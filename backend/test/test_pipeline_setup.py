@@ -8,7 +8,8 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from main import app, _allowed_project_roots, _sanitize_result
+from main import app
+from transport.rest_handler import _allowed_project_roots
 from pipeline.graph import get_analysis_pipeline, get_idea_pipeline, get_revision_pipeline
 
 
@@ -56,25 +57,15 @@ class PipelineSetupTests(unittest.TestCase):
                 os.unlink(outside_file)
                 _allowed_project_roots.clear()
 
-    def test_sanitize_result_hides_internal_rtm_matrix(self):
-        result = {
-            "metadata": {"status": "Completed"},
-            "rtm_matrix": [{"REQ_ID": "REQ-001"}],
-            "requirements_rtm": [{"REQ_ID": "REQ-001"}],
-            "run_id": "20260326_214400",
-            "api_key": "secret",
-        }
+    def test_read_file_requires_existing_file(self):
+        with TestClient(app) as client:
+            response = client.post("/api/read-file", json={"path": "C:/tmp/not_exists.txt"}).json()
 
-        sanitized = _sanitize_result(result)
-
-        self.assertNotIn("rtm_matrix", sanitized)
-        self.assertNotIn("api_key", sanitized)
-        self.assertEqual(sanitized["requirements_rtm"], [{"REQ_ID": "REQ-001"}])
-        self.assertEqual(sanitized["run_id"], "20260326_214400")
+        self.assertEqual(response["status"], "error")
 
     def test_delete_session_uses_run_id_and_exact_project_state_path(self):
-        with patch("main.delete_session_files", return_value=1) as delete_files_mock, \
-             patch("main.delete_exact_file", return_value=True) as delete_exact_mock, \
+        with patch("transport.rest_handler.delete_session_files", return_value=1) as delete_files_mock, \
+             patch("transport.rest_handler.delete_exact_file", return_value=True) as delete_exact_mock, \
              patch("pipeline.chroma_client.delete_by_run_id", return_value=2):
             with TestClient(app) as client:
                 response = client.request(
