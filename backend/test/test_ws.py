@@ -84,7 +84,7 @@ class WebSocketTests(unittest.TestCase):
                     }
                 }
 
-        with patch("main.get_analysis_pipeline", return_value=FakePipeline()):
+        with patch("orchestration.pipeline_runner.get_analysis_pipeline", return_value=FakePipeline()):
             with TestClient(app) as client:
                 with client.websocket_connect("/ws/pipeline") as websocket:
                     websocket.send_json({
@@ -174,9 +174,9 @@ class WebSocketTests(unittest.TestCase):
             {"file": "src/service.py", "func_name": "build_report", "lineno": 10, "docstring": "리포트 생성", "lang": "python"}
         ]
 
-        with patch("main.get_analysis_pipeline", return_value=fake_pipeline), \
-             patch("main.extract_functions", return_value=fake_functions), \
-             patch("main.summarize_for_llm", return_value="src/service.py:build_report:L10"):
+        with patch("orchestration.pipeline_runner.get_analysis_pipeline", return_value=fake_pipeline), \
+            patch("orchestration.pipeline_runner.extract_functions", return_value=fake_functions), \
+            patch("orchestration.pipeline_runner.summarize_for_llm", return_value="src/service.py:build_report:L10"):
             with TestClient(app) as client:
                 with client.websocket_connect("/ws/pipeline") as websocket:
                     websocket.send_json({
@@ -243,7 +243,7 @@ class WebSocketTests(unittest.TestCase):
                     }
                 }
 
-        with patch("main.get_analysis_pipeline", return_value=FakePipeline()):
+        with patch("orchestration.pipeline_runner.get_analysis_pipeline", return_value=FakePipeline()):
             with TestClient(app) as client:
                 with client.websocket_connect("/ws/pipeline") as websocket:
                     websocket.send_json({
