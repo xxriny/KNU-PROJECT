@@ -1,0 +1,279 @@
+"""
+REST API 엔드포인트 (REQ-001)
+/health, /api/* 엔드포인트를 APIRouter로 분리.
+main.py에서 app.include_router(rest_router) 호출.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import sys
+import traceback
+from typing import Optional
+
+from fastapi import APIRouter
+from pydantic import BaseModel
+
+# ── 경로 설정 ────────────────────────────────────────────
+_BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _BACKEND_ROOT not in sys.path:
+    sys.path.insert(0, _BACKEND_ROOT)
+
+from connectors.result_logger import save_result, delete_session_files, delete_exact_file
+from pipeline.graph import get_analysis_pipeline, get_revision_pipeline, get_idea_pipeline
+from pipeline.ast_scanner import extract_functions, summarize_for_llm
+from result_shaping.result_shaper import shape_result
+from orchestration.pipeline_runner import (
+    validate_analysis_inputs,
+    build_reverse_context,
+    analysis_pipeline_type,
+    ANALYSIS_ACTION_TYPES,
+)
+
+# ── 상수 ─────────────────────────────────────────────────
+AVAILABLE_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-3.0-flash",
+    "gemini-3.0-pro",
+]
+
+
+# ── 경로 보안 헬퍼 ────────────────────────────────────────
+_allowed_project_roots: set[str] = set()
+
+
+def _normalize_path(path: str) -> str:
+    return os.path.normcase(os.path.realpath(os.path.abspath(path)))
+
+
+def _is_within_root(path: str, root: str) -> bool:
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:
+        return False
+
+
+def register_project_root(root_path: str):
+    _allowed_project_roots.add(_normalize_path(root_path))
+
+
+def is_allowed_project_file(path: str) -> bool:
+    normalized = _normalize_path(path)
+    return any(_is_within_root(normalized, root) for root in _allowed_project_roots)
+
+
+# ── Pydantic 모델 ─────────────────────────────────────────
+class AnalysisRequest(BaseModel):
+    idea: str
+    context: str = ""
+    api_key: str = ""
+    model: str = "gemini-2.5-flash"
+    action_type: str = "CREATE"
+    source_dir: str = ""
+
+
+class RevisionRequest(BaseModel):
+    user_request: str
+    previous_result: dict = {}
+    chat_history: list = []
+    api_key: str = ""
+    model: str = "gemini-2.5-flash"
+
+
+class IdeaChatRequest(BaseModel):
+    message: str
+    chat_history: list = []
+    previous_result: dict = {}
+    api_key: str = ""
+    model: str = "gemini-2.5-flash"
+
+
+class ScanRequest(BaseModel):
+    path: str
+
+
+class ReadFileRequest(BaseModel):
+    path: str
+
+
+class DeleteSessionRequest(BaseModel):
+    project_state_path: str = ""
+
+
+class HealthResponse(BaseModel):
+    status: str = "ok"
+    version: str = "2.2.0"
+
+
+# ── Router ───────────────────────────────────────────────
+rest_router = APIRouter()
+
+
+@rest_router.get("/health", response_model=HealthResponse)
+async def health_check():
+    return HealthResponse()
+
+
+@rest_router.get("/api/config")
+async def get_config():
+    has_key = bool(os.environ.get("GEMINI_API_KEY", "").strip())
+    return {
+        "has_api_key": has_key,
+        "default_model": "gemini-2.5-flash",
+        "available_models": AVAILABLE_MODELS,
+    }
+
+
+@rest_router.post("/api/scan-folder")
+async def scan_folder_endpoint(req: ScanRequest):
+    from connectors.folder_connector import scan_folder
+    if not req.path:
+        return {"status": "error", "error": "폴더 경로가 비어있습니다."}
+
+    normalized_root = _normalize_path(req.path)
+    if not os.path.isdir(normalized_root):
+        return {"status": "error", "error": f"유효하지 않은 폴더: {req.path}"}
+
+    try:
+        register_project_root(normalized_root)
+        result = scan_folder(normalized_root)
+        return {"status": "ok", **result}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/read-file")
+async def read_file_endpoint(req: ReadFileRequest):
+    if not req.path:
+        return {"status": "error", "error": "파일 경로가 비어있습니다."}
+
+    normalized_path = _normalize_path(req.path)
+    if not os.path.isfile(normalized_path):
+        return {"status": "error", "error": f"유효하지 않은 파일: {req.path}"}
+    if not _allowed_project_roots:
+        return {"status": "error", "error": "먼저 프로젝트 폴더를 스캔하세요."}
+    if not is_allowed_project_file(normalized_path):
+        return {"status": "error", "error": "선택한 프로젝트 폴더 밖의 파일은 읽을 수 없습니다."}
+
+    try:
+        with open(normalized_path, "r", encoding="utf-8", errors="replace") as handle:
+            content = handle.read()
+        return {"status": "ok", "path": normalized_path, "content": content}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/analyze")
+async def analyze(req: AnalysisRequest):
+    try:
+        api_key = req.api_key or os.environ.get("GEMINI_API_KEY", "")
+        action_type = req.action_type if req.action_type in ANALYSIS_ACTION_TYPES else "CREATE"
+        validation_error = validate_analysis_inputs(action_type, req.idea, req.source_dir)
+        if validation_error:
+            return {"status": "error", "error": validation_error}
+
+        context = req.context
+        if action_type == "REVERSE_ENGINEER" and not (context or "").strip():
+            context = build_reverse_context(req.source_dir)
+            if not context:
+                return {
+                    "status": "error",
+                    "error": "선택한 폴더에서 분석 가능한 함수/메서드를 찾지 못했습니다.",
+                }
+
+        from datetime import datetime
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        pipeline = get_analysis_pipeline(action_type)
+        result = pipeline.invoke({
+            "api_key": api_key,
+            "model": req.model,
+            "input_idea": req.idea,
+            "project_context": context,
+            "source_dir": req.source_dir,
+            "action_type": action_type,
+            "run_id": run_id,
+        })
+        if result.get("error"):
+            return {"status": "error", "error": result["error"]}
+        shaped = shape_result(result)
+        shaped["pipeline_type"] = analysis_pipeline_type(action_type)
+        return {"status": "ok", "data": shaped}
+    except Exception as e:
+        traceback.print_exc()
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/revise")
+async def revise(req: RevisionRequest):
+    try:
+        api_key = req.api_key or os.environ.get("GEMINI_API_KEY", "")
+        pipeline = get_revision_pipeline()
+        result = pipeline.invoke({
+            "api_key": api_key,
+            "model": req.model,
+            "user_request": req.user_request,
+            "previous_result": req.previous_result,
+            "chat_history": req.chat_history,
+        })
+        if result.get("error"):
+            return {"status": "error", "error": result["error"]}
+        shaped = shape_result(result)
+        shaped["pipeline_type"] = "revision"
+        return {"status": "ok", "data": shaped}
+    except Exception as e:
+        traceback.print_exc()
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/idea-chat")
+async def idea_chat(req: IdeaChatRequest):
+    try:
+        api_key = req.api_key or os.environ.get("GEMINI_API_KEY", "")
+        pipeline = get_idea_pipeline()
+        result = pipeline.invoke({
+            "api_key": api_key,
+            "model": req.model,
+            "user_request": req.message,
+            "chat_history": req.chat_history,
+            "previous_result": req.previous_result,
+        })
+        if result.get("error"):
+            return {"status": "error", "error": result["error"]}
+        shaped = shape_result(result)
+        shaped["pipeline_type"] = "idea_chat"
+        shaped["chat_reply"] = shaped.get("agent_reply", "")
+        return {"status": "ok", "data": shaped}
+    except Exception as e:
+        traceback.print_exc()
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.delete("/api/session/{run_id}")
+async def delete_session(run_id: str, req: Optional[DeleteSessionRequest] = None):
+    if not re.match(r"^\d{8}_\d{6}$", run_id):
+        return {"status": "error", "error": "Invalid run_id format. Expected YYYYMMDD_HHMMSS"}
+
+    try:
+        files_deleted = delete_session_files(run_id)
+        exact_deleted = delete_exact_file(req.project_state_path) if req else False
+        if exact_deleted:
+            files_deleted += 1
+
+        from pipeline.chroma_client import delete_by_run_id as chroma_delete
+        docs_deleted = chroma_delete(run_id)
+
+        return {
+            "status": "ok",
+            "message": f"Session {run_id} deleted",
+            "files_deleted": files_deleted,
+            "documents_deleted": docs_deleted,
+        }
+    except Exception as e:
+        print(f"[Error] delete_session({run_id}): {e}")
+        traceback.print_exc()
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": f"Partial deletion for {run_id}",
+        }

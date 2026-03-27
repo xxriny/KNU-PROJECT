@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv
+.env
+*.egg-info/
+dist/
+build/
+
+# Node.js
+node_modules/
+dist/
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test/temporary data
+test/chroma_db/
+test/json/*.json
+test/json/*_PROJECT_STATE.md
+
+# Backend auto-generated data (세션 저장 파일, ChromaDB)
+backend/Data/*.json
+backend/Data/*_PROJECT_STATE.md
+backend/Data/chroma_db/
+
+# Electron build cache
+release/
+out/
+app/dist/
+
+# Build logs
+vite.log

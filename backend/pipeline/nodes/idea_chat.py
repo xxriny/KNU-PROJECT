@@ -1,0 +1,154 @@
+"""
+PM Agent Pipeline — 아이디어 채팅 노드 v8.0
+사용자와 대화하며 아이디어를 발전시키는 LangGraph 노드.
+아이디어가 충분히 구체화되면 분석 파이프라인으로 전달할 요약을 생성한다.
+"""
+
+import json
+import traceback
+from pipeline.state import PipelineState
+from pipeline.utils import get_llm
+
+
+SYSTEM_PROMPT = """당신은 PM(프로젝트 매니저) AI 어시스턴트입니다.
+사용자가 아이디어를 구체화하거나, 이미 만들어진 분석 결과를 이해하고 다음 액션을 결정하도록 도와주세요.
+
+## 역할
+1. 사용자의 막연한 아이디어를 구체적인 프로젝트 기획으로 발전시키세요.
+2. 적절한 질문을 통해 요구사항을 명확히 하세요.
+3. 기술 스택, 대상 사용자, 핵심 기능 등을 파악하세요.
+4. 아이디어가 충분히 구체화되면 분석을 시작할 수 있다고 안내하세요.
+5. 이전 분석 결과가 주어지면, 그 결과를 설명하거나 개선 방향을 제안하되 사용자가 명시적으로 요청하기 전에는 수정이 적용된 것처럼 말하지 마세요.
+
+## 응답 형식
+반드시 아래 JSON 형식으로 응답하세요:
+```json
+{
+  "reply": "사용자에게 보낼 응답 (한국어, 마크다운 가능)",
+  "idea_ready": false,
+  "idea_summary": "",
+  "suggested_mode": "create"
+}
+```
+
+- idea_ready: 아이디어가 충분히 구체화되어 분석을 시작할 수 있으면 true
+- idea_summary: idea_ready가 true일 때, 분석에 전달할 구체적인 아이디어 요약
+- suggested_mode: "create" (신규), "update" (기능확장), "reverse" (역공학)
+- 사용자가 "분석 시작", "개발 시작", "이걸로 해줘" 등을 말하면 idea_ready를 true로 설정
+- 이전 결과가 있는 상태라면 idea_ready는 기본적으로 false를 유지하고, 설명/비교/추천 중심으로 응답하세요.
+
+## 대화 스타일
+- 친근하지만 전문적인 톤
+- 핵심 질문 1-2개씩 던지기 (한 번에 너무 많이 묻지 않기)
+- 사용자 아이디어의 장점을 인정하고 발전시키기
+"""
+
+
+def idea_chat_node(state: PipelineState) -> dict:
+    """아이디어 채팅 노드 — 사용자와 대화하며 아이디어 구체화"""
+    try:
+        api_key = state.get("api_key", "")
+        model = state.get("model", "gemini-2.5-flash")
+        user_request = state.get("user_request", "")
+        history = state.get("chat_history", [])
+        previous_result = state.get("previous_result", {})
+
+        if not user_request:
+            return {"error": "메시지가 비어있습니다.", "current_step": "idea_chat"}
+
+        # 메시지 구성
+        from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+
+        messages = [SystemMessage(content=SYSTEM_PROMPT)]
+
+        if previous_result:
+            result_context = {
+                "metadata": previous_result.get("metadata", {}),
+                "requirements_rtm": previous_result.get("requirements_rtm", []),
+                "context_spec": previous_result.get("context_spec", {}),
+            }
+            messages.append(HumanMessage(content=(
+                "## 기존 분석 결과 컨텍스트\n"
+                f"{json.dumps(result_context, ensure_ascii=False, indent=2)}\n\n"
+                "위 결과는 참고용입니다. 사용자가 명시적으로 적용을 요청하기 전까지는 결과를 직접 수정하지 말고, 설명과 제안 중심으로 응답하세요."
+            )))
+
+        # 대화 히스토리 추가
+        for msg in history:
+            if msg["role"] == "user":
+                messages.append(HumanMessage(content=msg["content"]))
+            else:
+                messages.append(AIMessage(content=msg["content"]))
+
+        messages.append(HumanMessage(content=user_request))
+
+        # LLM 호출
+        llm = get_llm(api_key=api_key, model=model)
+        response = llm.invoke(messages)
+        raw = response.content if hasattr(response, "content") else str(response)
+
+        # JSON 파싱
+        result = _extract_json(raw)
+
+        if not result:
+            # JSON 파싱 실패 시 텍스트 응답으로 처리
+            reply = raw.strip()
+            idea_ready = False
+            idea_summary = ""
+            suggested_mode = "create"
+        else:
+            reply = result.get("reply", raw.strip())
+            idea_ready = result.get("idea_ready", False)
+            idea_summary = result.get("idea_summary", "")
+            suggested_mode = result.get("suggested_mode", "create")
+
+        # 히스토리 업데이트
+        new_history = list(history)
+        new_history.append({"role": "user", "content": user_request})
+        new_history.append({"role": "assistant", "content": reply})
+
+        return {
+            "agent_reply": reply,
+            "chat_history": new_history,
+            "idea_ready": idea_ready,
+            "idea_summary": idea_summary,
+            "suggested_mode": suggested_mode,
+            "thinking_log": [{"node": "idea_chat", "thinking": reply}],
+            "current_step": "idea_chat",
+        }
+
+    except Exception as e:
+        traceback.print_exc()
+        return {
+            "error": str(e),
+            "thinking_log": [{"node": "idea_chat", "thinking": f"오류: {e}"}],
+            "current_step": "idea_chat",
+        }
+
+
+def _extract_json(text: str) -> dict | None:
+    """LLM 응답에서 JSON 블록 추출"""
+    import re
+
+    m = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    brace_start = text.find("{")
+    if brace_start >= 0:
+        depth = 0
+        for i in range(brace_start, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[brace_start:i+1])
+                    except json.JSONDecodeError:
+                        break
+
+    return None

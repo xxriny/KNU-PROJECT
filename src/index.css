@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── 글로벌 스타일 ────────────────────── */
+:root {
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-card: #1a2332;
+  --bg-hover: #2d3a4f;
+  --border: #2d3748;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --green: #22c55e;
+  --yellow: #eab308;
+  --red: #ef4444;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-size: 16px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: "Pretendard", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.app-drag {
+  -webkit-app-region: drag;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* ── 스크롤바 커스텀 ──────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ── 리사이즈 핸들 ────────────────────── */
+[data-panel-group-direction="horizontal"] > [data-resize-handle] {
+  width: 4px;
+  background: transparent;
+  position: relative;
+  cursor: col-resize;
+}
+
+[data-panel-group-direction="horizontal"] > [data-resize-handle]::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  background: transparent;
+  transform: translateX(-50%);
+  transition: background 0.15s;
+}
+
+[data-panel-group-direction="horizontal"] > [data-resize-handle]:hover,
+[data-panel-group-direction="horizontal"] > [data-resize-handle][data-resize-handle-active] {
+  background: transparent;
+}
+
+[data-panel-group-direction="horizontal"] > [data-resize-handle]:hover::after,
+[data-panel-group-direction="horizontal"] > [data-resize-handle][data-resize-handle-active]::after,
+[data-panel-group-direction="horizontal"] > [data-resize-handle][data-resize-handle-state="drag"]::after {
+  background: #64748b;
+}
