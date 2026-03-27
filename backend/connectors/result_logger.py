@@ -17,10 +17,8 @@ DATA_DIR = os.path.join(_BACKEND_DIR, "Data")
 LOG_DIR = DATA_DIR
 
 # 과거 산출물 정리를 위한 레거시 경로 유지
-_PROJECT_ROOT = os.path.dirname(_BACKEND_DIR)
 LEGACY_LOG_DIRS = [
-    os.path.join(_PROJECT_ROOT, "test", "json"),
-    os.path.join(_PROJECT_ROOT, "backend", "test", "json"),
+    os.path.join(_BACKEND_DIR, "test", "json"),
 ]
 
 

@@ -30,9 +30,9 @@ dist/
 Thumbs.db
 
 # Test/temporary data
-test/chroma_db/
-test/json/*.json
-test/json/*_PROJECT_STATE.md
+backend/test/chroma_db/
+backend/test/json/*.json
+backend/test/json/*_PROJECT_STATE.md
 
 # Backend auto-generated data (세션 저장 파일, ChromaDB)
 backend/Data/*.json
