@@ -1,6 +1,6 @@
-# PM Agent Pipeline v2
+# NAVIGATOR
 
-PM 요구사항을 자동으로 분석·정형화하는 AI 파이프라인 데스크톱 앱.
+PM 요구사항을 자동으로 분석·정형화하는 AI 데스크톱 앱.
 
 **Electron + React(Vite) + FastAPI(Python) 사이드카** 구조로 동작하며, Google Gemini 기반 LangGraph 멀티 페이즈 파이프라인으로 PM/SA 결과물을 생성합니다.
 
