@@ -25,6 +25,54 @@ import {
   Layers,
 } from "lucide-react";
 
+// ── 공유 유틸 함수 ────────────────────────────────────────────────────────────
+
+/**
+ * 설명 텍스트에서 "핵심 분석 모듈 :", "핵심 모듈 :" 등의 접두사를 제거합니다.
+ */
+function toCompactModuleLabel(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return "설명 없음";
+  return raw
+    .replace(/^핵심\s*분석\s*모듈\s*:\s*/i, "")
+    .replace(/^핵심\s*모듈\s*:\s*/i, "")
+    .replace(/^분석\s*모듈\s*:\s*/i, "");
+}
+
+/**
+ * sa_phase5.mapped_requirements 배열로부터 REQ_ID → 기능명 매핑 객체를 생성합니다.
+ * 순수 함수이며 useMemo 의존성으로 직접 사용 가능합니다.
+ */
+function buildReqFunctionNameMap(mapped_requirements) {
+  const map = {};
+  for (const req of mapped_requirements || []) {
+    const reqId = req?.REQ_ID || req?.req_id;
+    if (!reqId) continue;
+    const functionName = String(
+      req?.functional_name || req?.label || toCompactModuleLabel(req?.description) || req?.name || ""
+    ).trim();
+    if (functionName) {
+      map[reqId] = functionName;
+    }
+  }
+  return map;
+}
+
+/**
+ * 아키텍처 레이어 이름을 Tailwind 배지 스타일 클래스로 변환합니다.
+ */
+function layerBadgeTone(layer) {
+  const key = String(layer || "").toLowerCase();
+  if (key.includes("present")) return "bg-blue-900/30 text-blue-300 border-blue-800/50";
+  if (key.includes("app")) return "bg-violet-900/30 text-violet-300 border-violet-800/50";
+  if (key.includes("domain")) return "bg-emerald-900/30 text-emerald-300 border-emerald-800/50";
+  if (key.includes("infra") || key.includes("data")) return "bg-amber-900/30 text-amber-300 border-amber-800/50";
+  if (key.includes("security") || key.includes("auth")) return "bg-rose-900/30 text-rose-300 border-rose-800/50";
+  return "bg-slate-800/50 text-slate-300 border-slate-700/60";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function ResultViewer({ tabId = "overview" }) {
   let content;
   switch (tabId) {
@@ -903,28 +951,10 @@ function SAArchitectureTab() {
     (layer) => (grouped[layer] || []).length > 0
   ).length;
   const guardrailCount = (sa_phase7?.guardrails || []).length;
-  const toCompactModuleLabel = (text) => {
-    const raw = String(text || "").trim();
-    if (!raw) return "설명 없음";
-    return raw
-      .replace(/^핵심\s*분석\s*모듈\s*:\s*/i, "")
-      .replace(/^핵심\s*모듈\s*:\s*/i, "")
-      .replace(/^분석\s*모듈\s*:\s*/i, "");
-  };
-  const reqFunctionNameMap = useMemo(() => {
-    const map = {};
-    for (const req of sa_phase5?.mapped_requirements || []) {
-      const reqId = req?.REQ_ID || req?.req_id;
-      if (!reqId) continue;
-      const functionName = String(
-        req?.functional_name || req?.label || toCompactModuleLabel(req?.description) || req?.name || ""
-      ).trim();
-      if (functionName) {
-        map[reqId] = functionName;
-      }
-    }
-    return map;
-  }, [sa_phase5?.mapped_requirements]);
+  const reqFunctionNameMap = useMemo(
+    () => buildReqFunctionNameMap(sa_phase5?.mapped_requirements),
+    [sa_phase5?.mapped_requirements]
+  );
   const toHumanReadableTitle = (contract) => {
     const source = String(contract?.interface_name || contract?.description || "").trim();
     if (source) {
@@ -1236,8 +1266,9 @@ function SASecurityTab() {
       { test: /(init|initialize|bootstrap).*(analysis|scan)/, value: "프로젝트 분석 초기화" },
       { test: /(render|display).*(result|output)/, value: "분석 결과 렌더링" },
       { test: /(collect|gather).*(metric|log)/, value: "메트릭 수집" },
+      { test: /(update|set).*(state|store|ui)/, value: "상태 업데이트" },
       { test: /(start|create).*(session)/, value: "세션 시작" },
-      { test: /(fetch|load|get).*(project|data|result)/, value: "데이터 조회" },
+      { test: /(load|fetch|get).*(project|data|result)/, value: "데이터 조회" },
       { test: /(save|persist|write).*(result|state|session)/, value: "결과 저장" },
       { test: /(validate|check).*(input|request|schema)/, value: "입력 검증" },
     ];
@@ -1682,24 +1713,10 @@ function SAFlowchartTab() {
   const stages = spec.stages || [];
   const summary = spec.summary || {};
   const quality = spec.data_quality || {};
-  const reqFunctionNameMap = useMemo(() => {
-    const map = {};
-    for (const req of sa_phase5?.mapped_requirements || []) {
-      const reqId = req?.REQ_ID || req?.req_id;
-      if (!reqId) continue;
-      const functionName = String(
-        req?.functional_name || req?.label || req?.description || req?.name || ""
-      )
-        .replace(/^핵심\s*분석\s*모듈\s*:\s*/i, "")
-        .replace(/^핵심\s*모듈\s*:\s*/i, "")
-        .replace(/^분석\s*모듈\s*:\s*/i, "")
-        .trim();
-      if (functionName) {
-        map[reqId] = functionName;
-      }
-    }
-    return map;
-  }, [sa_phase5?.mapped_requirements]);
+  const reqFunctionNameMap = useMemo(
+    () => buildReqFunctionNameMap(sa_phase5?.mapped_requirements),
+    [sa_phase5?.mapped_requirements]
+  );
 
   const graphSpec = useMemo(
     () => ({
@@ -1822,34 +1839,10 @@ function SAInterfacesTab() {
   const quality = doc.data_quality || {};
   const [expandedContractId, setExpandedContractId] = useState("");
 
-  const reqFunctionNameMap = useMemo(() => {
-    const map = {};
-    for (const req of sa_phase5?.mapped_requirements || []) {
-      const reqId = req?.REQ_ID || req?.req_id;
-      if (!reqId) continue;
-      const functionName = String(
-        req?.functional_name || req?.label || req?.description || req?.name || ""
-      )
-        .replace(/^핵심\s*분석\s*모듈\s*:\s*/i, "")
-        .replace(/^핵심\s*모듈\s*:\s*/i, "")
-        .replace(/^분석\s*모듈\s*:\s*/i, "")
-        .trim();
-      if (functionName) {
-        map[reqId] = functionName;
-      }
-    }
-    return map;
-  }, [sa_phase5?.mapped_requirements]);
-
-  const layerBadgeTone = (layer) => {
-    const key = String(layer || "").toLowerCase();
-    if (key.includes("present")) return "bg-blue-900/30 text-blue-300 border-blue-800/50";
-    if (key.includes("app")) return "bg-violet-900/30 text-violet-300 border-violet-800/50";
-    if (key.includes("domain")) return "bg-emerald-900/30 text-emerald-300 border-emerald-800/50";
-    if (key.includes("infra") || key.includes("data")) return "bg-amber-900/30 text-amber-300 border-amber-800/50";
-    if (key.includes("security") || key.includes("auth")) return "bg-rose-900/30 text-rose-300 border-rose-800/50";
-    return "bg-slate-800/50 text-slate-300 border-slate-700/60";
-  };
+  const reqFunctionNameMap = useMemo(
+    () => buildReqFunctionNameMap(sa_phase5?.mapped_requirements),
+    [sa_phase5?.mapped_requirements]
+  );
 
   const formatIoPreview = (specText, maxLength = 86) => {
     const raw = String(specText || "").trim();
@@ -2004,34 +1997,11 @@ function SADecisionTableTab() {
   const rows = table.rows || [];
   const quality = table.data_quality || {};
 
-  const reqFunctionNameMap = useMemo(() => {
-    const map = {};
-    for (const req of sa_phase5?.mapped_requirements || []) {
-      const reqId = req?.REQ_ID || req?.req_id;
-      if (!reqId) continue;
-      const functionName = String(
-        req?.functional_name || req?.label || req?.description || req?.name || ""
-      )
-        .replace(/^핵심\s*분석\s*모듈\s*:\s*/i, "")
-        .replace(/^핵심\s*모듈\s*:\s*/i, "")
-        .replace(/^분석\s*모듈\s*:\s*/i, "")
-        .trim();
-      if (functionName) {
-        map[reqId] = functionName;
-      }
-    }
-    return map;
-  }, [sa_phase5?.mapped_requirements]);
+  const reqFunctionNameMap = useMemo(
+    () => buildReqFunctionNameMap(sa_phase5?.mapped_requirements),
+    [sa_phase5?.mapped_requirements]
+  );
 
-  const layerBadgeTone = (layer) => {
-    const key = String(layer || "").toLowerCase();
-    if (key.includes("present")) return "bg-blue-900/30 text-blue-300 border-blue-800/50";
-    if (key.includes("app")) return "bg-violet-900/30 text-violet-300 border-violet-800/50";
-    if (key.includes("domain")) return "bg-emerald-900/30 text-emerald-300 border-emerald-800/50";
-    if (key.includes("infra") || key.includes("data")) return "bg-amber-900/30 text-amber-300 border-amber-800/50";
-    if (key.includes("security") || key.includes("auth")) return "bg-rose-900/30 text-rose-300 border-rose-800/50";
-    return "bg-slate-800/50 text-slate-300 border-slate-700/60";
-  };
 
   const restrictionTone = (restriction) => {
     const key = String(restriction || "").toLowerCase();

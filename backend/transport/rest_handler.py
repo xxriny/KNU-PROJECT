@@ -23,6 +23,7 @@ if _BACKEND_ROOT not in sys.path:
     sys.path.insert(0, _BACKEND_ROOT)
 
 from connectors.result_logger import delete_session_files, delete_exact_file
+from observability.logger import get_logger
 from pipeline.action_type import normalize_action_type
 from pipeline.graph import get_analysis_pipeline, get_revision_pipeline, get_idea_pipeline
 from result_shaping.result_shaper import shape_result
@@ -270,7 +271,7 @@ async def delete_session(run_id: str, req: Optional[DeleteSessionRequest] = None
             "documents_deleted": docs_deleted,
         }
     except Exception as e:
-        print(f"[Error] delete_session({run_id}): {e}")
+        get_logger(run_id).error(f"[Error] delete_session({run_id}): {e}")
         traceback.print_exc()
         return {
             "status": "error",

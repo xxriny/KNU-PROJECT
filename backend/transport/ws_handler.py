@@ -12,6 +12,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from transport.connection_manager import manager
 from orchestration.pipeline_runner import run_analysis, run_revision, run_idea_chat
+from observability.logger import get_logger
 
 
 async def websocket_pipeline(websocket: WebSocket):
@@ -25,7 +26,7 @@ async def websocket_pipeline(websocket: WebSocket):
         {"type": "status"|"thinking"|"result"|"error"|"pong", "node": "...", "data": {...}}
     """
     await manager.connect(websocket)
-    print(f"[WS] Client connected. Active: {len(manager.active_connections)}")
+    get_logger().info(f"[WS] Client connected. Active: {len(manager.active_connections)}")
 
     try:
         while True:
@@ -58,7 +59,7 @@ async def websocket_pipeline(websocket: WebSocket):
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-        print(f"[WS] Client disconnected. Active: {len(manager.active_connections)}")
+        get_logger().info(f"[WS] Client disconnected. Active: {len(manager.active_connections)}")
     except Exception as e:
         manager.disconnect(websocket)
-        print(f"[WS Error] {e}")
+        get_logger().error(f"[WS Error] {e}")

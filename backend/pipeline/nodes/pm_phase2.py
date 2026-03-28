@@ -11,16 +11,20 @@ from pipeline.schemas import PrioritizerOutput
 from pipeline.utils import call_structured_with_thinking
 
 SYSTEM_PROMPT = """\
-당신은 MECE 검증을 수행하는 요구사항 우선순위 산정(Prioritizer) 전문가입니다.
+당신은 요구사항 우선순위 산정(Prioritizer) 전문가입니다.
 
-[규칙]
-1. MoSCoW 우선순위 부여: 각 요구사항에 대해 Must-have | Should-have | Could-have 중 하나를 반드시 선택하세요.
-2. 우선순위 산정 근거: 각 결정에 대해 한 문장으로 된 한국어 근거(rationale)를 작성하세요.
-3. MECE 검증 (중복 제거 및 원자성 보장):
-   - 두 요구사항이 의미상 크게 중복되는 경우, 하나로 병합(MERGE)하고 불필요한 요구사항은 삭제(DELETE)하세요.
-   - 병합할 때는 더 구체적이고 원자적인(Atomic) 요구사항의 REQ_ID를 남기세요.
-   - [중요] 요구사항이 삭제되더라도 남은 REQ_ID들의 번호를 다시 매기거나 순서를 당기지 마세요. 원본 ID는 추적성을 위해 반드시 그대로 보존되어야 합니다.
-4. 내부 추론: thinking 필드의 내용은 3줄 이내로 간결하게 작성하세요."""
+<goal>
+제공된 원자적 요구사항(raw_requirements) 목록을 분석하여 MoSCoW 원칙에 따라 우선순위와 근거를 추가하세요.
+</goal>
+
+<critical_rules>
+1. [절대 준수] 입력받은 요구사항의 개수와 REQ_ID는 100% 그대로 유지해야 합니다. 
+   의미가 중복되어 보이더라도 절대 임의로 병합(Merge)하거나 삭제(Delete)하지 마세요.
+   당신의 역할은 오직 '우선순위 평가'입니다.
+2. MoSCoW 우선순위 부여: 각 요구사항에 대해 Must-have | Should-have | Could-have 중 하나를 반드시 선택하세요.
+3. 우선순위 산정 근거: 각 결정에 대해 한 문장으로 된 한국어 근거(rationale)를 작성하세요.
+4. 내부 추론: thinking 필드의 내용은 3줄 이내로 간결하게 작성하세요.
+</critical_rules>"""
 
 
 def prioritizer_node(state: PipelineState) -> dict:
@@ -39,7 +43,7 @@ def prioritizer_node(state: PipelineState) -> dict:
     compact = [{"REQ_ID": r.get("REQ_ID"), "category": r.get("category"),
                 "description": r.get("description")} for r in reqs]
 
-    user_msg = f"다음 요구사항들에 대해 우선순위를 산정하고 MECE 검증을 수행하세요:\n```json\n{json.dumps(compact, ensure_ascii=False)}\n```"
+    user_msg = f"다음 요구사항들에 대해 우선순위를 산정하세요 (절대 삭제/병합 금지):\n```json\n{json.dumps(compact, ensure_ascii=False)}\n```"
 
     try:
         result, thinking = call_structured_with_thinking(

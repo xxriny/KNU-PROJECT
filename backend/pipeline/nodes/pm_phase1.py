@@ -30,27 +30,21 @@ class AtomizerOutput(BaseModel):
     atomic_requirements: list[AtomicRequirement] = Field(default_factory=list)
 
 
-SYSTEM_PROMPT = """당신은 요구사항 원자화 전문가입니다.
+# CREATE / UPDATE 모드용 프롬프트 (MECE 기획자 페르소나)
+PM_SYSTEM_PROMPT = """당신은 수석 소프트웨어 기획자(PM)입니다.
 
 <goal>
-비즈니스 아이디어 또는 기존 시스템 설명을 원자적 요구사항으로 분해하세요.
+사용자의 비즈니스 아이디어나 기능 추가 요청을 완벽한 원자적 요구사항(RTM)으로 분해하고 기획하세요.
 </goal>
-
-<modes>
-입력에 <requested_action_type>이 주어지면 해당 모드를 최우선으로 적용하세요.
-주어지지 않았다면 아래 규칙으로 추론하세요:
-- input_idea만 존재: CREATE
-- project_context + input_idea 존재: UPDATE
-- project_context만 존재: REVERSE_ENGINEER
-</modes>
 
 <rules>
 1) 반드시 단일 JSON 객체만 출력하세요.
 2) 마크다운 코드블록, 설명 문장, 부가 텍스트를 절대 출력하지 마세요.
 3) 단일 책임 원칙: 하나의 요구사항은 하나의 검증 가능한 기능만 포함.
-4) description에 AND/OR, 그리고/또는이 들어가면 분리 가능한지 먼저 판단하고, 분리 가능하면 요구사항을 나눠 작성.
-5) 모호하면 action_type=Needs_Clarification, clarification_questions 2~3개, atomic_requirements는 빈 배열.
-6) category는 다음 중 하나: Frontend, Backend, Architecture, Database, Security, AI/ML, Infrastructure
+4) [MECE 원칙] 요구사항 추출 시 상호 배제 및 전체 포괄(MECE) 원칙을 엄격히 적용하세요. 중복 아이디어는 하나로 병합하여 최적화된 목록을 도출하세요.
+5) description에 AND/OR, 그리고/또는이 들어가면 분리 가능한지 판단하고, 분리 가능하면 요구사항을 나눠 작성.
+6) 모호하면 action_type=Needs_Clarification, clarification_questions 2~3개, atomic_requirements는 빈 배열.
+7) category는 다음 중 하나: Frontend, Backend, Architecture, Database, Security, AI/ML, Infrastructure
 </rules>
 
 <few_shot_create>
@@ -66,11 +60,23 @@ SYSTEM_PROMPT = """당신은 요구사항 원자화 전문가입니다.
 신규 아이디어: "구글 소셜 로그인을 추가"
 출력 규칙: 위 정보를 반영한 단일 JSON 객체로 반환하고, 신규 REQ를 atomic_requirements에 포함.
 </few_shot_update>
+"""
 
-<few_shot_reverse_engineer>
-입력 문맥: "현재 시스템에는 게시글 작성/조회/수정이 존재"
-출력 규칙: 기능 단위로 REQ를 분해하여 atomic_requirements 배열에 JSON으로 반환.
-</few_shot_reverse_engineer>
+# REVERSE_ENGINEER 모드용 프롬프트 (환각 방지 가드레일 리버스 엔지니어 페르소나)
+REVERSE_SYSTEM_PROMPT = """당신은 수석 소프트웨어 리버스 엔지니어입니다.
+
+<goal>
+입력된 소스 코드 스캔 결과(AST 요약 및 함수 목록)를 분석하여,
+'현재 시스템에 실제로 구현되어 있는 기능(As-Is)'만 추출하여 요구사항 명세서(RTM)로 복원하세요.
+</goal>
+
+<critical_rules>
+1) [절대 준수] 새로운 아이디어나 기능을 절대 상상해서 추가하지 마세요. (No Hallucination)
+2) [절대 준수] 오직 제공된 코드의 함수명, 클래스, docstring에 명시적으로 존재하는 기능만
+   단일 책임 원칙에 따라 분해하세요. 중복 기능은 하나로 정리하되, 없는 기능을 지어내면 안 됩니다.
+3) 반드시 단일 JSON 객체만 출력하세요.
+4) category는 다음 중 하나: Frontend, Backend, Architecture, Database, Security, AI/ML, Infrastructure
+</critical_rules>
 """
 
 
@@ -87,6 +93,9 @@ def atomizer_node(state: PipelineState) -> dict:
         requested_action_type = (sget("action_type", "") or "").strip().upper()
         sa_phase1 = sget("sa_phase1", {}) or {}
 
+        # 모드에 따른 프롬프트 선택
+        system_prompt = REVERSE_SYSTEM_PROMPT if requested_action_type == "REVERSE_ENGINEER" else PM_SYSTEM_PROMPT
+
         parts = []
         if requested_action_type in {"CREATE", "UPDATE", "REVERSE_ENGINEER"}:
             parts.append(f"<requested_action_type>\n{requested_action_type}\n</requested_action_type>")
@@ -94,6 +103,12 @@ def atomizer_node(state: PipelineState) -> dict:
             parts.append(f"<project_context>\n{ctx}\n</project_context>")
         if idea:
             parts.append(f"<input_idea>\n{idea}\n</input_idea>")
+        # REVERSE 모드: sa_phase1 스캔 함수 목록을 명시 주입 (환각 방지 가드레일)
+        if requested_action_type == "REVERSE_ENGINEER" and sa_phase1:
+            scanned_funcs = sa_phase1.get("sample_functions", []) or []
+            if scanned_funcs:
+                funcs_text = "\n".join(f"- {f}" for f in scanned_funcs)
+                parts.append(f"<scanned_functions>\n{funcs_text}\n</scanned_functions>")
         if requested_action_type == "UPDATE" and sa_phase1:
             analysis_lines = []
             if sa_phase1.get("architecture_assessment"):
@@ -123,10 +138,10 @@ def atomizer_node(state: PipelineState) -> dict:
             api_key=api_key,
             model=model,
             schema=AtomizerOutput,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             user_msg=user_content,
-            max_retries=3,    # 내부 재시도
-            temperature=0.2,
+            max_retries=3,
+            temperature=0.1,
         )
 
         latency_ms = int((time.perf_counter() - t0) * 1000)

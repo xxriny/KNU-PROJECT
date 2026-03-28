@@ -7,6 +7,7 @@ REQ_ID↔함수 매핑을 영구 벡터 DB에 저장/검색/삭제.
 import os
 import chromadb
 from typing import Optional, List, Dict
+from observability.logger import get_logger
 
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 신규 저장 위치: backend/Data/chroma_db
@@ -77,7 +78,8 @@ def add_knowledge(
         documents=[document],
         metadatas=[metadata]
     )
-    print(f"[ChromaDB] Added: {doc_id}")
+    run_id = metadata.get("run_id", "")
+    get_logger(run_id).info(f"[ChromaDB] Added: {doc_id}")
 
 
 def delete_by_run_id(run_id: str) -> int:
@@ -97,10 +99,10 @@ def delete_by_run_id(run_id: str) -> int:
     
     if results["ids"]:
         collection.delete(ids=results["ids"])
-        print(f"[ChromaDB] Deleted {len(results['ids'])} documents for run_id={run_id}")
+        get_logger(run_id).info(f"Deleted {len(results['ids'])} documents for run_id={run_id}")
         return len(results["ids"])
-    
-    print(f"[ChromaDB] No documents found for run_id={run_id}")
+
+    get_logger(run_id).info(f"No documents found for run_id={run_id}")
     return 0
 
 
