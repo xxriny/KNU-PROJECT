@@ -242,7 +242,7 @@ def call_structured_with_thinking(
     temperature: float = 0.3,
 ) -> tuple[T, str]:
     """구조화 출력 + thinking 필드 추출."""
-    result = call_structured(
+    result, _usage = call_structured_with_usage(
         api_key=api_key,
         model=model,
         schema=schema,

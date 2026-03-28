@@ -6,7 +6,7 @@ Pydantic 구조화 출력 강제 + MoSCoW 우선순위 + MECE 검증.
 
 import json
 from copy import deepcopy
-from pipeline.state import PipelineState
+from pipeline.state import PipelineState, sget as state_sget
 from pipeline.schemas import PrioritizerOutput
 from pipeline.utils import call_structured_with_thinking
 
@@ -25,12 +25,8 @@ SYSTEM_PROMPT = """\
 
 def prioritizer_node(state: PipelineState) -> dict:
     # 안전한 상태 접근 헬퍼 (TypedDict / 일반 dict 모두 호환)
-    def sget(key: str, default=None):
-        if hasattr(state, "get"):
-            val = state.get(key, default)
-        else:
-            val = getattr(state, key, default)
-        return default if val is None else val
+    def sget(key, default=None):
+        return state_sget(state, key, default)
 
     reqs = sget("raw_requirements", [])
     if not reqs:
@@ -73,3 +69,5 @@ def prioritizer_node(state: PipelineState) -> dict:
             "thinking_log": sget("thinking_log", []) + [{"node": "prioritizer", "thinking": f"구조화 출력 실패: {e}"}],
             "current_step": "prioritizer_done",
         }
+
+

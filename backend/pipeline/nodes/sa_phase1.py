@@ -4,7 +4,7 @@ from pathlib import Path
 from collections import defaultdict
 from pydantic import BaseModel, Field
 from pipeline.ast_scanner import extract_file_inventory, extract_functions
-from pipeline.state import PipelineState
+from pipeline.state import PipelineState, sget as state_sget
 from pipeline.utils import call_structured
 
 class SAPhase1LLMOutput(BaseModel):
@@ -166,11 +166,7 @@ def _build_representative_function_sample(functions: list[dict], max_items: int 
 
 def sa_phase1_node(state: PipelineState) -> dict:
     def sget(key, default=None):
-        if hasattr(state, "get"):
-            val = state.get(key, default)
-        else:
-            val = getattr(state, key, default)
-        return default if val is None else val
+        return state_sget(state, key, default)
 
     action_type = (sget("action_type", "CREATE") or "CREATE").strip().upper()
     source_dir = (sget("source_dir", "") or "").strip()
@@ -364,3 +360,4 @@ def sa_phase1_node(state: PipelineState) -> dict:
         "thinking_log": (sget("thinking_log", []) or []) + [{"node": "sa_phase1", "thinking": msg}],
         "current_step": "sa_phase1_done",
     }
+

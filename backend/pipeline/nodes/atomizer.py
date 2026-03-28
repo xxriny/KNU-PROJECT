@@ -1,7 +1,7 @@
 import time
 import traceback
 from pydantic import BaseModel, Field
-from pipeline.state import PipelineState
+from pipeline.state import PipelineState, sget
 from pipeline.utils import call_structured_with_usage
 
 class AtomicRequirement(BaseModel):
@@ -55,28 +55,21 @@ REVERSE_SYSTEM_PROMPT = """당신은 수석 소프트웨어 리버스 엔지니�
 
 def atomizer_node(state: PipelineState) -> dict:
     try:
-        def sget(key: str, default=None):
-            if hasattr(state, "get"):
-                val = state.get(key, default)
-            else:
-                val = getattr(state, key, default)
-            return default if val is None else val
-
-        api_key = sget("api_key", "")
-        model = sget("model", "gemini-2.5-flash")
-        idea = (sget("input_idea", "") or "").strip()
-        requested_action_type = (sget("action_type", "") or "").strip().upper()
+        api_key = sget(state, "api_key", "")
+        model = sget(state, "model", "gemini-2.5-flash")
+        idea = (sget(state, "input_idea", "") or "").strip()
+        requested_action_type = (sget(state, "action_type", "") or "").strip().upper()
 
         # 3. 모드에 따른 동적 프롬프트 선택 및 컨텍스트 주입 분기
         if requested_action_type == "REVERSE_ENGINEER":
             system_prompt = REVERSE_SYSTEM_PROMPT
             # 역공학 시 sa_phase1에서 스캔한 AST 데이터를 읽어옵니다.
-            sa_data = sget("sa_phase1", {})
+            sa_data = sget(state, "sa_phase1", {})
             scanned_funcs = sa_data.get("sample_functions", [])
             ctx = f"기존 코드 함수 목록: {scanned_funcs}"
         else:
             system_prompt = PM_SYSTEM_PROMPT
-            ctx = (sget("project_context", "") or "").strip()
+            ctx = (sget(state, "project_context", "") or "").strip()
 
         parts = []
         if requested_action_type in {"CREATE", "UPDATE", "REVERSE_ENGINEER"}:
@@ -121,7 +114,7 @@ def atomizer_node(state: PipelineState) -> dict:
             "metadata": metadata,
             "clarification_questions": out.clarification_questions or [],
             "action_type": metadata.get("action_type", "CREATE"),
-            "thinking_log": (sget("thinking_log", []) or []) + [{"node": "atomizer", "thinking": thinking}],
+            "thinking_log": (sget(state, "thinking_log", []) or []) + [{"node": "atomizer", "thinking": thinking}],
             "current_step": "atomizer_done",
         }
 

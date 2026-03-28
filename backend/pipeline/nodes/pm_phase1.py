@@ -6,7 +6,7 @@ Agent Pipeline — Atomizer Node
 import time
 import traceback
 from pydantic import BaseModel, Field
-from pipeline.state import PipelineState
+from pipeline.state import PipelineState, sget as state_sget
 from pipeline.utils import call_structured_with_usage
 
 
@@ -77,12 +77,8 @@ SYSTEM_PROMPT = """당신은 요구사항 원자화 전문가입니다.
 def atomizer_node(state: PipelineState) -> dict:
     try:
         # TypedDict / 객체 모두 호환
-        def sget(key: str, default=None):
-            if hasattr(state, "get"):
-                val = state.get(key, default)
-            else:
-                val = getattr(state, key, default)
-            return default if val is None else val
+        def sget(key, default=None):
+            return state_sget(state, key, default)
 
         api_key = sget("api_key", "")
         model = sget("model", "gemini-2.5-flash")
@@ -164,3 +160,4 @@ def atomizer_node(state: PipelineState) -> dict:
             "thinking_log": [{"node": "atomizer", "thinking": f"오류: {e}"}],
             "current_step": "error",
         }
+

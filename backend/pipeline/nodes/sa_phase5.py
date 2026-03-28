@@ -4,7 +4,7 @@ import re
 from collections import defaultdict
 from typing import List
 from pydantic import BaseModel, Field
-from pipeline.state import PipelineState
+from pipeline.state import PipelineState, sget as state_sget
 from pipeline.utils import call_structured_with_thinking
 
 # 1. 아키텍처 매핑을 위한 Pydantic 스키마 (가드레일 역할)
@@ -438,11 +438,7 @@ def _build_reverse_module_mapping(sa_phase1: dict, *, api_key: str = "", model: 
 
 def sa_phase5_node(state: PipelineState) -> dict:
     def sget(key, default=None):
-        if hasattr(state, "get"):
-            val = state.get(key, default)
-        else:
-            val = getattr(state, key, default)
-        return default if val is None else val
+        return state_sget(state, key, default)
 
     rtm = sget("requirements_rtm", []) or sget("rtm_matrix", []) or []
     action_type = (sget("action_type", "") or "CREATE").strip().upper()
@@ -560,3 +556,4 @@ def sa_phase5_node(state: PipelineState) -> dict:
         "thinking_log": (sget("thinking_log", []) or []) + [{"node": "sa_phase5", "thinking": thinking_msg}],
         "current_step": "sa_phase5_done",
     }
+

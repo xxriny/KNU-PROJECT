@@ -1,7 +1,7 @@
 import json
 from typing import List
 from pydantic import BaseModel, Field
-from pipeline.state import PipelineState
+from pipeline.state import PipelineState, sget as state_sget
 from pipeline.utils import call_structured_with_thinking
 
 class InterfaceContract(BaseModel):
@@ -28,11 +28,7 @@ INTERFACE_SYSTEM_PROMPT = """\
 
 def sa_phase7_node(state: PipelineState) -> dict:
     def sget(key, default=None):
-        if hasattr(state, "get"):
-            val = state.get(key, default)
-        else:
-            val = getattr(state, key, default)
-        return default if val is None else val
+        return state_sget(state, key, default)
 
     phase5 = sget("sa_phase5", {}) or {}
     phase6 = sget("sa_phase6", {}) or {}
@@ -128,3 +124,4 @@ def sa_phase7_node(state: PipelineState) -> dict:
         "thinking_log": sget("thinking_log", []) + [{"node": "sa_phase7", "thinking": thinking_msg}],
         "current_step": "sa_phase7_done",
     }
+

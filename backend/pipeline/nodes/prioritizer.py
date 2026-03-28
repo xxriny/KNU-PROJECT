@@ -1,6 +1,6 @@
 import json
 from copy import deepcopy
-from pipeline.state import PipelineState
+from pipeline.state import PipelineState, sget
 from pipeline.schemas import PrioritizerOutput
 from pipeline.utils import call_structured_with_thinking
 
@@ -20,19 +20,12 @@ SYSTEM_PROMPT = """\
 """
 
 def prioritizer_node(state: PipelineState) -> dict:
-    def sget(key: str, default=None):
-        if hasattr(state, "get"):
-            val = state.get(key, default)
-        else:
-            val = getattr(state, key, default)
-        return default if val is None else val
-
-    reqs = sget("raw_requirements", [])
+    reqs = sget(state, "raw_requirements", [])
     if not reqs:
         return {
             "prioritized_requirements": [],
             "current_step": "prioritizer_done",
-            "thinking_log": sget("thinking_log", []) + [{"node": "prioritizer", "thinking": "요구사항이 없습니다."}],
+            "thinking_log": sget(state, "thinking_log", []) + [{"node": "prioritizer", "thinking": "요구사항이 없습니다."}],
         }
 
     compact = [{"REQ_ID": r.get("REQ_ID"), "category": r.get("category"),
@@ -42,8 +35,8 @@ def prioritizer_node(state: PipelineState) -> dict:
 
     try:
         result, thinking = call_structured_with_thinking(
-            api_key=sget("api_key", ""),
-            model=sget("model", "gemini-2.5-flash"),
+            api_key=sget(state, "api_key", ""),
+            model=sget(state, "model", "gemini-2.5-flash"),
             schema=PrioritizerOutput,
             system_prompt=SYSTEM_PROMPT,
             user_msg=user_msg,
@@ -54,7 +47,7 @@ def prioritizer_node(state: PipelineState) -> dict:
 
         return {
             "prioritized_requirements": reqs_out,
-            "thinking_log": sget("thinking_log", []) + [{"node": "prioritizer", "thinking": thinking}],
+            "thinking_log": sget(state, "thinking_log", []) + [{"node": "prioritizer", "thinking": thinking}],
             "current_step": "prioritizer_done",
         }
     except Exception as e:
@@ -64,6 +57,6 @@ def prioritizer_node(state: PipelineState) -> dict:
             r.setdefault("rationale", "구조화 출력 실패 후 기본값 자동 할당")
         return {
             "prioritized_requirements": safe_reqs,
-            "thinking_log": sget("thinking_log", []) + [{"node": "prioritizer", "thinking": f"구조화 출력 실패: {e}"}],
+            "thinking_log": sget(state, "thinking_log", []) + [{"node": "prioritizer", "thinking": f"구조화 출력 실패: {e}"}],
             "current_step": "prioritizer_done",
         }

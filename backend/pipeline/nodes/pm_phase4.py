@@ -8,7 +8,7 @@ source_dir이 주어지면 AST 스캔으로 REQ_ID ↔ 소스코드 함수 단�
 import json
 from typing import List
 from pydantic import BaseModel, Field
-from pipeline.state import PipelineState
+from pipeline.state import PipelineState, sget as state_sget
 from pipeline.schemas import SemanticIndexerOutput, CodeFunctionLink
 from pipeline.utils import call_structured_with_thinking, call_structured
 from pipeline.ast_scanner import extract_functions, summarize_for_llm
@@ -79,11 +79,7 @@ CODE_MAPPING_SYSTEM_PROMPT = """\
 
 def semantic_indexer_node(state: PipelineState) -> dict:
     def sget(key, default=None):
-        if hasattr(state, "get"):
-            val = state.get(key, default)
-        else:
-            val = getattr(state, key, default)
-        return default if val is None else val
+        return state_sget(state, key, default)
 
     reqs = sget("rtm_matrix", [])
     if not reqs:
@@ -205,3 +201,5 @@ def semantic_indexer_node(state: PipelineState) -> dict:
         "thinking_log": sget("thinking_log", []) + [{"node": "semantic_indexer", "thinking": combined_thinking}],
         "current_step": "semantic_indexer_done",
     }
+
+

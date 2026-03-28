@@ -15,6 +15,7 @@ from typing import Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel
+from version import APP_VERSION
 
 # ── 경로 설정 ────────────────────────────────────────────
 _BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -34,8 +35,8 @@ from orchestration.pipeline_runner import (
 # ── 상수 ─────────────────────────────────────────────────
 AVAILABLE_MODELS = [
     "gemini-2.5-flash",
-    "gemini-3.0-flash",
-    "gemini-3.0-pro",
+    # "gemini-3.0-flash",  # not available yet
+    # "gemini-3.0-pro",    # not available yet
 ]
 
 
@@ -103,7 +104,7 @@ class DeleteSessionRequest(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    version: str = "2.2.0"
+    version: str = APP_VERSION
 
 
 # ── Router ───────────────────────────────────────────────

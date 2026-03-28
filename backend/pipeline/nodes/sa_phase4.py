@@ -3,7 +3,7 @@ import urllib.error
 from typing import List
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 from pydantic import BaseModel, Field
-from pipeline.state import PipelineState
+from pipeline.state import PipelineState, sget as state_sget
 from pipeline.utils import call_structured
 
 class PackageExtractionOutput(BaseModel):
@@ -65,11 +65,7 @@ def _verify_pypi_packages_parallel(packages: List[str]) -> tuple[list[str], list
 
 def sa_phase4_node(state: PipelineState) -> dict:
     def sget(key, default=None):
-        if hasattr(state, "get"):
-            val = state.get(key, default)
-        else:
-            val = getattr(state, key, default)
-        return default if val is None else val
+        return state_sget(state, key, default)
 
     context_spec = sget("context_spec", {}) or {}
     tech_stack = context_spec.get("tech_stack_suggestions", []) or []
@@ -145,3 +141,4 @@ def sa_phase4_node(state: PipelineState) -> dict:
         "thinking_log": (sget("thinking_log", []) or []) + [{"node": "sa_phase4", "thinking": f"{thinking_msg} | 검증 결과: {status}"}],
         "current_step": "sa_phase4_done",
     }
+

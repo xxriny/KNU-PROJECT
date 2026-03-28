@@ -9,7 +9,7 @@ from typing import List
 
 from pydantic import BaseModel, Field
 
-from pipeline.state import PipelineState
+from pipeline.state import PipelineState, sget as state_sget
 from pipeline.utils import call_structured
 
 
@@ -409,11 +409,7 @@ def _assess_reverse_maintainability(sa_phase1: dict, rtm: list, gap_report: list
 
 def sa_phase3_node(state: PipelineState) -> dict:
     def sget(key, default=None):
-        if hasattr(state, "get"):
-            val = state.get(key, default)
-        else:
-            val = getattr(state, key, default)
-        return default if val is None else val
+        return state_sget(state, key, default)
 
     rtm = sget("requirements_rtm", []) or sget("rtm_matrix", []) or []
     context_spec = sget("context_spec", {}) or {}
@@ -561,3 +557,4 @@ def sa_phase3_node(state: PipelineState) -> dict:
         "thinking_log": (sget("thinking_log", []) or []) + [{"node": "sa_phase3", "thinking": thinking_msg}],
         "current_step": "sa_phase3_done",
     }
+
