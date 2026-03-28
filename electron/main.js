@@ -1,5 +1,4 @@
 /**
- * PM Agent Pipeline v2 — Electron Main Process v2.2
  *
  * 역할:
  * 1. 사용 가능한 빈 포트를 동적으로 할당

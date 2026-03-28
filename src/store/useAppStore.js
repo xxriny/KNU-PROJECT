@@ -50,6 +50,16 @@ function cloneViewportTab(tab) {
   return tab ? { kind: tab.kind, id: tab.id } : { ...DEFAULT_VIEWPORT_TAB };
 }
 
+function normalizeOutputTabId(tabId) {
+  if (tabId === "sa_overview" || tabId === "sa_feasibility") {
+    return "overview";
+  }
+  if (tabId === "topology") {
+    return "context";
+  }
+  return tabId;
+}
+
 function extractRunId(value) {
   if (typeof value !== "string") {
     return null;
@@ -207,7 +217,9 @@ const useAppStore = create((set, get) => ({
       requirements_rtm: [],
       semantic_graph: null,
       context_spec: null,
+      sa_reverse_context: null,
       sa_output: null,
+      sa_artifacts: null,
       sa_phase1: null,
       sa_phase2: null,
       sa_phase3: null,
@@ -274,7 +286,9 @@ const useAppStore = create((set, get) => ({
   requirements_rtm: [],
   semantic_graph: null,
   context_spec: null,
+  sa_reverse_context: null,
   sa_output: null,
+  sa_artifacts: null,
   sa_phase1: null,
   sa_phase2: null,
   sa_phase3: null,
@@ -306,7 +320,9 @@ const useAppStore = create((set, get) => ({
       requirements_rtm: data.requirements_rtm || [],
       semantic_graph: data.semantic_graph || null,
       context_spec: data.context_spec || null,
+      sa_reverse_context: data.sa_reverse_context || null,
       sa_output: data.sa_output || null,
+      sa_artifacts: data.sa_artifacts || null,
       sa_phase1: data.sa_phase1 || null,
       sa_phase2: data.sa_phase2 || null,
       sa_phase3: data.sa_phase3 || null,
@@ -350,6 +366,22 @@ const useAppStore = create((set, get) => ({
       activeViewportTab: { kind: "code", id: file.id },
     });
     setTimeout(() => get().saveCurrentSession(), 0);
+  },
+
+  updateOpenFileContent: (fileId, content) => {
+    set((state) => {
+      const nextFiles = state.openFiles.map((file) => (
+        file.id === fileId ? { ...file, content } : file
+      ));
+      const nextSelectedFile = state.selectedFile?.id === fileId
+        ? { ...state.selectedFile, content }
+        : state.selectedFile;
+
+      return {
+        openFiles: nextFiles,
+        selectedFile: nextSelectedFile,
+      };
+    });
   },
 
   closeFile: (fileId) => {
@@ -403,6 +435,30 @@ const useAppStore = create((set, get) => ({
   setSelectedFile: (file) => set({ selectedFile: file }),
   setProjectFolder: (path) => set({ projectFolder: path }),
 
+  ensureProjectFolderAccess: async (folderPath) => {
+    const { backendPort } = get();
+    if (!backendPort || !folderPath) return false;
+
+    try {
+      const res = await fetch(`http://127.0.0.1:${backendPort}/api/scan-folder`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: folderPath }),
+      });
+      const data = await res.json();
+      if (data.status === "ok") {
+        set({ fileTree: data.tree || get().fileTree, projectFolder: data.root || folderPath });
+        setTimeout(() => get().saveCurrentSession(), 0);
+        return true;
+      }
+      console.error("[ProjectAccess] Error:", data.error);
+      return false;
+    } catch (e) {
+      console.error("[ProjectAccess] Fetch failed:", e);
+      return false;
+    }
+  },
+
   selectAndScanFolder: async () => {
     if (!window.electronAPI?.selectFolder) return;
     const folderPath = await window.electronAPI.selectFolder();
@@ -428,16 +484,33 @@ const useAppStore = create((set, get) => ({
   },
 
   openProjectFile: async (node) => {
-    const { backendPort } = get();
+    const { backendPort, projectFolder } = get();
     if (!backendPort || !node?.path) return;
 
-    try {
+    const readFile = async () => {
       const res = await fetch(`http://127.0.0.1:${backendPort}/api/read-file`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: node.path }),
       });
-      const data = await res.json();
+      return res.json();
+    };
+
+    try {
+      let data = await readFile();
+
+      const needsRescan = data.status !== "ok" && (
+        String(data.error || "").includes("먼저 프로젝트 폴더를 스캔하세요") ||
+        String(data.error || "").includes("프로젝트 폴더 밖의 파일")
+      );
+
+      if (needsRescan && projectFolder) {
+        const restored = await get().ensureProjectFolderAccess(projectFolder);
+        if (restored) {
+          data = await readFile();
+        }
+      }
+
       if (data.status !== "ok") {
         console.error("[ReadFile] Error:", data.error);
         return;
@@ -585,22 +658,29 @@ const useAppStore = create((set, get) => ({
     const session = sessions.find((entry) => entry.id === id);
     if (!session) return;
 
+    const normalizedViewportTab = cloneViewportTab(session.activeViewportTab);
+    if (normalizedViewportTab.kind === "output") {
+      normalizedViewportTab.id = normalizeOutputTabId(normalizedViewportTab.id);
+    }
+
     set({
       currentSessionId: id,
       projectFolder: session.projectFolder || null,
       fileTree: session.fileTree || [],
       openFiles: session.openFiles || [],
       selectedFile: session.selectedFile || null,
-      activeViewportTab: cloneViewportTab(session.activeViewportTab),
+      activeViewportTab: normalizedViewportTab,
       lastOutputTab: session.activeViewportTab?.kind === "output"
-        ? session.activeViewportTab.id
+        ? normalizeOutputTabId(session.activeViewportTab.id)
         : (session.resultData ? "overview" : "home"),
       resultData: session.resultData || null,
       chatHistory: session.chatHistory || [],
       requirements_rtm: session.resultData?.requirements_rtm || [],
       semantic_graph: session.resultData?.semantic_graph || null,
       context_spec: session.resultData?.context_spec || null,
+      sa_reverse_context: session.resultData?.sa_reverse_context || null,
       sa_output: session.resultData?.sa_output || null,
+      sa_artifacts: session.resultData?.sa_artifacts || null,
       sa_phase1: session.resultData?.sa_phase1 || null,
       sa_phase2: session.resultData?.sa_phase2 || null,
       sa_phase3: session.resultData?.sa_phase3 || null,
@@ -618,6 +698,12 @@ const useAppStore = create((set, get) => ({
       selectedMode: normalizeMode(session.selectedMode),
       model: session.model || get().model,
     });
+
+    if (session.projectFolder) {
+      setTimeout(() => {
+        get().ensureProjectFolderAccess(session.projectFolder);
+      }, 0);
+    }
   },
 
   deleteSession: async (id) => {
@@ -674,7 +760,9 @@ const useAppStore = create((set, get) => ({
     requirements_rtm: [],
     semantic_graph: null,
     context_spec: null,
+    sa_reverse_context: null,
     sa_output: null,
+    sa_artifacts: null,
     sa_phase1: null,
     sa_phase2: null,
     sa_phase3: null,

@@ -89,8 +89,57 @@ class ContextSpecOutput(BaseModel):
     key_decisions: List[str] = Field(default_factory=list, description="핵심 결정 사항")
     open_questions: List[str] = Field(default_factory=list, description="미해결 질문")
     tech_stack_suggestions: List[str] = Field(default_factory=list, description="기술 스택 제안")
+    tech_stack_suggestions_detailed: List[dict] = Field(default_factory=list, description="기술 스택 제안 상세 근거")
+    stack_confidence_score: float = Field(default=0.0, description="기술 스택 제안 종합 신뢰도 0.0 ~ 1.0")
     risk_factors: List[str] = Field(default_factory=list, description="리스크 요인")
     next_steps: List[str] = Field(default_factory=list, description="SA 에이전트 다음 단계")
+
+
+class ReverseContextOutput(BaseModel):
+    """REVERSE_ENGINEER 모드 전용 경량 컨텍스트 요약"""
+    summary: str = Field(description="역분석 프로젝트 요약 (한국어, 2-3문장)")
+    architecture_highlights: List[str] = Field(default_factory=list, description="레이어/구조 핵심 포인트")
+    tech_stack_observations: List[str] = Field(default_factory=list, description="실제 코드에서 관측된 기술 스택 단서")
+    dependency_observations: List[str] = Field(default_factory=list, description="위상 정렬/의존성 관찰 요약")
+    risk_factors: List[str] = Field(default_factory=list, description="리스크 요인")
+    next_steps: List[str] = Field(default_factory=list, description="다음 검증 단계")
+
+
+# ── SA Phase 3 출력 스키마 ──────────────────────
+
+class EvidenceSummary(BaseModel):
+    """SA3 분석 근거 요약 (REVERSE_ENGINEER 모드)"""
+    evidence_quality_score: int = Field(0, description="증거 품질 0~100점")
+    scanned_files: int = Field(0, description="스캔된 파일 수")
+    scanned_functions: int = Field(0, description="스캔된 함수 수")
+    framework_evidence_count: int = Field(0, description="프레임워크 증거 수")
+    has_tests: bool = Field(False, description="테스트 자산 여부")
+    has_observability: bool = Field(False, description="로깅/메트릭 계층 여부")
+    has_schema_enforcement: bool = Field(False, description="스키마 강제 여부")
+    has_result_shaping: bool = Field(False, description="결과 셰이핑 계층 여부")
+    has_pipeline_routing: bool = Field(False, description="파이프라인 라우팅 여부")
+    has_token_usage_tracking: bool = Field(False, description="토큰 사용량 추적 여부")
+    warnings: List[str] = Field(default_factory=list, description="분석 한계 경고")
+
+
+class ScoreBreakdownItem(BaseModel):
+    """SA3 점수 계산 상세항목 (REVERSE_ENGINEER 모드)"""
+    code: str = Field(description="신호 코드")
+    delta: int = Field(description="점수 변동: +증가, -감소")
+    message: str = Field(description="판정 사유 (한국어)")
+
+
+class SA3Output(BaseModel):
+    """SA Phase 3 노드의 구조화된 출력 (CREATE/UPDATE/REVERSE_ENGINEER 모드)"""
+    status: str = Field(description="Pass | Fail | Needs_Clarification | Error")
+    complexity_score: int = Field(0, description="복잡도/기술부채 점수 0~100")
+    decision: str = Field(default="", description="status와 동일")
+    diagnostic_code: str = Field(default="", description="REVERSE_RULE_BASED_PASS | ... | RTM_SCHEMA_INVALID")
+    reasons: List[str] = Field(default_factory=list, description="판정 근거 2~4개")
+    alternatives: List[str] = Field(default_factory=list, description="대안 또는 리팩토링 방법 1~3개")
+    high_risk_reqs: List[str] = Field(default_factory=list, description="고위험 REQ_ID 목록")
+    score_breakdown: List[ScoreBreakdownItem] = Field(default_factory=list, description="점수 계산 상세 (REVERSE 모드만)")
+    evidence_summary: EvidenceSummary = Field(default_factory=EvidenceSummary, description="분석 근거 요약 (REVERSE 모드만)")
 
 
 # ── SA 8단계 공통/출력 스키마 ─────────────────
@@ -135,11 +184,16 @@ class SAPhase4Output(SAStatus):
 class SAPhase5Output(SAStatus):
     pattern: str = "Clean Architecture"
     mapped_requirements: List[dict] = Field(default_factory=list)
+    layer_order: List[str] = Field(default_factory=list)
 
 
 class SAPhase6Output(SAStatus):
+    # 신규 계약: 객체 기반 상세 구조
+    defined_roles: List[dict] = Field(default_factory=list)
+    authz_matrix: List[dict] = Field(default_factory=list)
+    trust_boundaries: List[dict] = Field(default_factory=list)
+    # 구버전 호환 필드 (문자열 role 목록)
     rbac_roles: List[str] = Field(default_factory=list)
-    trust_boundaries: List[str] = Field(default_factory=list)
 
 
 class SAPhase7Output(SAStatus):
@@ -150,6 +204,9 @@ class SAPhase7Output(SAStatus):
 class SAPhase8Output(SAStatus):
     topo_queue: List[str] = Field(default_factory=list)
     cyclic_requirements: List[str] = Field(default_factory=list)
+    parallel_batches: List[List[str]] = Field(default_factory=list)
+    dependency_sources: dict = Field(default_factory=dict)
+    inferred_dependencies: List[dict] = Field(default_factory=list)
 
 
 class SAOutput(BaseModel):

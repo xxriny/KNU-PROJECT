@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from main import app
 from transport.rest_handler import _allowed_project_roots
-from pipeline.graph import get_analysis_pipeline, get_idea_pipeline, get_revision_pipeline
+from pipeline.graph import get_analysis_pipeline, get_idea_pipeline, get_revision_pipeline, _check_status
 
 
 class PipelineSetupTests(unittest.TestCase):
@@ -18,6 +18,16 @@ class PipelineSetupTests(unittest.TestCase):
         self.assertIsNotNone(get_analysis_pipeline())
         self.assertIsNotNone(get_revision_pipeline())
         self.assertIsNotNone(get_idea_pipeline())
+
+    def test_sa_fail_does_not_terminate_pipeline(self):
+        route = _check_status({"sa_phase3": {"status": "Fail"}})
+
+        self.assertEqual(route, "continue")
+
+    def test_sa_error_still_terminates_pipeline(self):
+        route = _check_status({"sa_phase3": {"status": "Error"}})
+
+        self.assertEqual(route, "error")
 
     def test_config_exposes_available_models(self):
         with TestClient(app) as client:

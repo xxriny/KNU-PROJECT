@@ -1,5 +1,4 @@
 /**
- * PM Agent Pipeline v2 — Preload Script (IPC Bridge)
  *
  * contextBridge를 통해 렌더러 프로세스(React)에
  * 안전한 API를 노출한다.

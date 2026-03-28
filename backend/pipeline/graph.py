@@ -21,6 +21,7 @@ from pipeline.nodes.sa_phase5 import sa_phase5_node
 from pipeline.nodes.sa_phase6 import sa_phase6_node
 from pipeline.nodes.sa_phase7 import sa_phase7_node
 from pipeline.nodes.sa_phase8 import sa_phase8_node
+from pipeline.nodes.sa_reverse_context import sa_reverse_context_node
 
 # 싱글턴 캐시
 _create_graph = None
@@ -29,8 +30,42 @@ _reverse_sa_graph = None
 _revision_graph = None
 _idea_graph = None
 
-FATAL_SA_STATUSES = {"Fail", "Error"}
-FATAL_PM_STATUSES = {"Needs_Clarification", "Error", "Completed_with_errors"}
+"""
+파이프라인 종료 정책 (Termination Policy)
+
+[SA 단계 — 분석 단서]
+- Fail: 타당성/부채 리스크는 기록하되 후속 구조 분석은 계속 진행
+    (이유: SA4~SA8 산출물까지 확보해 대안 설계와 후속 판단 근거를 남김)
+  
+- Needs_Clarification: 정보 부족하지만 SA 내부 재분석으로 해결 가능 → 계속 진행
+  (이유: SA4/5/6/7/8에서 추가 증거 수집 및 검증 담당, 판정 재평가 가능)
+  
+- Error: 시스템 오류 → 즉시 END
+
+[PM 단계 — 입력 준비 단계]
+- Needs_Clarification: 초기 입력(RTM) 또는 컨텍스트 불완전 → 즉시 END
+  (이유: SA가 진행할 기초 정보 부족 → 사용자 개입 필요)
+  
+- Completed_with_errors: 부분 성공이지만 품질 의심 → 즉시 END
+  (이유: SA 입력 신뢰도 낮음 → 정확도 보장 불가)
+  
+- Error: 시스템 오류 → 즉시 END
+
+[비대칭성의 의도]
+SA와 PM의 "Needs_Clarification"은 의미가 다릅니다:
+- SA: "불확실한 정보" → SA 단계 반복으로 수정 가능 → 계속
+- PM: "입력 준비 불완전" → 추가 입력 필요 → 중단
+"""
+
+# SA: Error만 즉시 중단, Fail은 후속 구조 분석을 계속 수행
+SA_EARLY_TERMINATION_STATUSES = {"Error"}
+
+# PM: Needs_Clarification/Error/부분 실패 = 입력/품질 문제 (사용자 개입 필요)
+PM_INPUT_READINESS_FAILURE_STATUSES = {"Needs_Clarification", "Error", "Completed_with_errors"}
+
+# 이전 이름으로 유지 (하위호환성)
+FATAL_SA_STATUSES = SA_EARLY_TERMINATION_STATUSES
+FATAL_PM_STATUSES = PM_INPUT_READINESS_FAILURE_STATUSES
 
 
 def _check_status(state: PipelineState) -> str:
@@ -69,6 +104,7 @@ def _add_all_analysis_nodes(workflow: StateGraph):
     workflow.add_node("sa_phase6", sa_phase6_node)
     workflow.add_node("sa_phase7", sa_phase7_node)
     workflow.add_node("sa_phase8", sa_phase8_node)
+    workflow.add_node("sa_reverse_context", sa_reverse_context_node)
 
 
 # ---------------------------------------------------------
@@ -95,7 +131,8 @@ def _get_create_pipeline():
         workflow.add_conditional_edges("sa_phase5", _check_status, {"continue": "sa_phase6", "error": END})
         workflow.add_conditional_edges("sa_phase6", _check_status, {"continue": "sa_phase7", "error": END})
         workflow.add_conditional_edges("sa_phase7", _check_status, {"continue": "sa_phase8", "error": END})
-        workflow.add_edge("sa_phase8", END)
+        workflow.add_edge("sa_phase8", "sa_reverse_context")
+        workflow.add_edge("sa_reverse_context", END)
         
         _create_graph = workflow.compile()
     return _create_graph
@@ -213,7 +250,8 @@ _CREATE_NEXT_NODES: dict[str, list[str]] = {
     "sa_phase5": ["sa_phase6"],
     "sa_phase6": ["sa_phase7"],
     "sa_phase7": ["sa_phase8"],
-    "sa_phase8": [],
+    "sa_phase8": ["sa_reverse_context"],
+    "sa_reverse_context": [],
 }
 
 _UPDATE_NEXT_NODES: dict[str, list[str]] = {

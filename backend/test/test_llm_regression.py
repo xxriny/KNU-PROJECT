@@ -310,3 +310,23 @@ class TestOverviewShaping:
             assert isinstance(ov["critical_gaps"], list), (
                 f"{rec['file']}/sa_overview.critical_gaps: list 타입이어야 함"
             )
+
+    def test_project_overview_schema(self, golden_records):
+        targets = _records_with_key(golden_records, "project_overview")
+        if not targets:
+            pytest.skip("project_overview 없는 데이터셋")
+        for rec in targets:
+            ov = rec["data"]["project_overview"]
+            assert isinstance(ov, dict), f"{rec['file']}/project_overview: dict 타입이어야 함"
+            assert "requirement_count" in ov, f"{rec['file']}/project_overview: requirement_count 누락"
+            assert isinstance(ov["requirement_count"], int), (
+                f"{rec['file']}/project_overview.requirement_count: int 타입이어야 함"
+            )
+            assert "priority_counts" in ov, f"{rec['file']}/project_overview: priority_counts 누락"
+            assert isinstance(ov["priority_counts"], dict), (
+                f"{rec['file']}/project_overview.priority_counts: dict 타입이어야 함"
+            )
+            assert "container_summary" in ov, f"{rec['file']}/project_overview: container_summary 누락"
+            assert isinstance(ov["container_summary"], dict), (
+                f"{rec['file']}/project_overview.container_summary: dict 타입이어야 함"
+            )
