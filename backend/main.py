@@ -38,6 +38,7 @@ except ImportError:
 from transport.rest_handler import rest_router
 from transport.ws_handler import websocket_pipeline
 from observability.metrics import make_metrics_app
+from observability.logger import get_logger
 
 ALLOWED_ORIGIN_REGEX = r"^(null|https?://(127\.0\.0\.1|localhost)(:\d+)?)$"
 
@@ -45,9 +46,9 @@ ALLOWED_ORIGIN_REGEX = r"^(null|https?://(127\.0\.0\.1|localhost)(:\d+)?)$"
 # ── App Lifespan ─────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print(f"[Backend] PM Agent Pipeline v2.2 starting on PID {os.getpid()}...")
+    get_logger().info(f"[Backend] PM Agent Pipeline v2.2 starting on PID {os.getpid()}...")
     yield
-    print(f"[Backend] Shutting down...")
+    get_logger().info(f"[Backend] Shutting down...")
 
 
 # ── FastAPI 앱 생성 ──────────────────────────────────────
@@ -85,7 +86,7 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Server host")
     args = parser.parse_args()
 
-    print(f"[Backend] Starting on {args.host}:{args.port}")
+    get_logger().info(f"[Backend] Starting on {args.host}:{args.port}")
     uvicorn.run(
         app,
         host=args.host,

@@ -1,3 +1,4 @@
+from observability.logger import get_logger
 """
 노드 5 — 롤링 컨텍스트 상태 명세서 (Context Spec)
 
@@ -122,11 +123,11 @@ def _save_project_state_md(spec: dict, project_name: str, run_id: str = "") -> s
         with open(filepath, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
 
-        print(f"[ContextSpec] PROJECT_STATE.md saved → {filepath}")
+        get_logger(sget("run_id", "")).info(f"[ContextSpec] PROJECT_STATE.md saved → {filepath}")
         return filepath
 
     except Exception as e:
-        print(f"[ContextSpec] Warning: PROJECT_STATE.md 저장 실패: {e}")
+        get_logger(sget("run_id", "")).warning(f"[ContextSpec] Warning: PROJECT_STATE.md 저장 실패: {e}")
         return ""
 
 

@@ -131,6 +131,27 @@ def _path_exists(root: str, *parts: str) -> bool:
     return bool(root) and os.path.exists(os.path.join(root, *parts))
 
 
+def _grep_any(root: str, tokens: list[str], limit: int = 50_000) -> bool:
+    """root 아래 모든 .py 파일을 탐색하여 tokens 중 하나라도 포함하는지 확인.
+    파일당 최대 limit 바이트만 읽어 성능을 보호한다."""
+    if not root or not os.path.isdir(root):
+        return False
+    skip_dirs = {"__pycache__", ".git", "node_modules", ".venv", "venv", "Data", "dist", "build"}
+    for current_root, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in skip_dirs]
+        for name in filenames:
+            if not name.endswith(".py"):
+                continue
+            try:
+                with open(os.path.join(current_root, name), encoding="utf-8", errors="replace") as fh:
+                    text = fh.read(limit)
+                if any(tok in text for tok in tokens):
+                    return True
+            except OSError:
+                continue
+    return False
+
+
 def _detect_tests(root: str) -> bool:
     if not root or not os.path.isdir(root):
         return False
@@ -168,39 +189,15 @@ def _collect_reverse_evidence(sa_phase1: dict, source_dir: str, has_rtm: bool) -
         _path_exists(root, "backend", "result_shaping", "result_shaper.py")
         or _path_exists(root, "result_shaping", "result_shaper.py")
     )
-    graph_path = (
-        os.path.join(root, "backend", "pipeline", "graph.py")
-        if root else ""
-    )
-    schemas_path = (
-        os.path.join(root, "backend", "pipeline", "schemas.py")
-        if root else ""
-    )
-    utils_path = (
-        os.path.join(root, "backend", "pipeline", "utils.py")
-        if root else ""
-    )
-    pm_phase1_path = (
-        os.path.join(root, "backend", "pipeline", "nodes", "pm_phase1.py")
-        if root else ""
-    )
-    atomizer_path = (
-        os.path.join(root, "backend", "pipeline", "nodes", "atomizer.py")
-        if root else ""
-    )
 
-    graph_text = _safe_read_text(graph_path)
-    schemas_text = _safe_read_text(schemas_path)
-    utils_text = _safe_read_text(utils_path)
-    pm_phase1_text = _safe_read_text(pm_phase1_path)
-    atomizer_text = _safe_read_text(atomizer_path)
-
-    has_pipeline_routing = "StateGraph" in graph_text and "add_conditional_edges" in graph_text
-    has_schema_enforcement = "with_structured_output" in utils_text and "BaseModel" in schemas_text
-    has_token_usage_tracking = any(
-        token in text
-        for text in (pm_phase1_text, atomizer_text, utils_text)
-        for token in ("call_structured_with_usage", "input_tokens", "output_tokens")
+    # 범용 패턴 탐색 — navigator 고유 경로 하드코딩 없이 os.walk로 전체 탐색
+    has_pipeline_routing = _grep_any(root, ["StateGraph", "add_conditional_edges"])
+    has_schema_enforcement = (
+        _grep_any(root, ["with_structured_output"])
+        and _grep_any(root, ["BaseModel"])
+    )
+    has_token_usage_tracking = _grep_any(
+        root, ["call_structured_with_usage", "input_tokens", "output_tokens"]
     )
 
     evidence_quality = 0
