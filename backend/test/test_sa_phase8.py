@@ -51,6 +51,13 @@ class SAPhase8DependencyTests(unittest.TestCase):
         self.assertGreaterEqual(len(phase["parallel_batches"]), 2)
         self.assertTrue(any(item["source"] == "data_flow" for item in phase["inferred_dependencies"]))
         self.assertIn("MOD-001", {item["from"] for item in phase["dependency_sources"]["MOD-002"]})
+        self.assertTrue(any(item.get("applied_to_canonical") for item in phase["dependency_sources"]["MOD-002"] if item["source"] == "data_flow"))
+        self.assertFalse(any(item.get("applied_to_canonical") for item in phase["dependency_sources"]["MOD-006"] if item["source"] == "data_flow"))
+        self.assertIn("MOD-001", phase["parallel_batches"][0])
+        self.assertIn("MOD-006", phase["parallel_batches"][0])
+        self.assertEqual(phase["parallel_batches"][1], ["MOD-002"])
+        self.assertIn("MOD-001", phase["topo_queue"])
+        self.assertIn("MOD-002", phase["topo_queue"])
 
     def test_low_signal_contract_tokens_do_not_become_canonical_dependencies(self):
         state = {

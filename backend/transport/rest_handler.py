@@ -6,6 +6,7 @@ main.py에서 app.include_router(rest_router) 호출.
 
 from __future__ import annotations
 
+from datetime import datetime
 import os
 import re
 import sys
@@ -20,15 +21,14 @@ _BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _BACKEND_ROOT not in sys.path:
     sys.path.insert(0, _BACKEND_ROOT)
 
-from connectors.result_logger import save_result, delete_session_files, delete_exact_file
+from connectors.result_logger import delete_session_files, delete_exact_file
+from pipeline.action_type import normalize_action_type
 from pipeline.graph import get_analysis_pipeline, get_revision_pipeline, get_idea_pipeline
-from pipeline.ast_scanner import extract_functions, summarize_for_llm
 from result_shaping.result_shaper import shape_result
 from orchestration.pipeline_runner import (
     validate_analysis_inputs,
     build_reverse_context,
     analysis_pipeline_type,
-    ANALYSIS_ACTION_TYPES,
 )
 
 # ── 상수 ─────────────────────────────────────────────────
@@ -168,7 +168,7 @@ async def read_file_endpoint(req: ReadFileRequest):
 async def analyze(req: AnalysisRequest):
     try:
         api_key = req.api_key or os.environ.get("GEMINI_API_KEY", "")
-        action_type = req.action_type if req.action_type in ANALYSIS_ACTION_TYPES else "CREATE"
+        action_type = normalize_action_type(req.action_type)
         validation_error = validate_analysis_inputs(action_type, req.idea, req.source_dir)
         if validation_error:
             return {"status": "error", "error": validation_error}
@@ -182,7 +182,6 @@ async def analyze(req: AnalysisRequest):
                     "error": "선택한 폴더에서 분석 가능한 함수/메서드를 찾지 못했습니다.",
                 }
 
-        from datetime import datetime
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         pipeline = get_analysis_pipeline(action_type)
         result = pipeline.invoke({

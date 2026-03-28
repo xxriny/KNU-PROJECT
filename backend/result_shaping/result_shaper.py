@@ -59,80 +59,75 @@ _EXCLUDED_KEYS: frozenset[str] = frozenset({
 
 # ─── Public API ───────────────────────────────────────────
 
-def shape_result(raw_result: dict) -> dict:
-    """LangGraph raw 결과 → JSON 직렬화 가능한 정형 결과.
-
-    - EXCLUDED_KEYS 필드 제거
-    - pm_overview / sa_overview / project_overview 스키마 기반 생성
-    """
-    sanitized: dict[str, Any] = {}
-    for key, value in raw_result.items():
-        if key in _EXCLUDED_KEYS:
-            continue
-        sanitized[key] = deep_sanitize(value)
-
-    requirements_rtm: list = sanitized.get("requirements_rtm") or []
-    context_spec: dict = sanitized.get("context_spec") or {}
-    reverse_context: dict = sanitized.get("sa_reverse_context") or {}
-    metadata: dict = sanitized.get("metadata") or {}
-    sa_phase2: dict = sanitized.get("sa_phase2") or {}
-    sa_phase3: dict = sanitized.get("sa_phase3") or {}
-    sa_phase5: dict = sanitized.get("sa_phase5") or {}
-
-    skipped_phases = [
+def _collect_skipped_phases(sanitized: dict[str, Any]) -> list[str]:
+    return [
         phase
         for phase in ("sa_phase1", "sa_phase2")
         if isinstance(sanitized.get(phase), dict)
         and sanitized.get(phase, {}).get("status") == "Skipped"
     ]
 
-    sanitized["pm_overview"] = PMOverview(
+
+def _build_pm_overview(
+    metadata: dict,
+    context_spec: dict,
+    reverse_context: dict,
+    requirements_rtm: list,
+) -> dict:
+    return PMOverview(
         status=metadata.get("status"),
         summary=context_spec.get("summary") or reverse_context.get("summary"),
         requirement_count=len(requirements_rtm),
         risks=context_spec.get("risk_factors", []) or reverse_context.get("risk_factors", []),
     ).model_dump()
 
-    sanitized["sa_overview"] = SAOverview(
+
+def _build_sa_overview(sa_phase2: dict, sa_phase3: dict, skipped_phases: list[str]) -> dict:
+    return SAOverview(
         feasibility=sa_phase3,
         critical_gaps=sa_phase2.get("gap_report", []),
         skipped_phases=skipped_phases,
     ).model_dump()
 
-    if not sanitized["pm_overview"].get("summary") and reverse_context.get("summary"):
-        sanitized["pm_overview"]["summary"] = reverse_context.get("summary")
 
-    sanitized["sa_artifacts"] = compile_sa_artifacts(sanitized)
-
-    summary_text = context_spec.get("summary") or reverse_context.get("summary")
+def _resolve_summary(context_spec: dict, reverse_context: dict) -> tuple[str | None, str]:
     if context_spec.get("summary"):
-        summary_source = "context_spec"
-    elif reverse_context.get("summary"):
-        summary_source = "sa_reverse_context"
-    else:
-        summary_source = "none"
+        return context_spec.get("summary"), "context_spec"
+    if reverse_context.get("summary"):
+        return reverse_context.get("summary"), "sa_reverse_context"
+    return None, "none"
 
-    priority_counts = {
+
+def _build_priority_counts(requirements_rtm: list) -> dict[str, int]:
+    return {
         "must": sum(1 for r in requirements_rtm if (r.get("priority") or "") == "Must-have"),
         "should": sum(1 for r in requirements_rtm if (r.get("priority") or "") == "Should-have"),
         "could": sum(1 for r in requirements_rtm if (r.get("priority") or "") == "Could-have"),
     }
 
+
+def _build_layer_distribution(sa_phase5: dict) -> dict[str, int]:
     layer_distribution: dict[str, int] = {}
     for req in sa_phase5.get("mapped_requirements", []) or []:
         layer = str(req.get("layer") or "Unknown")
         layer_distribution[layer] = layer_distribution.get(layer, 0) + 1
+    return layer_distribution
 
-    container_spec = (sanitized.get("sa_artifacts") or {}).get("container_diagram_spec") or {}
-    container_summary = container_spec.get("summary") or {}
 
-    data_flags = {
+def _build_data_flags(
+    requirements_rtm: list,
+    sanitized: dict[str, Any],
+    reverse_context: dict,
+) -> dict[str, bool]:
+    return {
         "has_rtm": len(requirements_rtm) > 0,
         "has_phase1_scan": isinstance(sanitized.get("sa_phase1"), dict),
         "has_reverse_context": bool(reverse_context.get("summary")),
         "has_sa_artifacts": isinstance(sanitized.get("sa_artifacts"), dict),
     }
 
+
+def _compute_next_actions(data_flags: dict[str, bool], sa_phase3: dict, container_summary: dict) -> list[str]:
     next_actions: list[str] = []
     if not data_flags["has_rtm"]:
         next_actions.append("요구사항(RTM) 또는 추적 가능한 유저 스토리를 보강하세요.")
@@ -142,8 +137,28 @@ def shape_result(raw_result: dict) -> dict:
         next_actions.append("외부 연동 구간의 인증/재시도/관측성 정책을 계약 수준에서 명시하세요.")
     if not next_actions:
         next_actions.append("핵심 경로 기준으로 통합 테스트를 작성해 변경 회귀를 방지하세요.")
+    return next_actions
 
-    sanitized["project_overview"] = ProjectOverview(
+
+def _build_project_overview(
+    *,
+    metadata: dict,
+    summary_text: str | None,
+    summary_source: str,
+    requirements_rtm: list,
+    priority_counts: dict[str, int],
+    context_spec: dict,
+    reverse_context: dict,
+    sa_phase2: dict,
+    sa_phase3: dict,
+    sa_phase5: dict,
+    skipped_phases: list[str],
+    layer_distribution: dict[str, int],
+    container_summary: dict,
+    data_flags: dict[str, bool],
+    next_actions: list[str],
+) -> dict:
+    return ProjectOverview(
         status=metadata.get("status"),
         project_name=metadata.get("project_name"),
         action_type=metadata.get("action_type"),
@@ -166,6 +181,66 @@ def shape_result(raw_result: dict) -> dict:
         data_flags=data_flags,
         next_actions=next_actions[:3],
     ).model_dump()
+
+def shape_result(raw_result: dict) -> dict:
+    """LangGraph raw 결과 → JSON 직렬화 가능한 정형 결과.
+
+    - EXCLUDED_KEYS 필드 제거
+    - pm_overview / sa_overview / project_overview 스키마 기반 생성
+    """
+    sanitized: dict[str, Any] = {}
+    for key, value in raw_result.items():
+        if key in _EXCLUDED_KEYS:
+            continue
+        sanitized[key] = deep_sanitize(value)
+
+    requirements_rtm: list = sanitized.get("requirements_rtm") or []
+    context_spec: dict = sanitized.get("context_spec") or {}
+    reverse_context: dict = sanitized.get("sa_reverse_context") or {}
+    metadata: dict = sanitized.get("metadata") or {}
+    sa_phase2: dict = sanitized.get("sa_phase2") or {}
+    sa_phase3: dict = sanitized.get("sa_phase3") or {}
+    sa_phase5: dict = sanitized.get("sa_phase5") or {}
+
+    skipped_phases = _collect_skipped_phases(sanitized)
+
+    sanitized["pm_overview"] = _build_pm_overview(
+        metadata=metadata,
+        context_spec=context_spec,
+        reverse_context=reverse_context,
+        requirements_rtm=requirements_rtm,
+    )
+    sanitized["sa_overview"] = _build_sa_overview(sa_phase2, sa_phase3, skipped_phases)
+
+    sanitized["sa_artifacts"] = compile_sa_artifacts(sanitized)
+
+    summary_text, summary_source = _resolve_summary(context_spec, reverse_context)
+    priority_counts = _build_priority_counts(requirements_rtm)
+    layer_distribution = _build_layer_distribution(sa_phase5)
+
+    container_spec = (sanitized.get("sa_artifacts") or {}).get("container_diagram_spec") or {}
+    container_summary = container_spec.get("summary") or {}
+
+    data_flags = _build_data_flags(requirements_rtm, sanitized, reverse_context)
+    next_actions = _compute_next_actions(data_flags, sa_phase3, container_summary)
+
+    sanitized["project_overview"] = _build_project_overview(
+        metadata=metadata,
+        summary_text=summary_text,
+        summary_source=summary_source,
+        requirements_rtm=requirements_rtm,
+        priority_counts=priority_counts,
+        context_spec=context_spec,
+        reverse_context=reverse_context,
+        sa_phase2=sa_phase2,
+        sa_phase3=sa_phase3,
+        sa_phase5=sa_phase5,
+        skipped_phases=skipped_phases,
+        layer_distribution=layer_distribution,
+        container_summary=container_summary,
+        data_flags=data_flags,
+        next_actions=next_actions,
+    )
 
     return sanitized
 

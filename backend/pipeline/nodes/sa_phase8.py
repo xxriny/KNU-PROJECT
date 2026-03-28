@@ -195,12 +195,13 @@ def _synthesize_dependencies(items: list[dict], semantic_graph: dict, sa_phase7:
                 continue
             confidence = _calculate_dependency_confidence(common, token_frequency, module_count, source_contract, target_contract)
             strong_common = [token for token in common if token not in LOW_SIGNAL_TOKENS]
+            applied_to_canonical = bool(strong_common and confidence >= MIN_CANONICAL_CONFIDENCE)
             dependency_sources[target_req].append({
                 "source": "data_flow",
                 "from": source_req,
                 "confidence": confidence,
                 "tokens": common[:4],
-                "applied_to_canonical": bool(strong_common and confidence >= MIN_CANONICAL_CONFIDENCE),
+                "applied_to_canonical": applied_to_canonical,
             })
             inferred_dependencies.append({
                 "target": target_req,
@@ -209,6 +210,8 @@ def _synthesize_dependencies(items: list[dict], semantic_graph: dict, sa_phase7:
                 "confidence": confidence,
                 "tokens": common[:4],
             })
+            if applied_to_canonical and source_req not in target["depends_on"]:
+                target["depends_on"].append(source_req)
         target["depends_on"] = sorted(dict.fromkeys(target["depends_on"]))
 
     return merged_items, dependency_sources, inferred_dependencies
