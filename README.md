@@ -9,9 +9,14 @@ Electron + React(Vite) + FastAPI 사이드카 아키텍처로 동작하며, Goog
 
 ## 1. 주요 기능
 
-- 멀티 모드 분석: `CREATE`, `UPDATE`, `REVERSE_ENGINEER`
+- 멀티 모드 분석: `CREATE`, `UPDATE`, `REVERSE_ENGINEER` (REST/WebSocket의 `action_type`은 이 셋으로 정규화)
+- SA/PM 단계에서 정보가 부족하면 `Needs_Clarification` 판정·명확화 질문 등 내부 분기
 - 실시간 파이프라인 스트리밍: WebSocket 상태/생각 로그/최종 결과
-- SA 시각화 아티팩트 자동 컴파일: 컨테이너 다이어그램, Flowchart, UML 컴포넌트 뷰
+- **실행 계층 분리**: REST·WebSocket 핸들러가 공통으로 사용하는 `PipelineExecutor` (`orchestration/executor.py`)
+- **파이프라인 정비**: LangGraph 그래프 빌더 캐시(`_PipelineRegistry`), 노드 공통 보일러플레이트 `@pipeline_node` (`pipeline/node_base.py`)
+- **상태·스키마**: `PipelineState`를 모드별 TypedDict 조각으로 조합, LLM 구조화 출력은 `pipeline/schemas/`(Pydantic)에서 관리
+- SA 시각화 아티팩트 자동 컴파일: 컨테이너 다이어그램(`result_shaping/container_config.py`로 레이어·매핑 조정 가능), Flowchart, UML 컴포넌트 뷰
+- **프론트 모듈화**: 결과 뷰를 `components/resultViewer/` 탭 단위로 분리, Zustand는 `store/slices/`(WebSocket·설정) + `useAppStore` 조합
 - 세션 저장/복원: 프로젝트별 분석 상태 및 UI 탭 상태 유지
 - 보안 기본 원칙: `.env` 분리, 결과 shaping 단계에서 민감 필드 제외
 
@@ -88,8 +93,11 @@ npm run dev
 - `npm run dev:electron`: Electron 앱 실행
 - `npm run build`: 프론트 프로덕션 빌드
 - `npm run build:electron`: 빌드 + 패키징
+- `npm run backend`: 백엔드만 단독 기동(개발·디버그용, 기본 포트는 `package.json` 스크립트 참고)
 
 ## 6. 프로젝트 구조
+
+### 6.1 디렉터리 개요
 
 ```text
 navigator/
@@ -99,23 +107,46 @@ navigator/
 ├─ src/
 │  ├─ App.jsx
 │  ├─ index.css
-│  ├─ components/             # Workspace, ResultViewer, SAArtifactGraph 등
+│  ├─ components/
+│  │  ├─ Workspace, ChatPanel, SAArtifactGraph, …
+│  │  ├─ ResultViewer.jsx     # 결과 셸(탭 라우팅)
+│  │  ├─ resultViewer/        # 탭별 UI (Overview, RTM, Context, Topology, SA 전용 탭 등)
+│  │  ├─ graphLayout.js       # 그래프 레이아웃
+│  │  └─ graphUtils.js        # 그래프 유틸
 │  └─ store/
-│     └─ useAppStore.js       # Zustand 전역 상태
+│     ├─ useAppStore.js       # 통합 스토어(파이프라인·UI·세션 등)
+│     ├─ storeHelpers.js
+│     ├─ debounce.js
+│     └─ slices/
+│        ├─ wsSlice.js        # WebSocket 관련 액션/상태
+│        └─ configSlice.js    # 설정 관련
 ├─ backend/
 │  ├─ main.py                 # FastAPI 엔트리
-│  ├─ transport/              # WS/REST 핸들러
-│  ├─ orchestration/          # 파이프라인 실행 오케스트레이션
+│  ├─ version.py              # 기본 모델 등 공통 상수
+│  ├─ transport/              # WebSocket / REST 핸들러
+│  ├─ orchestration/
+│  │  ├─ pipeline_runner.py   # 파이프라인 선택·실행 진입
+│  │  └─ executor.py          # REST·WS 공통 실행·결과 shaping (PipelineExecutor)
 │  ├─ pipeline/
-│  │  ├─ graph.py             # LangGraph 노드 그래프
-│  │  └─ nodes/               # PM/SA 단계별 노드
+│  │  ├─ graph.py             # LangGraph StateGraph 빌더, 파이프라인 레지스트리
+│  │  ├─ state.py             # PipelineState (TypedDict 조합)
+│  │  ├─ node_base.py         # @pipeline_node, NodeContext
+│  │  ├─ utils.py             # LLM 호출·구조화 출력 공통
+│  │  ├─ schemas/             # Pydantic 스키마 패키지 (core 등)
+│  │  └─ nodes/               # PM/SA/채팅 단계별 노드
+│  │     ├─ pm_phase1 … pm_phase5   # atomizer → … → context_spec
+│  │     ├─ sa_phase1 … sa_phase8
+│  │     ├─ sa_phase3_reverse.py, sa_reverse_module.py, sa_layer_heuristics.py, …
+│  │     ├─ chat_revision.py, idea_chat.py
+│  │     └─ sa_reverse_context.py
 │  ├─ result_shaping/
-│  │  ├─ result_shaper.py     # 최종 결과 정형화
-│  │  └─ sa_artifact_compiler.py
-│  ├─ observability/          # logger, metrics
-│  ├─ connectors/             # 파일/결과 저장 연동
+│  │  ├─ result_shaper.py
+│  │  ├─ sa_artifact_compiler.py
+│  │  └─ container_config.py  # 컨테이너 다이어그램 그룹·레이어 매핑(프로젝트 커스터마이즈)
+│  ├─ observability/
+│  ├─ connectors/
 │  ├─ Data/                   # 분석 결과 JSON, PROJECT_STATE
-│  ├─ test/                   # 백엔드 테스트
+│  ├─ test/
 │  ├─ requirements.txt
 │  └─ .env.example
 ├─ index.html
@@ -124,13 +155,29 @@ navigator/
 └─ vite.config.js
 ```
 
+### 6.2 백엔드 개발 시 참고
+
+- **파이프라인 그래프**: `pipeline/graph.py`에서 모드별 엣지·노드 조립. 캐시 초기화가 필요하면 `_PipelineRegistry.clear()` 사용.
+- **새 노드 추가**: 기존 노드와 동일하게 `(state: PipelineState) -> dict` 형태를 유지. 공통 패턴은 `@pipeline_node`로 `make_sget`, `thinking_log`, `current_step` 처리 가능. LangGraph는 래퍼 함수의 **첫 인자 타입 힌트**로 입력 스키마를 추론하므로, 데코레이터 적용 시 `PipelineState`가 노출되도록 유지할 것(`node_base.py` 참고).
+- **LLM 구조화 스키마**: `pipeline/schemas/core.py` 및 패키지 `__init__` 재노출 규칙을 따름.
+- **API 키**: 단일 진입점에서 해석되도록 유지(`transport`, `pipeline_runner` 등과 정합).
+
+### 6.3 프론트엔드 개발 시 참고
+
+- **상태**: 도메인별 로직은 `store/slices/`로 나누고 `useAppStore.js`에서 조합하는 패턴을 권장.
+- **결과 UI**: 새 탭은 `components/resultViewer/`에 컴포넌트 추가 후 `ResultViewer.jsx`에서 연결.
+
 ## 7. 파이프라인 모드
+
+분석 요청의 `action_type`(및 정규화 결과)은 아래 셋 중 하나입니다. (`pipeline/action_type.py` 참고.)
 
 | Mode | 설명 |
 |---|---|
 | `CREATE` | 아이디어 기반 신규 요구사항 정형화 + SA 산출물 생성 |
 | `UPDATE` | 기존 코드/요구 반영 변경 분석 |
 | `REVERSE_ENGINEER` | 코드베이스 역분석 중심 SA 산출물 생성 |
+
+SA 등 하위 단계에서는 `Needs_Clarification` 같은 **판정/상태**가 별도로 기록될 수 있으며, 이는 위 세 모드와 동일한 “최상위 모드”가 아닙니다.
 
 ## 8. 결과 산출물
 
@@ -207,4 +254,4 @@ python test/test_sa_artifact_compiler.py
 ## 13. 라이선스/운영 메모
 
 - 내부 운영/개발용 문서 기준입니다.
-- 대규모 리팩터링 시 `backend/test` 회귀 테스트와 `npm run build`를 함께 확인하세요.
+- 대규모 변경 후에는 `backend/test` 회귀, `npm run build`, 주요 모드(CREATE/UPDATE/REVERSE) 수동 스모크를 권장합니다.
