@@ -78,7 +78,6 @@ def add_knowledge(
         documents=[document],
         metadatas=[metadata]
     )
-    run_id = metadata.get("run_id", "")
     get_logger(run_id).info(f"[ChromaDB] Added: {doc_id}")
 
 

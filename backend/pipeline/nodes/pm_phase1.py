@@ -4,30 +4,12 @@ Agent Pipeline — Atomizer Node
 """
 
 import time
-import traceback
-from pydantic import BaseModel, Field
-from pipeline.state import PipelineState, sget as state_sget
+
+from pipeline.state import PipelineState, make_sget
+from observability.logger import get_logger
 from pipeline.utils import call_structured_with_usage
-
-
-class AtomicRequirement(BaseModel):
-    REQ_ID: str = Field(description="고유 ID. 예: REQ-001")
-    category: str = Field(description="Frontend|Backend|Architecture|Database|Security|AI/ML|Infrastructure")
-    description: str = Field(description="한국어 1문장, 테스트 가능한 단일 책임 기능")
-
-
-class AtomizerMetadata(BaseModel):
-    project_name: str = Field(default="Untitled")
-    action_type: str = Field(description="CREATE|UPDATE|REVERSE_ENGINEER|Needs_Clarification")
-    status: str = Field(description="Success|Needs_Clarification")
-    total_requirements: int = Field(default=0)
-
-
-class AtomizerOutput(BaseModel):
-    thinking_process: str = Field(default="", description="모드 판별 및 분해 근거 요약")
-    metadata: AtomizerMetadata
-    clarification_questions: list[str] = Field(default_factory=list)
-    atomic_requirements: list[AtomicRequirement] = Field(default_factory=list)
+from pipeline.nodes.atomizer import AtomizerOutput
+from version import DEFAULT_MODEL
 
 
 # CREATE / UPDATE 모드용 프롬프트 (MECE 기획자 페르소나)
@@ -82,12 +64,10 @@ REVERSE_SYSTEM_PROMPT = """당신은 수석 소프트웨어 리버스 엔지니�
 
 def atomizer_node(state: PipelineState) -> dict:
     try:
-        # TypedDict / 객체 모두 호환
-        def sget(key, default=None):
-            return state_sget(state, key, default)
+        sget = make_sget(state)
 
         api_key = sget("api_key", "")
-        model = sget("model", "gemini-2.5-flash")
+        model = sget("model", DEFAULT_MODEL)
         ctx = (sget("project_context", "") or "").strip()
         idea = (sget("input_idea", "") or "").strip()
         requested_action_type = (sget("action_type", "") or "").strip().upper()
@@ -169,7 +149,7 @@ def atomizer_node(state: PipelineState) -> dict:
         }
 
     except Exception as e:
-        traceback.print_exc()
+        get_logger().exception("atomizer_node failed")
         return {
             "error": f"atomizer 실패: {e}",
             "thinking_log": [{"node": "atomizer", "thinking": f"오류: {e}"}],

@@ -4,15 +4,7 @@ from collections import Counter
 import os
 
 from pipeline.schemas import ReverseContextOutput
-from pipeline.state import PipelineState
-
-
-def _sget(state: PipelineState, key: str, default=None):
-    if hasattr(state, "get"):
-        value = state.get(key, default)
-    else:
-        value = getattr(state, key, default)
-    return default if value is None else value
+from pipeline.state import PipelineState, make_sget, sget as _sget
 
 
 def _top_frameworks(sa_phase1: dict) -> list[str]:

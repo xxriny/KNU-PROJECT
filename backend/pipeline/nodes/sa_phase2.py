@@ -1,8 +1,9 @@
 import json
 from pydantic import BaseModel, Field
 from typing import List
-from pipeline.state import PipelineState, sget as state_sget
+from pipeline.state import PipelineState, make_sget
 from pipeline.utils import call_structured_with_thinking
+from version import DEFAULT_MODEL
 
 class RequirementImpact(BaseModel):
     req_id: str = Field(description="요구사항 ID")
@@ -25,8 +26,7 @@ IMPACT_SYSTEM_PROMPT = """\
 3. 발생할 수 있는 부작용(side_effects)을 구체적으로 작성하세요."""
 
 def sa_phase2_node(state: PipelineState) -> dict:
-    def sget(key, default=None):
-        return state_sget(state, key, default)
+    sget = make_sget(state)
 
     action_type = sget("action_type", "CREATE")
     
@@ -41,7 +41,7 @@ def sa_phase2_node(state: PipelineState) -> dict:
             "current_step": "sa_phase2_done",
         }
 
-    rtm = sget("requirements_rtm", []) or sget("rtm_matrix", []) or []
+    rtm = sget("requirements_rtm", [])
     semantic_graph = sget("semantic_graph", {}) or {}
 
     touched_files = set()
@@ -73,7 +73,7 @@ def sa_phase2_node(state: PipelineState) -> dict:
     try:
         result, thinking = call_structured_with_thinking(
             api_key=sget("api_key", ""),
-            model=sget("model", "gemini-2.5-flash"),
+            model=sget("model", DEFAULT_MODEL),
             schema=GapReportOutput,
             system_prompt=IMPACT_SYSTEM_PROMPT,
             user_msg=user_msg,

@@ -10,6 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 from result_shaping.sa_artifact_compiler import compile_sa_artifacts
+from pipeline.utils import to_serializable
 
 
 # ─── 스키마 ───────────────────────────────────────────────
@@ -246,15 +247,5 @@ def shape_result(raw_result: dict) -> dict:
 
 
 def deep_sanitize(obj: Any) -> Any:
-    """Pydantic 모델, dict, list를 재귀적으로 JSON 직렬화 가능하게 변환."""
-    if hasattr(obj, "model_dump"):
-        return obj.model_dump()
-    if hasattr(obj, "dict"):
-        return obj.dict()
-    if isinstance(obj, dict):
-        return {k: deep_sanitize(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [deep_sanitize(item) for item in obj]
-    if isinstance(obj, (str, int, float, bool, type(None))):
-        return obj
-    return str(obj)
+    """to_serializable의 하위 호환 별칭."""
+    return to_serializable(obj)

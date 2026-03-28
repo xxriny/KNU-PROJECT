@@ -11,10 +11,11 @@ Self-Correction 재시도 루프로 의존성 상실(Dependency Amnesia) 자가 
 
 import json
 from copy import deepcopy
-from pipeline.state import PipelineState
+from pipeline.state import PipelineState, make_sget
 from pipeline.schemas import RTMBuilderOutput
 from pipeline.utils import call_structured_with_thinking, get_llm
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from version import DEFAULT_MODEL
 
 SYSTEM_PROMPT = """\
 당신은 요구사항 추적 매트릭스(RTM) 구축 전문가입니다.
@@ -79,9 +80,7 @@ def _validate_dependency_quality(result: RTMBuilderOutput) -> str | None:
 
 
 def rtm_builder_node(state: PipelineState) -> dict:
-    # 1. 안전한 상태 접근 헬퍼
-    def sget(key: str, default=None):
-        return state.get(key, default) if isinstance(state, dict) else getattr(state, key, default)
+    sget = make_sget(state)
 
     reqs = sget("prioritized_requirements", [])
     if not reqs:
@@ -108,7 +107,7 @@ def rtm_builder_node(state: PipelineState) -> dict:
     try:
         # 1차: 구조화 출력 호출 (KeyError 방어 적용)
         api_key = sget("api_key", "")
-        model = sget("model", "gemini-2.5-flash")
+        model = sget("model", DEFAULT_MODEL)
         
         result, thinking = call_structured_with_thinking(
             api_key=api_key,

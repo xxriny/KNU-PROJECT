@@ -8,11 +8,12 @@ source_dir이 주어지면 AST 스캔으로 REQ_ID ↔ 소스코드 함수 단�
 import json
 from typing import List
 from pydantic import BaseModel, Field
-from pipeline.state import PipelineState, sget as state_sget
+from pipeline.state import PipelineState, make_sget
 from pipeline.schemas import SemanticIndexerOutput, CodeFunctionLink
 from pipeline.utils import call_structured_with_thinking, call_structured
 from pipeline.ast_scanner import extract_functions, summarize_for_llm
 from pipeline.chroma_client import add_knowledge
+from version import DEFAULT_MODEL
 
 GRAPH_SYSTEM_PROMPT = """\
 당신은 시맨틱 지식 그래프(Semantic Knowledge Graph) 생성 전문가입니다.
@@ -78,10 +79,9 @@ CODE_MAPPING_SYSTEM_PROMPT = """\
 
 
 def semantic_indexer_node(state: PipelineState) -> dict:
-    def sget(key, default=None):
-        return state_sget(state, key, default)
+    sget = make_sget(state)
 
-    reqs = sget("rtm_matrix", [])
+    reqs = sget("requirements_rtm", [])
     if not reqs:
         return {
             "semantic_graph": {"nodes": [], "edges": []},
@@ -97,7 +97,7 @@ def semantic_indexer_node(state: PipelineState) -> dict:
     try:
         result, thinking = call_structured_with_thinking(
             api_key=sget("api_key", ""),
-            model=sget("model", "gemini-2.5-flash"),
+            model=sget("model", DEFAULT_MODEL),
             schema=SemanticIndexerOutput,
             system_prompt=GRAPH_SYSTEM_PROMPT,
             user_msg=user_msg,
@@ -141,7 +141,7 @@ def semantic_indexer_node(state: PipelineState) -> dict:
             try:
                 mapping_result = call_structured(
                     api_key=sget("api_key", ""),
-                    model=sget("model", "gemini-2.5-flash"),
+                    model=sget("model", DEFAULT_MODEL),
                     schema=_CodeMappingOutput,
                     system_prompt=CODE_MAPPING_SYSTEM_PROMPT,
                     user_msg=mapping_msg,

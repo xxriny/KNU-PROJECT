@@ -1,6 +1,6 @@
 import re
 
-from pipeline.state import PipelineState, sget as state_sget
+from pipeline.state import PipelineState, make_sget
 
 
 TOKEN_ALIASES = {
@@ -258,10 +258,9 @@ def _topo_sort_with_batches(items: list[dict]) -> tuple[list[str], list[list[str
 
 
 def sa_phase8_node(state: PipelineState) -> dict:
-    def sget(key, default=None):
-        return state_sget(state, key, default)
+    sget = make_sget(state)
 
-    rtm = sget("requirements_rtm", []) or sget("rtm_matrix", []) or []
+    rtm = sget("requirements_rtm", [])
     if not rtm:
         phase5 = sget("sa_phase5", {}) or {}
         rtm = phase5.get("mapped_requirements", []) or []

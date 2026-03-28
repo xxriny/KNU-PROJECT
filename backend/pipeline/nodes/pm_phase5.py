@@ -11,9 +11,10 @@ import json
 import os
 from datetime import datetime
 from connectors.result_logger import LOG_DIR, _safe_filename
-from pipeline.state import PipelineState, sget as state_sget
+from pipeline.state import PipelineState, make_sget
 from pipeline.schemas import ContextSpecOutput
 from pipeline.utils import call_structured_with_thinking
+from version import DEFAULT_MODEL
 
 SYSTEM_PROMPT = """\
 당신은 롤링 컨텍스트 명세서 작성 전문가입니다.
@@ -123,19 +124,18 @@ def _save_project_state_md(spec: dict, project_name: str, run_id: str = "") -> s
         with open(filepath, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
 
-        get_logger(sget("run_id", "")).info(f"[ContextSpec] PROJECT_STATE.md saved → {filepath}")
+        get_logger(run_id).info(f"[ContextSpec] PROJECT_STATE.md saved → {filepath}")
         return filepath
 
     except Exception as e:
-        get_logger(sget("run_id", "")).warning(f"[ContextSpec] Warning: PROJECT_STATE.md 저장 실패: {e}")
+        get_logger(run_id).warning(f"[ContextSpec] Warning: PROJECT_STATE.md 저장 실패: {e}")
         return ""
 
 
 def context_spec_node(state: PipelineState) -> dict:
-    def sget(key, default=None):
-        return state_sget(state, key, default)
+    sget = make_sget(state)
 
-    rtm = sget("rtm_matrix", [])
+    rtm = sget("requirements_rtm", [])
     sg = sget("semantic_graph", {})
     meta = sget("metadata", {})
     sa_phase1 = sget("sa_phase1", {}) or {}
@@ -168,7 +168,7 @@ def context_spec_node(state: PipelineState) -> dict:
     try:
         result, thinking = call_structured_with_thinking(
             api_key=sget("api_key", ""),
-            model=sget("model", "gemini-2.5-flash"),
+            model=sget("model", DEFAULT_MODEL),
             schema=ContextSpecOutput,
             system_prompt=SYSTEM_PROMPT,
             user_msg=user_msg,

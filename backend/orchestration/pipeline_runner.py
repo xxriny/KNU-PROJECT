@@ -6,18 +6,10 @@ _ws_run_* 시리즈 + 스트리밍 로직을 단일 모듈에서 관리.
 
 from __future__ import annotations
 
-import os
 import asyncio
-import traceback
 from datetime import datetime
 
 from fastapi import WebSocket
-
-# ── 경로 설정 (standalone 임포트 지원) ──────────────
-import sys as _sys
-_BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _BACKEND_ROOT not in _sys.path:
-    _sys.path.insert(0, _BACKEND_ROOT)
 
 from pipeline.graph import (
     get_analysis_pipeline,
@@ -34,6 +26,7 @@ from observability.logger import get_logger
 from observability.metrics import track_node
 from transport.connection_manager import manager
 from connectors.result_logger import save_result
+from version import DEFAULT_MODEL
 
 
 # ─── 입력 검증 ────────────────────────────────────────────
@@ -116,15 +109,15 @@ async def _run_pipeline_base(
                 active_log.warning("save_result_failed", error=str(log_err))
 
     except Exception as e:
-        traceback.print_exc()
+        get_logger().exception("pipeline execution failed")
         await manager.send_json(ws, {"type": "error", "data": {"message": str(e)}})
 
 
 # ─── WebSocket 파이프라인 실행 ────────────────────────────
 
 async def run_analysis(ws: WebSocket, payload: dict) -> None:
-    api_key = payload.get("api_key", "") or os.environ.get("GEMINI_API_KEY", "")
-    model = payload.get("model", "gemini-2.5-flash")
+    api_key = payload.get("api_key", "")
+    model = payload.get("model", DEFAULT_MODEL)
     idea = payload.get("idea", "")
     context = payload.get("context", "")
     action_type = normalize_action_type(payload.get("action_type", "CREATE"))
@@ -169,8 +162,8 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
 
 
 async def run_revision(ws: WebSocket, payload: dict) -> None:
-    api_key = payload.get("api_key", "") or os.environ.get("GEMINI_API_KEY", "")
-    model = payload.get("model", "gemini-2.5-flash")
+    api_key = payload.get("api_key", "")
+    model = payload.get("model", DEFAULT_MODEL)
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     log = get_logger(run_id)
 
@@ -194,8 +187,8 @@ async def run_revision(ws: WebSocket, payload: dict) -> None:
 
 
 async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
-    api_key = payload.get("api_key", "") or os.environ.get("GEMINI_API_KEY", "")
-    model = payload.get("model", "gemini-2.5-flash")
+    api_key = payload.get("api_key", "")
+    model = payload.get("model", DEFAULT_MODEL)
 
     await _run_pipeline_base(
         ws,

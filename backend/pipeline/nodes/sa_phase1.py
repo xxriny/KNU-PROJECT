@@ -4,8 +4,9 @@ from pathlib import Path
 from collections import defaultdict
 from pydantic import BaseModel, Field
 from pipeline.ast_scanner import extract_file_inventory, extract_functions
-from pipeline.state import PipelineState, sget as state_sget
+from pipeline.state import PipelineState, make_sget
 from pipeline.utils import call_structured
+from version import DEFAULT_MODEL
 
 class SAPhase1LLMOutput(BaseModel):
     thinking: str = Field(default="", description="분석 추론")
@@ -165,8 +166,7 @@ def _build_representative_function_sample(functions: list[dict], max_items: int 
     return sample[:max_items]
 
 def sa_phase1_node(state: PipelineState) -> dict:
-    def sget(key, default=None):
-        return state_sget(state, key, default)
+    sget = make_sget(state)
 
     action_type = (sget("action_type", "CREATE") or "CREATE").strip().upper()
     source_dir = (sget("source_dir", "") or "").strip()
@@ -189,7 +189,7 @@ def sa_phase1_node(state: PipelineState) -> dict:
         }
 
     api_key = sget("api_key", "")
-    model = sget("model", "gemini-2.5-flash")
+    model = sget("model", DEFAULT_MODEL)
 
     detected_frameworks, framework_evidence, coverage = _detect_framework_evidence(source_dir)
 
