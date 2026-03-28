@@ -9,24 +9,17 @@ from __future__ import annotations
 from datetime import datetime
 import os
 import re
-import sys
-import traceback
 from typing import Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel
-from version import APP_VERSION
-
-# ── 경로 설정 ────────────────────────────────────────────
-_BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _BACKEND_ROOT not in sys.path:
-    sys.path.insert(0, _BACKEND_ROOT)
+from version import APP_VERSION, DEFAULT_MODEL
+from observability.logger import get_logger
 
 from connectors.result_logger import delete_session_files, delete_exact_file
-from observability.logger import get_logger
 from pipeline.action_type import normalize_action_type
 from pipeline.graph import get_analysis_pipeline, get_revision_pipeline, get_idea_pipeline
-from result_shaping.result_shaper import shape_result
+from orchestration.executor import execute_pipeline
 from orchestration.pipeline_runner import (
     validate_analysis_inputs,
     build_reverse_context,
@@ -35,7 +28,7 @@ from orchestration.pipeline_runner import (
 
 # ── 상수 ─────────────────────────────────────────────────
 AVAILABLE_MODELS = [
-    "gemini-2.5-flash",
+    DEFAULT_MODEL,
     # "gemini-3.0-flash",  # not available yet
     # "gemini-3.0-pro",    # not available yet
 ]
@@ -70,7 +63,7 @@ class AnalysisRequest(BaseModel):
     idea: str
     context: str = ""
     api_key: str = ""
-    model: str = "gemini-2.5-flash"
+    model: str = DEFAULT_MODEL
     action_type: str = "CREATE"
     source_dir: str = ""
 
@@ -80,7 +73,7 @@ class RevisionRequest(BaseModel):
     previous_result: dict = {}
     chat_history: list = []
     api_key: str = ""
-    model: str = "gemini-2.5-flash"
+    model: str = DEFAULT_MODEL
 
 
 class IdeaChatRequest(BaseModel):
@@ -88,7 +81,7 @@ class IdeaChatRequest(BaseModel):
     chat_history: list = []
     previous_result: dict = {}
     api_key: str = ""
-    model: str = "gemini-2.5-flash"
+    model: str = DEFAULT_MODEL
 
 
 class ScanRequest(BaseModel):
@@ -122,7 +115,7 @@ async def get_config():
     has_key = bool(os.environ.get("GEMINI_API_KEY", "").strip())
     return {
         "has_api_key": has_key,
-        "default_model": "gemini-2.5-flash",
+        "default_model": DEFAULT_MODEL,
         "available_models": AVAILABLE_MODELS,
     }
 
@@ -166,10 +159,17 @@ async def read_file_endpoint(req: ReadFileRequest):
         return {"status": "error", "error": str(e)}
 
 
+def _to_response(result) -> dict:
+    """PipelineResult → REST JSON 응답 변환."""
+    if result.success:
+        return {"status": "ok", "data": result.data}
+    return {"status": "error", "error": result.error}
+
+
 @rest_router.post("/api/analyze")
 async def analyze(req: AnalysisRequest):
     try:
-        api_key = req.api_key or os.environ.get("GEMINI_API_KEY", "")
+        api_key = req.api_key
         action_type = normalize_action_type(req.action_type)
         validation_error = validate_analysis_inputs(action_type, req.idea, req.source_dir)
         if validation_error:
@@ -184,69 +184,62 @@ async def analyze(req: AnalysisRequest):
                     "error": "선택한 폴더에서 분석 가능한 함수/메서드를 찾지 못했습니다.",
                 }
 
-        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        pipeline = get_analysis_pipeline(action_type)
-        result = pipeline.invoke({
-            "api_key": api_key,
-            "model": req.model,
-            "input_idea": req.idea,
-            "project_context": context,
-            "source_dir": req.source_dir,
-            "action_type": action_type,
-            "run_id": run_id,
-        })
-        if result.get("error"):
-            return {"status": "error", "error": result["error"]}
-        shaped = shape_result(result)
-        shaped["pipeline_type"] = analysis_pipeline_type(action_type)
-        return {"status": "ok", "data": shaped}
+        return _to_response(execute_pipeline(
+            get_analysis_pipeline(action_type),
+            {
+                "api_key": api_key,
+                "model": req.model,
+                "input_idea": req.idea,
+                "project_context": context,
+                "source_dir": req.source_dir,
+                "action_type": action_type,
+                "run_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
+            },
+            analysis_pipeline_type(action_type),
+        ))
     except Exception as e:
-        traceback.print_exc()
+        get_logger().exception("analyze endpoint failed")
         return {"status": "error", "error": str(e)}
 
 
 @rest_router.post("/api/revise")
 async def revise(req: RevisionRequest):
     try:
-        api_key = req.api_key or os.environ.get("GEMINI_API_KEY", "")
-        pipeline = get_revision_pipeline()
-        result = pipeline.invoke({
-            "api_key": api_key,
-            "model": req.model,
-            "user_request": req.user_request,
-            "previous_result": req.previous_result,
-            "chat_history": req.chat_history,
-        })
-        if result.get("error"):
-            return {"status": "error", "error": result["error"]}
-        shaped = shape_result(result)
-        shaped["pipeline_type"] = "revision"
-        return {"status": "ok", "data": shaped}
+        api_key = req.api_key
+        return _to_response(execute_pipeline(
+            get_revision_pipeline(),
+            {
+                "api_key": api_key,
+                "model": req.model,
+                "user_request": req.user_request,
+                "previous_result": req.previous_result,
+                "chat_history": req.chat_history,
+            },
+            "revision",
+        ))
     except Exception as e:
-        traceback.print_exc()
+        get_logger().exception("revise endpoint failed")
         return {"status": "error", "error": str(e)}
 
 
 @rest_router.post("/api/idea-chat")
 async def idea_chat(req: IdeaChatRequest):
     try:
-        api_key = req.api_key or os.environ.get("GEMINI_API_KEY", "")
-        pipeline = get_idea_pipeline()
-        result = pipeline.invoke({
-            "api_key": api_key,
-            "model": req.model,
-            "user_request": req.message,
-            "chat_history": req.chat_history,
-            "previous_result": req.previous_result,
-        })
-        if result.get("error"):
-            return {"status": "error", "error": result["error"]}
-        shaped = shape_result(result)
-        shaped["pipeline_type"] = "idea_chat"
-        shaped["chat_reply"] = shaped.get("agent_reply", "")
-        return {"status": "ok", "data": shaped}
+        api_key = req.api_key
+        return _to_response(execute_pipeline(
+            get_idea_pipeline(),
+            {
+                "api_key": api_key,
+                "model": req.model,
+                "user_request": req.message,
+                "chat_history": req.chat_history,
+                "previous_result": req.previous_result,
+            },
+            "idea_chat",
+            result_mutator=lambda s: s.update({"chat_reply": s.get("agent_reply", "")}),
+        ))
     except Exception as e:
-        traceback.print_exc()
+        get_logger().exception("idea_chat endpoint failed")
         return {"status": "error", "error": str(e)}
 
 
@@ -271,8 +264,7 @@ async def delete_session(run_id: str, req: Optional[DeleteSessionRequest] = None
             "documents_deleted": docs_deleted,
         }
     except Exception as e:
-        get_logger(run_id).error(f"[Error] delete_session({run_id}): {e}")
-        traceback.print_exc()
+        get_logger().exception(f"delete_session failed for run_id={run_id}")
         return {
             "status": "error",
             "error": str(e),

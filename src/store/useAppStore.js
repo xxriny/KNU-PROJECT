@@ -11,141 +11,30 @@
  */
 
 import { create } from "zustand";
+import {
+  DEFAULT_VIEWPORT_TAB,
+  MODE_TO_ACTION_TYPE,
+  MODE_TO_PIPELINE_TYPE,
+  EMPTY_RESULT_FIELDS,
+  normalizeMode,
+  loadSessions,
+  persistSessions,
+  cloneViewportTab,
+  normalizeOutputTabId,
+  extractRunId,
+  inferPipelineTypeFromResult,
+  spreadResultData,
+} from "./storeHelpers";
+import { createWsSlice } from "./slices/wsSlice";
+import { createConfigSlice } from "./slices/configSlice";
+import { debounce } from "./debounce";
 
-const SESSION_STORAGE_KEY = "pm_sessions";
-const DEFAULT_VIEWPORT_TAB = { kind: "output", id: "home" };
-const MODE_TO_ACTION_TYPE = {
-  create: "CREATE",
-  update: "UPDATE",
-  reverse: "REVERSE_ENGINEER",
-};
+const useAppStore = create((set, get) => {
+  const debouncedSave = debounce(() => get().saveCurrentSession(), 500);
 
-const MODE_TO_PIPELINE_TYPE = {
-  create: "analysis_create",
-  update: "analysis_update",
-  reverse: "analysis_reverse",
-};
-
-function normalizeMode(mode) {
-  return MODE_TO_ACTION_TYPE[mode] ? mode : "create";
-}
-
-function loadSessions() {
-  try {
-    return JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-function persistSessions(sessions) {
-  try {
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessions));
-  } catch {
-    // Non-fatal localStorage failure.
-  }
-}
-
-function cloneViewportTab(tab) {
-  return tab ? { kind: tab.kind, id: tab.id } : { ...DEFAULT_VIEWPORT_TAB };
-}
-
-function normalizeOutputTabId(tabId) {
-  if (tabId === "sa_overview" || tabId === "sa_feasibility") {
-    return "overview";
-  }
-  if (tabId === "topology") {
-    return "context";
-  }
-  return tabId;
-}
-
-function extractRunId(value) {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const match = value.match(/(\d{8}_\d{6})/);
-  return match ? match[1] : null;
-}
-
-function inferPipelineTypeFromResult(data) {
-  const hinted = data?.pipeline_type;
-  if (typeof hinted === "string" && hinted) {
-    return hinted;
-  }
-
-  const actionType = (data?.metadata?.action_type || "").toUpperCase();
-  if (actionType === "REVERSE_ENGINEER") {
-    return "analysis_reverse";
-  }
-  if (actionType === "UPDATE") {
-    return "analysis_update";
-  }
-  return "analysis_create";
-}
-
-const useAppStore = create((set, get) => ({
-  // ═══════════════════════════════════════
-  //  백엔드 연결 상태
-  // ═══════════════════════════════════════
-  backendPort: null,
-  wsConnection: null,
-  wsStatus: "disconnected",
-
-  setBackendPort: (port) => set({ backendPort: port }),
-  setWsStatus: (status) => set({ wsStatus: status }),
-
-  connectWebSocket: (port) => {
-    const currentWs = get().wsConnection;
-    if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-      return;
-    }
-
-    set({ wsStatus: "connecting" });
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/pipeline`);
-
-    ws.onopen = () => {
-      console.log("[WS] Connected to backend");
-      set({ wsConnection: ws, wsStatus: "connected" });
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        get()._handleWsMessage(msg);
-      } catch (err) {
-        console.error("[WS] Parse error:", err);
-      }
-    };
-
-    ws.onclose = () => {
-      console.log("[WS] Disconnected");
-      set({ wsConnection: null, wsStatus: "disconnected" });
-      setTimeout(() => {
-        const { backendPort, wsStatus } = get();
-        if (backendPort && wsStatus === "disconnected") {
-          get().connectWebSocket(backendPort);
-        }
-      }, 3000);
-    };
-
-    ws.onerror = (err) => {
-      console.error("[WS] Error:", err);
-      set({ wsStatus: "error" });
-    };
-
-    set({ wsConnection: ws });
-  },
-
-  sendWsMessage: (type, payload) => {
-    const ws = get().wsConnection;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type, payload }));
-      return;
-    }
-    console.warn("[WS] Not connected, cannot send message");
-  },
+  return {
+  ...createWsSlice(set, get),
+  ...createConfigSlice(set, get),
 
   _handleWsMessage: (msg) => {
     const { type, node, data } = msg;
@@ -158,7 +47,7 @@ const useAppStore = create((set, get) => ({
             [node]: data.status,
           },
         }));
-        setTimeout(() => get().saveCurrentSession(), 0);
+        debouncedSave();
         break;
 
       case "thinking":
@@ -168,7 +57,7 @@ const useAppStore = create((set, get) => ({
             { node, text: data.text, timestamp: Date.now() },
           ],
         }));
-        setTimeout(() => get().saveCurrentSession(), 0);
+        debouncedSave();
         break;
 
       case "result":
@@ -180,7 +69,7 @@ const useAppStore = create((set, get) => ({
           pipelineStatus: "error",
           pipelineError: data.message,
         });
-        setTimeout(() => get().saveCurrentSession(), 0);
+        debouncedSave();
         break;
 
       case "pong":
@@ -213,29 +102,14 @@ const useAppStore = create((set, get) => ({
       pipelineNodes: {},
       thinkingLog: [],
       pipelineType: MODE_TO_PIPELINE_TYPE[normalizedMode] || "analysis_create",
-      resultData: null,
-      requirements_rtm: [],
-      semantic_graph: null,
-      context_spec: null,
-      sa_reverse_context: null,
-      sa_output: null,
-      sa_artifacts: null,
-      sa_phase1: null,
-      sa_phase2: null,
-      sa_phase3: null,
-      sa_phase4: null,
-      sa_phase5: null,
-      sa_phase6: null,
-      sa_phase7: null,
-      sa_phase8: null,
-      metadata: null,
+      ...EMPTY_RESULT_FIELDS,
       chatHistory: [],
       chatInput: "",
       selectedMode: normalizedMode,
       activeViewportTab: { kind: "output", id: "progress" },
       lastOutputTab: "progress",
     });
-    setTimeout(() => get().saveCurrentSession(), 0);
+    debouncedSave();
     get().sendWsMessage("analyze", {
       idea,
       context,
@@ -257,7 +131,7 @@ const useAppStore = create((set, get) => ({
       activeViewportTab: { kind: "output", id: "progress" },
       lastOutputTab: "progress",
     });
-    setTimeout(() => get().saveCurrentSession(), 0);
+    debouncedSave();
     get().sendWsMessage("revise", {
       user_request: userRequest,
       previous_result: resultData || {},
@@ -299,7 +173,6 @@ const useAppStore = create((set, get) => ({
   sa_phase8: null,
   metadata: null,
   selectedMode: "create",
-  availableModels: ["gemini-2.5-flash"],
 
   _processResult: (data, node = "complete") => {
     if (node === "idea_chat") {
@@ -308,7 +181,7 @@ const useAppStore = create((set, get) => ({
         set((state) => ({
           chatHistory: [...state.chatHistory, { role: "assistant", content: reply }],
         }));
-        setTimeout(() => get().saveCurrentSession(), 0);
+        debouncedSave();
       }
       return;
     }
@@ -316,27 +189,12 @@ const useAppStore = create((set, get) => ({
     set({
       pipelineStatus: "done",
       pipelineType: inferPipelineTypeFromResult(data),
-      resultData: data,
-      requirements_rtm: data.requirements_rtm || [],
-      semantic_graph: data.semantic_graph || null,
-      context_spec: data.context_spec || null,
-      sa_reverse_context: data.sa_reverse_context || null,
-      sa_output: data.sa_output || null,
-      sa_artifacts: data.sa_artifacts || null,
-      sa_phase1: data.sa_phase1 || null,
-      sa_phase2: data.sa_phase2 || null,
-      sa_phase3: data.sa_phase3 || null,
-      sa_phase4: data.sa_phase4 || null,
-      sa_phase5: data.sa_phase5 || null,
-      sa_phase6: data.sa_phase6 || null,
-      sa_phase7: data.sa_phase7 || null,
-      sa_phase8: data.sa_phase8 || null,
-      metadata: data.metadata || null,
+      ...spreadResultData(data),
       chatHistory: data.chat_history || get().chatHistory,
       activeViewportTab: { kind: "output", id: "overview" },
       lastOutputTab: "overview",
     });
-    setTimeout(() => get().saveCurrentSession(), 0);
+    debouncedSave();
   },
 
   // ═══════════════════════════════════════
@@ -365,7 +223,7 @@ const useAppStore = create((set, get) => ({
       selectedFile: file,
       activeViewportTab: { kind: "code", id: file.id },
     });
-    setTimeout(() => get().saveCurrentSession(), 0);
+    debouncedSave();
   },
 
   updateOpenFileContent: (fileId, content) => {
@@ -401,7 +259,7 @@ const useAppStore = create((set, get) => ({
       selectedFile: filtered.find((file) => file.id === nextViewport.id) || null,
       activeViewportTab: nextViewport,
     });
-    setTimeout(() => get().saveCurrentSession(), 0);
+    debouncedSave();
   },
 
   // ═══════════════════════════════════════
@@ -414,14 +272,14 @@ const useAppStore = create((set, get) => ({
     set((state) => ({
       chatHistory: [...state.chatHistory, { role, content }],
     }));
-    setTimeout(() => get().saveCurrentSession(), 0);
+    debouncedSave();
   },
 
   setChatInput: (text) => set({ chatInput: text }),
 
   clearChat: () => {
     set({ chatHistory: [], chatInput: "" });
-    setTimeout(() => get().saveCurrentSession(), 0);
+    debouncedSave();
   },
 
   // ═══════════════════════════════════════
@@ -448,7 +306,7 @@ const useAppStore = create((set, get) => ({
       const data = await res.json();
       if (data.status === "ok") {
         set({ fileTree: data.tree || get().fileTree, projectFolder: data.root || folderPath });
-        setTimeout(() => get().saveCurrentSession(), 0);
+        debouncedSave();
         return true;
       }
       console.error("[ProjectAccess] Error:", data.error);
@@ -474,7 +332,7 @@ const useAppStore = create((set, get) => ({
       const data = await res.json();
       if (data.status === "ok") {
         set({ fileTree: data.tree || [], projectFolder: data.root || folderPath });
-        setTimeout(() => get().saveCurrentSession(), 0);
+        debouncedSave();
       } else {
         console.error("[FolderScan] Error:", data.error);
       }
@@ -544,41 +402,6 @@ const useAppStore = create((set, get) => ({
       css: "css",
     };
     return map[ext] || "plaintext";
-  },
-
-  // ═══════════════════════════════════════
-  //  설정
-  // ═══════════════════════════════════════
-  apiKey: "",
-  model: "gemini-2.5-flash",
-  backendHasKey: false,
-
-  setApiKey: (key) => set({ apiKey: key }),
-  setModel: (model) => set({ model }),
-
-  fetchConfig: async (port) => {
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/config`);
-      if (!res.ok) return;
-      const cfg = await res.json();
-      const nextAvailableModels = Array.isArray(cfg.available_models) && cfg.available_models.length > 0
-        ? cfg.available_models
-        : ["gemini-2.5-flash"];
-      const currentModel = get().model;
-      if (cfg.has_api_key) {
-        set({ backendHasKey: true });
-      }
-      set({
-        availableModels: nextAvailableModels,
-        model: nextAvailableModels.includes(currentModel)
-          ? currentModel
-          : (cfg.default_model && nextAvailableModels.includes(cfg.default_model)
-              ? cfg.default_model
-              : nextAvailableModels[0]),
-      });
-    } catch (e) {
-      console.warn("[Config] Failed to fetch /api/config:", e);
-    }
   },
 
   // ═══════════════════════════════════════
@@ -673,23 +496,8 @@ const useAppStore = create((set, get) => ({
       lastOutputTab: session.activeViewportTab?.kind === "output"
         ? normalizeOutputTabId(session.activeViewportTab.id)
         : (session.resultData ? "overview" : "home"),
-      resultData: session.resultData || null,
+      ...spreadResultData(session.resultData),
       chatHistory: session.chatHistory || [],
-      requirements_rtm: session.resultData?.requirements_rtm || [],
-      semantic_graph: session.resultData?.semantic_graph || null,
-      context_spec: session.resultData?.context_spec || null,
-      sa_reverse_context: session.resultData?.sa_reverse_context || null,
-      sa_output: session.resultData?.sa_output || null,
-      sa_artifacts: session.resultData?.sa_artifacts || null,
-      sa_phase1: session.resultData?.sa_phase1 || null,
-      sa_phase2: session.resultData?.sa_phase2 || null,
-      sa_phase3: session.resultData?.sa_phase3 || null,
-      sa_phase4: session.resultData?.sa_phase4 || null,
-      sa_phase5: session.resultData?.sa_phase5 || null,
-      sa_phase6: session.resultData?.sa_phase6 || null,
-      sa_phase7: session.resultData?.sa_phase7 || null,
-      sa_phase8: session.resultData?.sa_phase8 || null,
-      metadata: session.resultData?.metadata || null,
       pipelineStatus: session.resultData ? "done" : "idle",
       pipelineType: session.pipelineType || inferPipelineTypeFromResult(session.resultData || {}),
       pipelineError: null,
@@ -756,22 +564,7 @@ const useAppStore = create((set, get) => ({
     pipelineError: null,
     pipelineNodes: {},
     thinkingLog: [],
-    resultData: null,
-    requirements_rtm: [],
-    semantic_graph: null,
-    context_spec: null,
-    sa_reverse_context: null,
-    sa_output: null,
-    sa_artifacts: null,
-    sa_phase1: null,
-    sa_phase2: null,
-    sa_phase3: null,
-    sa_phase4: null,
-    sa_phase5: null,
-    sa_phase6: null,
-    sa_phase7: null,
-    sa_phase8: null,
-    metadata: null,
+    ...EMPTY_RESULT_FIELDS,
     activeViewportTab: { kind: "output", id: "home" },
     lastOutputTab: "home",
     chatHistory: [],
@@ -781,7 +574,7 @@ const useAppStore = create((set, get) => ({
     fileTree: state.fileTree,
     projectFolder: state.projectFolder,
   })),
-}));
+};});
 
 export default useAppStore;
 

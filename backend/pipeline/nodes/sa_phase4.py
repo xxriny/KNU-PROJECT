@@ -3,8 +3,9 @@ import urllib.error
 from typing import List
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 from pydantic import BaseModel, Field
-from pipeline.state import PipelineState, sget as state_sget
+from pipeline.state import PipelineState, make_sget
 from pipeline.utils import call_structured
+from version import DEFAULT_MODEL
 
 class PackageExtractionOutput(BaseModel):
     thinking: str = Field(default="", description="패키지 추출 추론 과정")
@@ -64,14 +65,13 @@ def _verify_pypi_packages_parallel(packages: List[str]) -> tuple[list[str], list
     return sorted(set(verified)), sorted(set(rejected))
 
 def sa_phase4_node(state: PipelineState) -> dict:
-    def sget(key, default=None):
-        return state_sget(state, key, default)
+    sget = make_sget(state)
 
     context_spec = sget("context_spec", {}) or {}
     tech_stack = context_spec.get("tech_stack_suggestions", []) or []
     sa_phase1 = sget("sa_phase1", {}) or {}
     api_key = sget("api_key", "")
-    model = sget("model", "gemini-2.5-flash")
+    model = sget("model", DEFAULT_MODEL)
     action_type = (sget("action_type", "") or "CREATE").strip().upper()
 
     if not tech_stack:

@@ -6,9 +6,10 @@ Pydantic 구조화 출력 강제 + MoSCoW 우선순위 + MECE 검증.
 
 import json
 from copy import deepcopy
-from pipeline.state import PipelineState, sget as state_sget
+from pipeline.state import PipelineState, make_sget
 from pipeline.schemas import PrioritizerOutput
 from pipeline.utils import call_structured_with_thinking
+from version import DEFAULT_MODEL
 
 SYSTEM_PROMPT = """\
 당신은 요구사항 우선순위 산정(Prioritizer) 전문가입니다.
@@ -28,9 +29,7 @@ SYSTEM_PROMPT = """\
 
 
 def prioritizer_node(state: PipelineState) -> dict:
-    # 안전한 상태 접근 헬퍼 (TypedDict / 일반 dict 모두 호환)
-    def sget(key, default=None):
-        return state_sget(state, key, default)
+    sget = make_sget(state)
 
     reqs = sget("raw_requirements", [])
     if not reqs:
@@ -48,7 +47,7 @@ def prioritizer_node(state: PipelineState) -> dict:
     try:
         result, thinking = call_structured_with_thinking(
             api_key=sget("api_key", ""),
-            model=sget("model", "gemini-2.5-flash"),
+            model=sget("model", DEFAULT_MODEL),
             schema=PrioritizerOutput,
             system_prompt=SYSTEM_PROMPT,
             user_msg=user_msg,

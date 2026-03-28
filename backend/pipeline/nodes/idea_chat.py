@@ -5,9 +5,10 @@ PM Agent Pipeline — 아이디어 채팅 노드 v8.0
 """
 
 import json
-import traceback
-from pipeline.state import PipelineState
-from pipeline.utils import get_llm
+from pipeline.state import PipelineState, make_sget
+from pipeline.utils import get_llm, parse_json_safe
+from observability.logger import get_logger
+from version import DEFAULT_MODEL
 
 
 SYSTEM_PROMPT = """당신은 PM(프로젝트 매니저) AI 어시스턴트입니다.
@@ -47,11 +48,12 @@ SYSTEM_PROMPT = """당신은 PM(프로젝트 매니저) AI 어시스턴트입니
 def idea_chat_node(state: PipelineState) -> dict:
     """아이디어 채팅 노드 — 사용자와 대화하며 아이디어 구체화"""
     try:
-        api_key = state.get("api_key", "")
-        model = state.get("model", "gemini-2.5-flash")
-        user_request = state.get("user_request", "")
-        history = state.get("chat_history", [])
-        previous_result = state.get("previous_result", {})
+        sget = make_sget(state)
+        api_key = sget("api_key", "")
+        model = sget("model", DEFAULT_MODEL)
+        user_request = sget("user_request", "")
+        history = sget("chat_history", [])
+        previous_result = sget("previous_result", {})
 
         if not user_request:
             return {"error": "메시지가 비어있습니다.", "current_step": "idea_chat"}
@@ -87,8 +89,7 @@ def idea_chat_node(state: PipelineState) -> dict:
         response = llm.invoke(messages)
         raw = response.content if hasattr(response, "content") else str(response)
 
-        # JSON 파싱
-        result = _extract_json(raw)
+        result = parse_json_safe(raw)
 
         if not result:
             # JSON 파싱 실패 시 텍스트 응답으로 처리
@@ -118,37 +119,9 @@ def idea_chat_node(state: PipelineState) -> dict:
         }
 
     except Exception as e:
-        traceback.print_exc()
+        get_logger().exception("idea_chat_node failed")
         return {
             "error": str(e),
             "thinking_log": [{"node": "idea_chat", "thinking": f"오류: {e}"}],
             "current_step": "idea_chat",
         }
-
-
-def _extract_json(text: str) -> dict | None:
-    """LLM 응답에서 JSON 블록 추출"""
-    import re
-
-    m = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
-    if m:
-        try:
-            return json.loads(m.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-
-    brace_start = text.find("{")
-    if brace_start >= 0:
-        depth = 0
-        for i in range(brace_start, len(text)):
-            if text[i] == "{":
-                depth += 1
-            elif text[i] == "}":
-                depth -= 1
-                if depth == 0:
-                    try:
-                        return json.loads(text[brace_start:i+1])
-                    except json.JSONDecodeError:
-                        break
-
-    return None

@@ -9,13 +9,22 @@ PM Agent Pipeline — 유틸리티 v6.3 (FastAPI 구조 적용)
 
 import json, re, os, threading
 from collections import OrderedDict
-from typing import Any, Type, TypeVar
+from dataclasses import dataclass
+from typing import Any, Generic, Type, TypeVar
 from pydantic import BaseModel, ValidationError
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from version import DEFAULT_MODEL, DEFAULT_TEMPERATURE, MAX_LLM_RETRIES
 
 T = TypeVar("T", bound=BaseModel)
 _CACHE_LIMIT = 32
+
+
+@dataclass
+class LLMResult(Generic[T]):
+    parsed: T
+    usage: dict
+    thinking: str
 
 
 def _make_llm_cache_key(api_key: str, model: str, temperature: float) -> str:
@@ -61,7 +70,7 @@ _llm_cache_lock = threading.Lock()
 _raw_cache_lock = threading.Lock()
 
 
-def get_llm(api_key: str, model: str = "gemini-2.5-flash", temperature: float = 0.3) -> ChatGoogleGenerativeAI:
+def get_llm(api_key: str, model: str = DEFAULT_MODEL, temperature: float = DEFAULT_TEMPERATURE) -> ChatGoogleGenerativeAI:
     """ChatGoogleGenerativeAI 싱글턴 (api_key + model 조합으로 캐싱)"""
     try:
         effective_key = _get_effective_key(api_key)
@@ -86,59 +95,91 @@ def get_llm(api_key: str, model: str = "gemini-2.5-flash", temperature: float = 
         raise RuntimeError(f"LLM 초기화 오류: {str(e)}")
 
 
+def _retry_loop(structured_llm, messages: list, max_retries: int, label: str):
+    """공통 Self-Correction 재시도 루프. 성공 시 raw invoke 결과 반환."""
+    messages = list(messages)
+    last_error = None
+    for attempt in range(max_retries):
+        result = None
+        try:
+            result = structured_llm.invoke(messages)
+            return result
+        except ValidationError as e:
+            last_error = e
+            error_msg = str(e)
+        except Exception as e:
+            last_error = e
+            error_msg = str(e)
+
+        bad_output = str(result) if result is not None else "Unknown output format or invocation error"
+        messages.append(AIMessage(content=bad_output))
+        messages.append(HumanMessage(content=(
+            f"Your previous response caused a validation error:\n"
+            f"```\n{error_msg}\n```\n\n"
+            f"Please fix the output to strictly match the required JSON schema. "
+            f"All required fields must be present and no extra fields are allowed.\n\n"
+            f"Retry attempt {attempt + 2}/{max_retries}. "
+            f"Return ONLY the corrected JSON output."
+        )))
+
+    raise RuntimeError(
+        f"{label} failed after {max_retries} attempts. Last error: {last_error}"
+    )
+
+
+_ZERO_USAGE: dict = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+
+
 def call_structured(
     api_key: str,
     model: str,
     schema: Type[T],
     system_prompt: str,
     user_msg: str,
-    max_retries: int = 3,
-    temperature: float = 0.3,
-) -> T:
-    """
-    Pydantic 스키마 강제 구조화 출력 + Self-Correction 재시도 루프.
-
-    1차: with_structured_output(schema)로 LLM API에 JSON 스키마 주입
-    실패 시: 에러 메시지를 LLM에게 피드백하여 자가 수정 (최대 max_retries회)
-
-    Returns: Pydantic 모델 인스턴스 (파싱 보장)
-    """
+    max_retries: int = MAX_LLM_RETRIES,
+    temperature: float = DEFAULT_TEMPERATURE,
+) -> LLMResult[T]:
+    """Unified structured output: parsed result, usage metadata, and thinking."""
     llm = get_llm(api_key, model, temperature)
-    structured_llm = llm.with_structured_output(schema)
+    messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_msg)]
 
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=user_msg),
-    ]
+    try:
+        structured_llm = llm.with_structured_output(schema, include_raw=True)
+    except TypeError:
+        structured_llm = llm.with_structured_output(schema)
+        parsed = _retry_loop(structured_llm, messages, max_retries, "Structured output")
+        return LLMResult(
+            parsed=parsed,
+            usage={**_ZERO_USAGE},
+            thinking=getattr(parsed, "thinking", ""),
+        )
 
-    last_error = None
+    raw_result = _retry_loop(structured_llm, messages, max_retries, "Structured output")
 
-    for attempt in range(max_retries):
-        result = None
-        try:
-            result = structured_llm.invoke(messages)
-            return result
+    if isinstance(raw_result, dict):
+        parsed = raw_result.get("parsed")
+        raw = raw_result.get("raw")
+        parsing_error = raw_result.get("parsing_error")
+        if parsing_error:
+            raise RuntimeError(f"Structured parsing error: {parsing_error}")
+    else:
+        parsed = raw_result
+        raw = None
 
-        except (ValidationError, Exception) as e:
-            last_error = e
-            error_msg = str(e)
+    if parsed is None:
+        raise RuntimeError("Structured output parsed result is None")
 
-            bad_output = str(result) if result is not None else "Unknown output format or invocation error"
-            messages.append(AIMessage(content=bad_output))
+    usage_meta = getattr(raw, "usage_metadata", None) or {}
+    usage = {
+        "input_tokens": usage_meta.get("input_tokens", usage_meta.get("prompt_token_count", 0)) or 0,
+        "output_tokens": usage_meta.get("output_tokens", usage_meta.get("candidates_token_count", 0)) or 0,
+        "total_tokens": usage_meta.get("total_tokens", usage_meta.get("total_token_count", 0)) or 0,
+    }
 
-            correction_msg = (
-                f"Your previous response caused a validation error:\n"
-                f"```\n{error_msg}\n```\n\n"
-                f"Please fix the output to strictly match the required JSON schema. "
-                f"All required fields must be present and no extra fields are allowed.\n\n"
-                f"Retry attempt {attempt + 2}/{max_retries}. "
-                f"Return ONLY the corrected JSON output."
-            )
-            messages.append(HumanMessage(content=correction_msg))
-
-    raise RuntimeError(
-        f"Structured output failed after {max_retries} attempts. "
-        f"Last error: {last_error}"
+    return LLMResult(
+        parsed=parsed,
+        usage=usage,
+        thinking=getattr(parsed, "thinking", ""),
     )
 
 
@@ -148,88 +189,16 @@ def call_structured_with_usage(
     schema: Type[T],
     system_prompt: str,
     user_msg: str,
-    max_retries: int = 3,
-    temperature: float = 0.3,
+    max_retries: int = MAX_LLM_RETRIES,
+    temperature: float = DEFAULT_TEMPERATURE,
 ) -> tuple[T, dict]:
-    """
-    구조화 출력 + usage 메타데이터 추출.
-
-    Returns:
-        (parsed_model, usage)
-        usage 예시: {"input_tokens": 123, "output_tokens": 45, "total_tokens": 168}
-    """
-    llm = get_llm(api_key, model, temperature)
-
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=user_msg),
-    ]
-
-    last_error = None
-
-    # include_raw가 지원되면 usage_metadata를 추출하고,
-    # 지원되지 않는 환경에서는 call_structured로 안전 폴백한다.
-    try:
-        structured_llm = llm.with_structured_output(schema, include_raw=True)
-    except TypeError:
-        parsed = call_structured(
-            api_key=api_key,
-            model=model,
-            schema=schema,
-            system_prompt=system_prompt,
-            user_msg=user_msg,
-            max_retries=max_retries,
-            temperature=temperature,
-        )
-        return parsed, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-
-    for attempt in range(max_retries):
-        result = None
-        try:
-            result = structured_llm.invoke(messages)
-
-            if isinstance(result, dict):
-                parsed = result.get("parsed")
-                raw = result.get("raw")
-                parsing_error = result.get("parsing_error")
-                if parsing_error:
-                    raise RuntimeError(f"Structured parsing error: {parsing_error}")
-            else:
-                # 일부 구현은 parsed 객체만 반환할 수 있다.
-                parsed = result
-                raw = None
-
-            if parsed is None:
-                raise RuntimeError("Structured output parsed result is None")
-
-            usage_meta = getattr(raw, "usage_metadata", None) or {}
-            usage = {
-                "input_tokens": usage_meta.get("input_tokens", usage_meta.get("prompt_token_count", 0)) or 0,
-                "output_tokens": usage_meta.get("output_tokens", usage_meta.get("candidates_token_count", 0)) or 0,
-                "total_tokens": usage_meta.get("total_tokens", usage_meta.get("total_token_count", 0)) or 0,
-            }
-            return parsed, usage
-
-        except (ValidationError, Exception) as e:
-            last_error = e
-            error_msg = str(e)
-
-            bad_output = str(result) if result is not None else "Unknown output format or invocation error"
-            messages.append(AIMessage(content=bad_output))
-
-            correction_msg = (
-                f"Your previous response caused a validation error:\n"
-                f"```\n{error_msg}\n```\n\n"
-                f"Please fix the output to strictly match the required JSON schema. "
-                f"All required fields must be present and no extra fields are allowed.\n\n"
-                f"Retry attempt {attempt + 2}/{max_retries}. Return ONLY the corrected JSON output."
-            )
-            messages.append(HumanMessage(content=correction_msg))
-
-    raise RuntimeError(
-        f"Structured output with usage failed after {max_retries} attempts. "
-        f"Last error: {last_error}"
+    """Backward-compat wrapper: returns (parsed, usage)."""
+    result = call_structured(
+        api_key=api_key, model=model, schema=schema,
+        system_prompt=system_prompt, user_msg=user_msg,
+        max_retries=max_retries, temperature=temperature,
     )
+    return result.parsed, result.usage
 
 
 def call_structured_with_thinking(
@@ -238,21 +207,16 @@ def call_structured_with_thinking(
     schema: Type[T],
     system_prompt: str,
     user_msg: str,
-    max_retries: int = 3,
-    temperature: float = 0.3,
+    max_retries: int = MAX_LLM_RETRIES,
+    temperature: float = DEFAULT_TEMPERATURE,
 ) -> tuple[T, str]:
-    """구조화 출력 + thinking 필드 추출."""
-    result, _usage = call_structured_with_usage(
-        api_key=api_key,
-        model=model,
-        schema=schema,
-        system_prompt=system_prompt,
-        user_msg=user_msg,
-        max_retries=max_retries,
-        temperature=temperature,
+    """Backward-compat wrapper: returns (parsed, thinking)."""
+    result = call_structured(
+        api_key=api_key, model=model, schema=schema,
+        system_prompt=system_prompt, user_msg=user_msg,
+        max_retries=max_retries, temperature=temperature,
     )
-    thinking = getattr(result, "thinking", "")
-    return result, thinking
+    return result.parsed, result.thinking
 
 
 # ── 하위 호환: 기존 call_gemini (비구조화 호출) ────────
@@ -275,8 +239,8 @@ def _get_raw_client(api_key: str):
         raise RuntimeError(f"Gemini 클라이언트 초기화 오류: {str(e)}")
 
 
-def call_gemini(api_key: str, model: str = "gemini-2.5-flash", system: str = "",
-                user_msg: str = "", temperature: float = 0.3, max_tokens: int = 8192) -> str:
+def call_gemini(api_key: str, model: str = DEFAULT_MODEL, system: str = "",
+                user_msg: str = "", temperature: float = DEFAULT_TEMPERATURE, max_tokens: int = 8192) -> str:
     """비구조화 Gemini 호출"""
     try:
         client = _get_raw_client(api_key)
@@ -321,3 +285,20 @@ def parse_json_safe(text: str):
 def extract_thinking(text: str) -> str:
     m = re.search(r"<thinking>(.*?)</thinking>", text, re.DOTALL)
     return m.group(1).strip() if m else ""
+
+
+# ── 직렬화 유틸 ──────────────────────────────────
+
+def to_serializable(obj: Any) -> Any:
+    """Pydantic 모델, dict, list를 재귀적으로 JSON 직렬화 가능하게 변환."""
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    if hasattr(obj, "dict"):
+        return obj.dict()
+    if isinstance(obj, dict):
+        return {k: to_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [to_serializable(item) for item in obj]
+    if isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    return str(obj)

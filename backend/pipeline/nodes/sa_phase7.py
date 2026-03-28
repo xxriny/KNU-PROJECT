@@ -1,8 +1,9 @@
 import json
 from typing import List
 from pydantic import BaseModel, Field
-from pipeline.state import PipelineState, sget as state_sget
+from pipeline.state import PipelineState, make_sget
 from pipeline.utils import call_structured_with_thinking
+from version import DEFAULT_MODEL
 
 class InterfaceContract(BaseModel):
     contract_id: str = Field(description="인터페이스 ID (예: IF-REQ-001)")
@@ -27,8 +28,7 @@ INTERFACE_SYSTEM_PROMPT = """\
 3. guardrails는 일반적인 소프트웨어 원칙이 아닌, 제공된 요구사항과 보안 경계에 특화된 구체적인 제약 사항(예: 데이터 흐름 차단 규칙, 특정 레이어 간 통신 제한 등)을 한국어로 작성하세요."""
 
 def sa_phase7_node(state: PipelineState) -> dict:
-    def sget(key, default=None):
-        return state_sget(state, key, default)
+    sget = make_sget(state)
 
     phase5 = sget("sa_phase5", {}) or {}
     phase6 = sget("sa_phase6", {}) or {}
@@ -38,7 +38,7 @@ def sa_phase7_node(state: PipelineState) -> dict:
     trust_boundaries = phase6.get("trust_boundaries", []) or []
     
     api_key = sget("api_key", "")
-    model = sget("model", "gemini-2.5-flash")
+    model = sget("model", DEFAULT_MODEL)
 
     if not mapped_reqs:
         return {

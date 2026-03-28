@@ -46,9 +46,9 @@ ALLOWED_ORIGIN_REGEX = r"^(null|https?://(127\.0\.0\.1|localhost)(:\d+)?)$"
 # ── App Lifespan ─────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    get_logger().info(f"[Backend] PM Agent Pipeline v2.2 starting on PID {os.getpid()}...")
+    get_logger().info("backend_starting", pid=os.getpid(), version=APP_VERSION)
     yield
-    get_logger().info(f"[Backend] Shutting down...")
+    get_logger().info("backend_shutdown")
 
 
 # ── FastAPI 앱 생성 ──────────────────────────────────────
@@ -86,7 +86,7 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Server host")
     args = parser.parse_args()
 
-    get_logger().info(f"[Backend] Starting on {args.host}:{args.port}")
+    get_logger().info("backend_entry", host=args.host, port=args.port)
     uvicorn.run(
         app,
         host=args.host,

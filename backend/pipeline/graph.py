@@ -34,6 +34,10 @@ class _PipelineRegistry:
             cls._cache[key] = builder_fn()
         return cls._cache[key]
 
+    @classmethod
+    def clear(cls):
+        cls._cache.clear()
+
 """
 파이프라인 종료 정책 (Termination Policy)
 
@@ -107,87 +111,58 @@ def _add_all_analysis_nodes(workflow: StateGraph):
     workflow.add_node("sa_reverse_context", sa_reverse_context_node)
 
 
-def _add_sa_chain(workflow: StateGraph, phases: list[str]) -> None:
-    for src, dst in zip(phases[:-1], phases[1:]):
+def _wire_linear_pipeline(workflow: StateGraph, chain: tuple[str, ...]):
+    """순차 파이프라인 배선: START→chain[0]→…→chain[-1]→END (조건부 에러 처리 포함)."""
+    workflow.add_edge(START, chain[0])
+    for src, dst in zip(chain[:-1], chain[1:]):
         workflow.add_conditional_edges(src, _check_status, {"continue": dst, "error": END})
+    workflow.add_edge(chain[-1], END)
 
 
-# ---------------------------------------------------------
-# 1. CREATE 모드 파이프라인
-# 흐름: PM(1~5) -> SA(3~8)
-# ---------------------------------------------------------
+# ── 노드 실행 시퀀스 (Single Source of Truth) ──────────────
+# 그래프 배선과 라우팅 맵이 모두 이 튜플에서 자동 도출된다.
+
+_CREATE_CHAIN: tuple[str, ...] = (
+    "atomizer", "prioritizer", "rtm_builder", "semantic_indexer", "context_spec",
+    "sa_phase3", "sa_phase4", "sa_phase5", "sa_phase6", "sa_phase7", "sa_phase8",
+    "sa_reverse_context",
+)
+
+_UPDATE_CHAIN: tuple[str, ...] = (
+    "sa_phase1", "atomizer", "prioritizer", "rtm_builder", "semantic_indexer", "context_spec",
+    "sa_phase2", "sa_phase3", "sa_phase4", "sa_phase5", "sa_phase6", "sa_phase7", "sa_phase8",
+)
+
+_REVERSE_CHAIN: tuple[str, ...] = (
+    "sa_phase1",
+    "sa_phase3", "sa_phase4", "sa_phase5", "sa_phase6", "sa_phase7", "sa_phase8",
+)
+
+
+def _chain_to_next_nodes(chain: tuple[str, ...]) -> dict[str, list[str]]:
+    """노드 시퀀스에서 라우팅 next_nodes 맵을 자동 생성."""
+    return {node: ([chain[i + 1]] if i + 1 < len(chain) else []) for i, node in enumerate(chain)}
+
+
+def _build_analysis_pipeline(key: str, chain: tuple[str, ...]):
+    def _build():
+        workflow = StateGraph(PipelineState)
+        _add_all_analysis_nodes(workflow)
+        _wire_linear_pipeline(workflow, chain)
+        return workflow.compile()
+    return _PipelineRegistry.get_or_build(key, _build)
+
+
 def _get_create_pipeline():
-    def _build():
-        workflow = StateGraph(PipelineState)
-        _add_all_analysis_nodes(workflow)
-        
-        # PM 체인
-        workflow.add_edge(START, "atomizer")
-        workflow.add_conditional_edges("atomizer", _check_status, {"continue": "prioritizer", "error": END})
-        workflow.add_conditional_edges("prioritizer", _check_status, {"continue": "rtm_builder", "error": END})
-        workflow.add_conditional_edges("rtm_builder", _check_status, {"continue": "semantic_indexer", "error": END})
-        workflow.add_conditional_edges("semantic_indexer", _check_status, {"continue": "context_spec", "error": END})
-        
-        # SA 코어 체인 연결 (Phase 1, 2 생략)
-        workflow.add_conditional_edges("context_spec", _check_status, {"continue": "sa_phase3", "error": END})
-        _add_sa_chain(workflow, ["sa_phase3", "sa_phase4", "sa_phase5", "sa_phase6", "sa_phase7", "sa_phase8"])
-        workflow.add_edge("sa_phase8", "sa_reverse_context")
-        workflow.add_edge("sa_reverse_context", END)
-
-        return workflow.compile()
-
-    return _PipelineRegistry.get_or_build("analysis_create", _build)
+    return _build_analysis_pipeline("analysis_create", _CREATE_CHAIN)
 
 
-# ---------------------------------------------------------
-# 2. UPDATE 모드 파이프라인
-# 흐름: SA(1) -> PM(1~5) -> SA(2~8)
-# ---------------------------------------------------------
 def get_update_sa_pipeline():
-    def _build():
-        workflow = StateGraph(PipelineState)
-        _add_all_analysis_nodes(workflow)
-        
-        # SA Phase 1 먼저 실행 (기존 코드 구조 파악)
-        workflow.add_edge(START, "sa_phase1")
-
-        # 스캔 결과를 바탕으로 PM 체인 진입 (변경 요구사항 구조화)
-        workflow.add_conditional_edges("sa_phase1", _check_status, {"continue": "atomizer", "error": END})
-        workflow.add_conditional_edges("atomizer", _check_status, {"continue": "prioritizer", "error": END})
-        workflow.add_conditional_edges("prioritizer", _check_status, {"continue": "rtm_builder", "error": END})
-        workflow.add_conditional_edges("rtm_builder", _check_status, {"continue": "semantic_indexer", "error": END})
-        workflow.add_conditional_edges("semantic_indexer", _check_status, {"continue": "context_spec", "error": END})
-        
-        # SA 심화 체인 연결
-        workflow.add_conditional_edges("context_spec", _check_status, {"continue": "sa_phase2", "error": END})
-        _add_sa_chain(workflow, ["sa_phase2", "sa_phase3", "sa_phase4", "sa_phase5", "sa_phase6", "sa_phase7", "sa_phase8"])
-        workflow.add_edge("sa_phase8", END)
-
-        return workflow.compile()
-
-    return _PipelineRegistry.get_or_build("analysis_update", _build)
+    return _build_analysis_pipeline("analysis_update", _UPDATE_CHAIN)
 
 
-# ---------------------------------------------------------
-# 3. REVERSE ENGINEER 모드 파이프라인
-# 흐름: SA(1) -> SA(3~8)
-# ---------------------------------------------------------
 def get_reverse_sa_pipeline():
-    def _build():
-        workflow = StateGraph(PipelineState)
-        _add_all_analysis_nodes(workflow)
-        
-        # SA Phase 1 먼저 실행 (코드 스캔)
-        workflow.add_edge(START, "sa_phase1")
-        
-        # 스캔된 코드를 바탕으로 유지보수성/보안/구조 진단 진행
-        workflow.add_conditional_edges("sa_phase1", _check_status, {"continue": "sa_phase3", "error": END})
-        _add_sa_chain(workflow, ["sa_phase3", "sa_phase4", "sa_phase5", "sa_phase6", "sa_phase7", "sa_phase8"])
-        workflow.add_edge("sa_phase8", END)
-
-        return workflow.compile()
-
-    return _PipelineRegistry.get_or_build("analysis_reverse", _build)
+    return _build_analysis_pipeline("analysis_reverse", _REVERSE_CHAIN)
 
 
 # ---------------------------------------------------------
@@ -231,45 +206,10 @@ def get_idea_pipeline():
 # action_type -> {first_node, next_nodes, start_message}
 # ---------------------------------------------------------
 
-_CREATE_NEXT_NODES: dict[str, list[str]] = {
-    "atomizer": ["prioritizer"],
-    "prioritizer": ["rtm_builder"],
-    "rtm_builder": ["semantic_indexer"],
-    "semantic_indexer": ["context_spec"],
-    "context_spec": ["sa_phase3"],
-    "sa_phase3": ["sa_phase4"],
-    "sa_phase4": ["sa_phase5"],
-    "sa_phase5": ["sa_phase6"],
-    "sa_phase6": ["sa_phase7"],
-    "sa_phase7": ["sa_phase8"],
-    "sa_phase8": ["sa_reverse_context"],
-    "sa_reverse_context": [],
-}
-
-_UPDATE_NEXT_NODES: dict[str, list[str]] = {
-    "sa_phase1": ["atomizer"],
-    "atomizer": ["prioritizer"],
-    "prioritizer": ["rtm_builder"],
-    "rtm_builder": ["semantic_indexer"],
-    "semantic_indexer": ["context_spec"],
-    "context_spec": ["sa_phase2"],
-    "sa_phase2": ["sa_phase3"],
-    "sa_phase3": ["sa_phase4"],
-    "sa_phase4": ["sa_phase5"],
-    "sa_phase5": ["sa_phase6"],
-    "sa_phase6": ["sa_phase7"],
-    "sa_phase7": ["sa_phase8"],
-    "sa_phase8": [],
-}
-
-_REVERSE_NEXT_NODES: dict[str, list[str]] = {
-    "sa_phase1": ["sa_phase3"],
-    "sa_phase3": ["sa_phase4"],
-    "sa_phase4": ["sa_phase5"],
-    "sa_phase5": ["sa_phase6"],
-    "sa_phase6": ["sa_phase7"],
-    "sa_phase7": ["sa_phase8"],
-    "sa_phase8": [],
+_PIPELINE_ROUTING_CONFIGS: dict[str, dict] = {
+    "CREATE": {"chain": _CREATE_CHAIN, "start_message": "요구사항 원자화 시작..."},
+    "UPDATE": {"chain": _UPDATE_CHAIN, "start_message": "기존 코드 구조 분석 후 변경 설계 시작..."},
+    "REVERSE_ENGINEER": {"chain": _REVERSE_CHAIN, "start_message": "프로젝트 구조 심층 분석 시작..."},
 }
 
 
@@ -280,22 +220,12 @@ def get_pipeline_routing_map(action_type: str = "CREATE") -> dict:
         {"first_node": str, "next_nodes": dict[str, list[str]], "start_message": str}
     """
     normalized = normalize_action_type(action_type)
-    if normalized == "REVERSE_ENGINEER":
-        return {
-            "first_node": "sa_phase1",
-            "next_nodes": _REVERSE_NEXT_NODES,
-            "start_message": "프로젝트 구조 심층 분석 시작...",
-        }
-    if normalized == "UPDATE":
-        return {
-            "first_node": "sa_phase1",
-            "next_nodes": _UPDATE_NEXT_NODES,
-            "start_message": "기존 코드 구조 분석 후 변경 설계 시작...",
-        }
+    config = _PIPELINE_ROUTING_CONFIGS.get(normalized, _PIPELINE_ROUTING_CONFIGS["CREATE"])
+    chain = config["chain"]
     return {
-        "first_node": "atomizer",
-        "next_nodes": _CREATE_NEXT_NODES,
-        "start_message": "요구사항 원자화 시작...",
+        "first_node": chain[0],
+        "next_nodes": _chain_to_next_nodes(chain),
+        "start_message": config["start_message"],
     }
 
 

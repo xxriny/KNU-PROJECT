@@ -82,6 +82,9 @@ except ImportError:
         def error(self, msg: str, **kw):
             self._log.error(self._fmt(msg, **kw))
 
+        def exception(self, msg: str, **kw):
+            self._log.exception(self._fmt(msg, **kw))
+
         def bind(self, **kw):
             return self
 
