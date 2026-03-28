@@ -7,13 +7,15 @@ ENV=prod → JSONRenderer (단일 라인 JSON)
 
 from __future__ import annotations
 
+import functools
 import os
 import logging
 
 try:
     import structlog
 
-    def configure_logging() -> None:
+    @functools.lru_cache(maxsize=None)
+    def _ensure_configured() -> None:
         """프로세스 내 최초 1회 structlog 설정."""
         env = os.environ.get("ENV", "dev").lower()
         renderer = (
@@ -34,9 +36,12 @@ try:
             logger_factory=structlog.PrintLoggerFactory(),
         )
 
+    def configure_logging() -> None:
+        _ensure_configured()
+
     def get_logger(run_id: str = ""):
         """run_id가 자동 바인딩된 structlog 인스턴스 반환."""
-        configure_logging()
+        _ensure_configured()
         logger = structlog.get_logger()
         if run_id:
             logger = logger.bind(run_id=run_id)
@@ -46,11 +51,15 @@ except ImportError:
     # structlog 미설치 시 표준 logging으로 폴백
     import logging as _logging
 
-    def configure_logging() -> None:  # type: ignore[misc]
+    @functools.lru_cache(maxsize=None)
+    def _ensure_configured() -> None:
         _logging.basicConfig(
             level=_logging.INFO,
             format="%(asctime)s [%(levelname)s] %(name)s %(message)s",
         )
+
+    def configure_logging() -> None:  # type: ignore[misc]
+        _ensure_configured()
 
     class _FallbackLogger:
         def __init__(self, run_id: str = ""):
@@ -77,5 +86,5 @@ except ImportError:
             return self
 
     def get_logger(run_id: str = ""):  # type: ignore[misc]
-        configure_logging()
+        _ensure_configured()
         return _FallbackLogger(run_id=run_id)

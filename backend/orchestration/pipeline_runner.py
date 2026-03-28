@@ -27,6 +27,7 @@ from pipeline.graph import (
     get_revision_routing_map,
     get_idea_chat_routing_map,
 )
+from pipeline.action_type import ANALYSIS_ACTION_TYPES, normalize_action_type
 from pipeline.ast_scanner import extract_functions, summarize_for_llm
 from result_shaping.result_shaper import shape_result, deep_sanitize
 from observability.logger import get_logger
@@ -34,14 +35,12 @@ from observability.metrics import track_node
 from transport.connection_manager import manager
 from connectors.result_logger import save_result
 
-ANALYSIS_ACTION_TYPES = {"CREATE", "UPDATE", "REVERSE_ENGINEER"}
-
 
 # ─── 입력 검증 ────────────────────────────────────────────
 
 def validate_analysis_inputs(action_type: str, idea: str, source_dir: str) -> str | None:
     """모드별 필수 입력 검증. 에러 메시지 또는 None 반환."""
-    normalized = (action_type or "CREATE").strip().upper()
+    normalized = normalize_action_type(action_type)
     idea_text = (idea or "").strip()
     source_path = (source_dir or "").strip()
 
@@ -74,12 +73,51 @@ def build_reverse_context(source_dir: str) -> str:
 
 
 def analysis_pipeline_type(action_type: str) -> str:
-    normalized = (action_type or "CREATE").strip().upper()
+    normalized = normalize_action_type(action_type)
     if normalized == "REVERSE_ENGINEER":
         return "analysis_reverse"
     if normalized == "UPDATE":
         return "analysis_update"
     return "analysis_create"
+
+
+async def _run_pipeline_base(
+    ws: WebSocket,
+    *,
+    pipeline,
+    routing: dict,
+    state_payload: dict,
+    pipeline_type: str,
+    result_node: str = "complete",
+    save: bool = True,
+    result_mutator=None,
+    log=None,
+) -> None:
+    """공통 파이프라인 실행, 결과 정형화, 전송, 저장 처리."""
+    try:
+        result = await stream_pipeline_updates(ws, pipeline, state_payload, routing=routing)
+
+        if result.get("error"):
+            await manager.send_json(ws, {"type": "error", "data": {"message": result["error"]}})
+            return
+
+        shaped = shape_result(result)
+        shaped["pipeline_type"] = pipeline_type
+        if result_mutator is not None:
+            result_mutator(shaped)
+
+        await manager.send_json(ws, {"type": "result", "node": result_node, "data": shaped})
+
+        if save:
+            try:
+                save_result(shaped)
+            except Exception as log_err:
+                active_log = log or get_logger(state_payload.get("run_id", ""))
+                active_log.warning("save_result_failed", error=str(log_err))
+
+    except Exception as e:
+        traceback.print_exc()
+        await manager.send_json(ws, {"type": "error", "data": {"message": str(e)}})
 
 
 # ─── WebSocket 파이프라인 실행 ────────────────────────────
@@ -89,8 +127,7 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
     model = payload.get("model", "gemini-2.5-flash")
     idea = payload.get("idea", "")
     context = payload.get("context", "")
-    action_type = payload.get("action_type", "CREATE")
-    action_type = action_type if action_type in ANALYSIS_ACTION_TYPES else "CREATE"
+    action_type = normalize_action_type(payload.get("action_type", "CREATE"))
     source_dir = payload.get("source_dir", "")
 
     validation_error = validate_analysis_inputs(action_type, idea, source_dir)
@@ -111,40 +148,24 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
     log = get_logger(run_id)
     log.info("analysis_start", action_type=action_type)
 
-    try:
-        pipeline = get_analysis_pipeline(action_type)
-        routing = get_pipeline_routing_map(action_type)
-
-        result = await stream_pipeline_updates(
-            ws,
-            pipeline,
-            {
-                "api_key": api_key,
-                "model": model,
-                "input_idea": idea,
-                "project_context": context,
-                "source_dir": source_dir,
-                "action_type": action_type,
-                "run_id": run_id,
-            },
-            routing=routing,
-        )
-
-        if result.get("error"):
-            await manager.send_json(ws, {"type": "error", "data": {"message": result["error"]}})
-            return
-
-        shaped = shape_result(result)
-        shaped["pipeline_type"] = analysis_pipeline_type(action_type)
-        await manager.send_json(ws, {"type": "result", "node": "complete", "data": shaped})
-        try:
-            save_result(shaped)
-        except Exception as log_err:
-            log.warning("save_result_failed", error=str(log_err))
-
-    except Exception as e:
-        traceback.print_exc()
-        await manager.send_json(ws, {"type": "error", "data": {"message": str(e)}})
+    await _run_pipeline_base(
+        ws,
+        pipeline=get_analysis_pipeline(action_type),
+        routing=get_pipeline_routing_map(action_type),
+        state_payload={
+            "api_key": api_key,
+            "model": model,
+            "input_idea": idea,
+            "project_context": context,
+            "source_dir": source_dir,
+            "action_type": action_type,
+            "run_id": run_id,
+        },
+        pipeline_type=analysis_pipeline_type(action_type),
+        result_node="complete",
+        save=True,
+        log=log,
+    )
 
 
 async def run_revision(ws: WebSocket, payload: dict) -> None:
@@ -153,73 +174,45 @@ async def run_revision(ws: WebSocket, payload: dict) -> None:
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     log = get_logger(run_id)
 
-    try:
-        pipeline = get_revision_pipeline()
-        routing = get_revision_routing_map()
-
-        result = await stream_pipeline_updates(
-            ws,
-            pipeline,
-            {
-                "api_key": api_key,
-                "model": model,
-                "user_request": payload.get("user_request", ""),
-                "previous_result": payload.get("previous_result", {}),
-                "chat_history": payload.get("chat_history", []),
-            },
-            routing=routing,
-        )
-
-        if result.get("error"):
-            await manager.send_json(ws, {"type": "error", "data": {"message": result["error"]}})
-            return
-
-        shaped = shape_result(result)
-        shaped["pipeline_type"] = "revision"
-        await manager.send_json(ws, {"type": "result", "node": "complete", "data": shaped})
-        try:
-            save_result(shaped)
-        except Exception as log_err:
-            log.warning("save_result_failed", error=str(log_err))
-
-    except Exception as e:
-        traceback.print_exc()
-        await manager.send_json(ws, {"type": "error", "data": {"message": str(e)}})
+    await _run_pipeline_base(
+        ws,
+        pipeline=get_revision_pipeline(),
+        routing=get_revision_routing_map(),
+        state_payload={
+            "api_key": api_key,
+            "model": model,
+            "user_request": payload.get("user_request", ""),
+            "previous_result": payload.get("previous_result", {}),
+            "chat_history": payload.get("chat_history", []),
+            "run_id": run_id,
+        },
+        pipeline_type="revision",
+        result_node="complete",
+        save=True,
+        log=log,
+    )
 
 
 async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
     api_key = payload.get("api_key", "") or os.environ.get("GEMINI_API_KEY", "")
     model = payload.get("model", "gemini-2.5-flash")
 
-    try:
-        pipeline = get_idea_pipeline()
-        routing = get_idea_chat_routing_map()
-
-        result = await stream_pipeline_updates(
-            ws,
-            pipeline,
-            {
-                "api_key": api_key,
-                "model": model,
-                "user_request": payload.get("message", ""),
-                "chat_history": payload.get("chat_history", []),
-                "previous_result": payload.get("previous_result", {}),
-            },
-            routing=routing,
-        )
-
-        if result.get("error"):
-            await manager.send_json(ws, {"type": "error", "data": {"message": result["error"]}})
-            return
-
-        shaped = shape_result(result)
-        shaped["pipeline_type"] = "idea_chat"
-        shaped["chat_reply"] = shaped.get("agent_reply", "")
-        await manager.send_json(ws, {"type": "result", "node": "idea_chat", "data": shaped})
-
-    except Exception as e:
-        traceback.print_exc()
-        await manager.send_json(ws, {"type": "error", "data": {"message": str(e)}})
+    await _run_pipeline_base(
+        ws,
+        pipeline=get_idea_pipeline(),
+        routing=get_idea_chat_routing_map(),
+        state_payload={
+            "api_key": api_key,
+            "model": model,
+            "user_request": payload.get("message", ""),
+            "chat_history": payload.get("chat_history", []),
+            "previous_result": payload.get("previous_result", {}),
+        },
+        pipeline_type="idea_chat",
+        result_node="idea_chat",
+        save=False,
+        result_mutator=lambda shaped: shaped.update({"chat_reply": shaped.get("agent_reply", "")}),
+    )
 
 
 # ─── 스트리밍 ─────────────────────────────────────────────
@@ -243,7 +236,7 @@ async def stream_pipeline_updates(
     action_type: str = payload.get("action_type", "unknown")
 
     aggregated: dict = {}
-    if isinstance(payload, dict) and payload.get("run_id"):
+    if payload.get("run_id"):
         aggregated["run_id"] = payload["run_id"]
     seen_thinking: set[tuple[str, str]] = set()
 

@@ -73,21 +73,15 @@ def get_llm(api_key: str, model: str = "gemini-2.5-flash", temperature: float = 
                 _llm_cache.move_to_end(cache_key)
                 return cached_llm
 
-        llm = ChatGoogleGenerativeAI(
-            model=model,
-            google_api_key=effective_key,
-            temperature=temperature,
-        )
-
-        with _llm_cache_lock:
-            cached_llm = _llm_cache.get(cache_key)
-            if cached_llm is not None:
-                _llm_cache.move_to_end(cache_key)
-                return cached_llm
+            llm = ChatGoogleGenerativeAI(
+                model=model,
+                google_api_key=effective_key,
+                temperature=temperature,
+            )
             _remember_cache_entry(_llm_cache, cache_key, llm)
         return llm
-    except ValueError as ve:
-        raise ve
+    except ValueError:
+        raise
     except Exception as e:
         raise RuntimeError(f"LLM 초기화 오류: {str(e)}")
 
@@ -274,13 +268,7 @@ def _get_raw_client(api_key: str):
                 _raw_cache.move_to_end(effective_key)
                 return cached_client
 
-        client = genai.Client(api_key=effective_key)
-
-        with _raw_cache_lock:
-            cached_client = _raw_cache.get(effective_key)
-            if cached_client is not None:
-                _raw_cache.move_to_end(effective_key)
-                return cached_client
+            client = genai.Client(api_key=effective_key)
             _remember_cache_entry(_raw_cache, effective_key, client)
         return client
     except Exception as e:

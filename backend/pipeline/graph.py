@@ -5,6 +5,7 @@ PM Agent Pipeline — LangGraph 파이프라인 빌더 v10.0 (완전체)
 """
 
 from langgraph.graph import StateGraph, START, END
+from pipeline.action_type import normalize_action_type
 from pipeline.state import PipelineState
 from pipeline.nodes.pm_phase1 import atomizer_node
 from pipeline.nodes.pm_phase2 import prioritizer_node
@@ -23,12 +24,15 @@ from pipeline.nodes.sa_phase7 import sa_phase7_node
 from pipeline.nodes.sa_phase8 import sa_phase8_node
 from pipeline.nodes.sa_reverse_context import sa_reverse_context_node
 
-# 싱글턴 캐시
-_create_graph = None
-_update_sa_graph = None
-_reverse_sa_graph = None
-_revision_graph = None
-_idea_graph = None
+
+class _PipelineRegistry:
+    _cache: dict[str, object] = {}
+
+    @classmethod
+    def get_or_build(cls, key: str, builder_fn):
+        if key not in cls._cache:
+            cls._cache[key] = builder_fn()
+        return cls._cache[key]
 
 """
 파이프라인 종료 정책 (Termination Policy)
@@ -63,10 +67,6 @@ SA_EARLY_TERMINATION_STATUSES = {"Error"}
 # PM: Needs_Clarification/Error/부분 실패 = 입력/품질 문제 (사용자 개입 필요)
 PM_INPUT_READINESS_FAILURE_STATUSES = {"Needs_Clarification", "Error", "Completed_with_errors"}
 
-# 이전 이름으로 유지 (하위호환성)
-FATAL_SA_STATUSES = SA_EARLY_TERMINATION_STATUSES
-FATAL_PM_STATUSES = PM_INPUT_READINESS_FAILURE_STATUSES
-
 
 def _check_status(state: PipelineState) -> str:
     """노드 실행 후 상태를 검사하여 에러/정보 부족 시 파이프라인을 조기 종료하는 라우터"""
@@ -76,14 +76,14 @@ def _check_status(state: PipelineState) -> str:
             
         # PM 단계 에러 체크
         metadata = state.get("metadata", {})
-        if metadata.get("status") in FATAL_PM_STATUSES:
+        if metadata.get("status") in PM_INPUT_READINESS_FAILURE_STATUSES:
             return "error"
             
         # SA 단계 에러 체크
         for phase in [f"sa_phase{i}" for i in range(1, 9)]:
             phase_data = state.get(phase)
             if isinstance(phase_data, dict):
-                if phase_data.get("status") in FATAL_SA_STATUSES:
+                if phase_data.get("status") in SA_EARLY_TERMINATION_STATUSES:
                     return "error"
                     
     return "continue"
@@ -107,13 +107,17 @@ def _add_all_analysis_nodes(workflow: StateGraph):
     workflow.add_node("sa_reverse_context", sa_reverse_context_node)
 
 
+def _add_sa_chain(workflow: StateGraph, phases: list[str]) -> None:
+    for src, dst in zip(phases[:-1], phases[1:]):
+        workflow.add_conditional_edges(src, _check_status, {"continue": dst, "error": END})
+
+
 # ---------------------------------------------------------
 # 1. CREATE 모드 파이프라인
 # 흐름: PM(1~5) -> SA(3~8)
 # ---------------------------------------------------------
 def _get_create_pipeline():
-    global _create_graph
-    if _create_graph is None:
+    def _build():
         workflow = StateGraph(PipelineState)
         _add_all_analysis_nodes(workflow)
         
@@ -126,16 +130,13 @@ def _get_create_pipeline():
         
         # SA 코어 체인 연결 (Phase 1, 2 생략)
         workflow.add_conditional_edges("context_spec", _check_status, {"continue": "sa_phase3", "error": END})
-        workflow.add_conditional_edges("sa_phase3", _check_status, {"continue": "sa_phase4", "error": END})
-        workflow.add_conditional_edges("sa_phase4", _check_status, {"continue": "sa_phase5", "error": END})
-        workflow.add_conditional_edges("sa_phase5", _check_status, {"continue": "sa_phase6", "error": END})
-        workflow.add_conditional_edges("sa_phase6", _check_status, {"continue": "sa_phase7", "error": END})
-        workflow.add_conditional_edges("sa_phase7", _check_status, {"continue": "sa_phase8", "error": END})
+        _add_sa_chain(workflow, ["sa_phase3", "sa_phase4", "sa_phase5", "sa_phase6", "sa_phase7", "sa_phase8"])
         workflow.add_edge("sa_phase8", "sa_reverse_context")
         workflow.add_edge("sa_reverse_context", END)
-        
-        _create_graph = workflow.compile()
-    return _create_graph
+
+        return workflow.compile()
+
+    return _PipelineRegistry.get_or_build("analysis_create", _build)
 
 
 # ---------------------------------------------------------
@@ -143,8 +144,7 @@ def _get_create_pipeline():
 # 흐름: SA(1) -> PM(1~5) -> SA(2~8)
 # ---------------------------------------------------------
 def get_update_sa_pipeline():
-    global _update_sa_graph
-    if _update_sa_graph is None:
+    def _build():
         workflow = StateGraph(PipelineState)
         _add_all_analysis_nodes(workflow)
         
@@ -160,16 +160,12 @@ def get_update_sa_pipeline():
         
         # SA 심화 체인 연결
         workflow.add_conditional_edges("context_spec", _check_status, {"continue": "sa_phase2", "error": END})
-        workflow.add_conditional_edges("sa_phase2", _check_status, {"continue": "sa_phase3", "error": END})
-        workflow.add_conditional_edges("sa_phase3", _check_status, {"continue": "sa_phase4", "error": END})
-        workflow.add_conditional_edges("sa_phase4", _check_status, {"continue": "sa_phase5", "error": END})
-        workflow.add_conditional_edges("sa_phase5", _check_status, {"continue": "sa_phase6", "error": END})
-        workflow.add_conditional_edges("sa_phase6", _check_status, {"continue": "sa_phase7", "error": END})
-        workflow.add_conditional_edges("sa_phase7", _check_status, {"continue": "sa_phase8", "error": END})
+        _add_sa_chain(workflow, ["sa_phase2", "sa_phase3", "sa_phase4", "sa_phase5", "sa_phase6", "sa_phase7", "sa_phase8"])
         workflow.add_edge("sa_phase8", END)
-        
-        _update_sa_graph = workflow.compile()
-    return _update_sa_graph
+
+        return workflow.compile()
+
+    return _PipelineRegistry.get_or_build("analysis_update", _build)
 
 
 # ---------------------------------------------------------
@@ -177,8 +173,7 @@ def get_update_sa_pipeline():
 # 흐름: SA(1) -> SA(3~8)
 # ---------------------------------------------------------
 def get_reverse_sa_pipeline():
-    global _reverse_sa_graph
-    if _reverse_sa_graph is None:
+    def _build():
         workflow = StateGraph(PipelineState)
         _add_all_analysis_nodes(workflow)
         
@@ -187,15 +182,12 @@ def get_reverse_sa_pipeline():
         
         # 스캔된 코드를 바탕으로 유지보수성/보안/구조 진단 진행
         workflow.add_conditional_edges("sa_phase1", _check_status, {"continue": "sa_phase3", "error": END})
-        workflow.add_conditional_edges("sa_phase3", _check_status, {"continue": "sa_phase4", "error": END})
-        workflow.add_conditional_edges("sa_phase4", _check_status, {"continue": "sa_phase5", "error": END})
-        workflow.add_conditional_edges("sa_phase5", _check_status, {"continue": "sa_phase6", "error": END})
-        workflow.add_conditional_edges("sa_phase6", _check_status, {"continue": "sa_phase7", "error": END})
-        workflow.add_conditional_edges("sa_phase7", _check_status, {"continue": "sa_phase8", "error": END})
+        _add_sa_chain(workflow, ["sa_phase3", "sa_phase4", "sa_phase5", "sa_phase6", "sa_phase7", "sa_phase8"])
         workflow.add_edge("sa_phase8", END)
-        
-        _reverse_sa_graph = workflow.compile()
-    return _reverse_sa_graph
+
+        return workflow.compile()
+
+    return _PipelineRegistry.get_or_build("analysis_reverse", _build)
 
 
 # ---------------------------------------------------------
@@ -203,7 +195,7 @@ def get_reverse_sa_pipeline():
 # ---------------------------------------------------------
 def get_analysis_pipeline(action_type: str = "CREATE"):
     """action_type 기반 분석 파이프라인 선택"""
-    normalized_action = (action_type or "CREATE").strip().upper()
+    normalized_action = normalize_action_type(action_type)
     if normalized_action == "REVERSE_ENGINEER":
         return get_reverse_sa_pipeline()
     if normalized_action == "UPDATE":
@@ -213,26 +205,26 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
 
 def get_revision_pipeline():
     """수정 파이프라인 (START -> chat_revision -> END)"""
-    global _revision_graph
-    if _revision_graph is None:
+    def _build():
         workflow = StateGraph(PipelineState)
         workflow.add_node("chat_revision", chat_revision_node)
         workflow.add_edge(START, "chat_revision")
         workflow.add_edge("chat_revision", END)
-        _revision_graph = workflow.compile()
-    return _revision_graph
+        return workflow.compile()
+
+    return _PipelineRegistry.get_or_build("revision", _build)
 
 
 def get_idea_pipeline():
     """아이디어 발전 파이프라인 (START -> idea_chat -> END)"""
-    global _idea_graph
-    if _idea_graph is None:
+    def _build():
         workflow = StateGraph(PipelineState)
         workflow.add_node("idea_chat", idea_chat_node)
         workflow.add_edge(START, "idea_chat")
         workflow.add_edge("idea_chat", END)
-        _idea_graph = workflow.compile()
-    return _idea_graph
+        return workflow.compile()
+
+    return _PipelineRegistry.get_or_build("idea_chat", _build)
 
 # ---------------------------------------------------------
 # 라우팅 맵 — transport/orchestration에서 공유 (REQ-007)
@@ -287,7 +279,7 @@ def get_pipeline_routing_map(action_type: str = "CREATE") -> dict:
     Returns:
         {"first_node": str, "next_nodes": dict[str, list[str]], "start_message": str}
     """
-    normalized = (action_type or "CREATE").strip().upper()
+    normalized = normalize_action_type(action_type)
     if normalized == "REVERSE_ENGINEER":
         return {
             "first_node": "sa_phase1",

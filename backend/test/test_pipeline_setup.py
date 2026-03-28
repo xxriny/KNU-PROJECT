@@ -11,9 +11,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from main import app
 from transport.rest_handler import _allowed_project_roots
 from pipeline.graph import get_analysis_pipeline, get_idea_pipeline, get_revision_pipeline, _check_status
+from pipeline.action_type import normalize_action_type
+from orchestration.pipeline_runner import analysis_pipeline_type
 
 
 class PipelineSetupTests(unittest.TestCase):
+    def test_action_type_normalization_is_shared(self):
+        self.assertEqual(normalize_action_type(" update "), "UPDATE")
+        self.assertEqual(normalize_action_type("invalid"), "CREATE")
+        self.assertEqual(analysis_pipeline_type("invalid"), "analysis_create")
+
     def test_pipeline_builders_return_compiled_graphs(self):
         self.assertIsNotNone(get_analysis_pipeline())
         self.assertIsNotNone(get_revision_pipeline())
