@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from version import APP_VERSION
 
 # ── 경로 설정 ────────────────────────────────────────────
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -52,7 +53,7 @@ async def lifespan(app: FastAPI):
 # ── FastAPI 앱 생성 ──────────────────────────────────────
 app = FastAPI(
     title="PM Agent Pipeline Backend",
-    version="2.2.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 

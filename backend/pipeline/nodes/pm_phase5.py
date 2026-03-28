@@ -10,7 +10,7 @@ import json
 import os
 from datetime import datetime
 from connectors.result_logger import LOG_DIR, _safe_filename
-from pipeline.state import PipelineState
+from pipeline.state import PipelineState, sget as state_sget
 from pipeline.schemas import ContextSpecOutput
 from pipeline.utils import call_structured_with_thinking
 
@@ -132,11 +132,7 @@ def _save_project_state_md(spec: dict, project_name: str, run_id: str = "") -> s
 
 def context_spec_node(state: PipelineState) -> dict:
     def sget(key, default=None):
-        if hasattr(state, "get"):
-            val = state.get(key, default)
-        else:
-            val = getattr(state, key, default)
-        return default if val is None else val
+        return state_sget(state, key, default)
 
     rtm = sget("rtm_matrix", [])
     sg = sget("semantic_graph", {})
@@ -208,3 +204,5 @@ def context_spec_node(state: PipelineState) -> dict:
             "thinking_log": sget("thinking_log", []) + [{"node": "context_spec", "thinking": f"Error: {e}"}],
             "current_step": "context_spec_done",
         }
+
+

@@ -1,7 +1,7 @@
 import json
 from pydantic import BaseModel, Field
 from typing import List
-from pipeline.state import PipelineState
+from pipeline.state import PipelineState, sget as state_sget
 from pipeline.utils import call_structured_with_thinking
 
 class RequirementImpact(BaseModel):
@@ -26,11 +26,7 @@ IMPACT_SYSTEM_PROMPT = """\
 
 def sa_phase2_node(state: PipelineState) -> dict:
     def sget(key, default=None):
-        if hasattr(state, "get"):
-            val = state.get(key, default)
-        else:
-            val = getattr(state, key, default)
-        return default if val is None else val
+        return state_sget(state, key, default)
 
     action_type = sget("action_type", "CREATE")
     
@@ -110,3 +106,4 @@ def sa_phase2_node(state: PipelineState) -> dict:
         "thinking_log": sget("thinking_log", []) + [{"node": "sa_phase2", "thinking": thinking_msg}],
         "current_step": "sa_phase2_done",
     }
+

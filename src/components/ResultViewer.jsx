@@ -40,12 +40,6 @@ export default function ResultViewer({ tabId = "overview" }) {
     case "context":
       content = <ContextTab />;
       break;
-    case "sa_overview":
-      content = <OverviewTab />;
-      break;
-    case "sa_feasibility":
-      content = <OverviewTab />;
-      break;
     case "sa_architecture":
       content = <SAArchitectureTab />;
       break;

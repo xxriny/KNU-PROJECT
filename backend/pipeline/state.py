@@ -87,3 +87,12 @@ class PipelineState(TypedDict):
     sa_phase7: dict                  # 인터페이스/가드레일 설계 결과
     sa_phase8: dict                  # 위상 정렬 결과
     sa_output: dict                  # SA 최종 통합 산출물
+
+
+def sget(state: PipelineState, key: str, default=None):
+    """Shared helper to read values from dict-like/object-like PipelineState."""
+    if hasattr(state, "get"):
+        value = state.get(key, default)
+    else:
+        value = getattr(state, key, default)
+    return default if value is None else value

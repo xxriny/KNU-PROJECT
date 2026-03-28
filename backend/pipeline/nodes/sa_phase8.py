@@ -1,6 +1,6 @@
 import re
 
-from pipeline.state import PipelineState
+from pipeline.state import PipelineState, sget as state_sget
 
 
 TOKEN_ALIASES = {
@@ -259,11 +259,7 @@ def _topo_sort_with_batches(items: list[dict]) -> tuple[list[str], list[list[str
 
 def sa_phase8_node(state: PipelineState) -> dict:
     def sget(key, default=None):
-        if hasattr(state, "get"):
-            val = state.get(key, default)
-        else:
-            val = getattr(state, key, default)
-        return default if val is None else val
+        return state_sget(state, key, default)
 
     rtm = sget("requirements_rtm", []) or sget("rtm_matrix", []) or []
     if not rtm:
@@ -303,3 +299,4 @@ def sa_phase8_node(state: PipelineState) -> dict:
         "thinking_log": (sget("thinking_log", []) or []) + [{"node": "sa_phase8", "thinking": f"위상 정렬 완료 (총 {len(parallel_batches)}개의 병렬 개발 페이즈 생성)"}],
         "current_step": "sa_phase8_done",
     }
+
