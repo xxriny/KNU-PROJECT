@@ -23,11 +23,61 @@ SYSTEM_PROMPT = """\
 2. key_decisions: 내린 아키텍처/비즈니스 결정 사항들
 3. open_questions: 검증이 필요한 미해결 항목들
 4. tech_stack_suggestions: 추론된 기술스택 추천사항
+   (manifest에서 발견된 프레임워크를 우선하고, 누락된 부분은 요구사항 기반으로 확장하세요)
+    가능하면 각 기술 스택 제안은 manifest 근거 여부를 일관되게 반영하세요.
 5. risk_factors: 식별된 위험요소들
 6. next_steps: SA 에이전트를 위한 추천 다음 단계
 7. thinking은 3줄 이내로 작성하세요."""
 
 _LOG_DIR = LOG_DIR
+
+
+def _build_tech_stack_details(plain_suggestions: list[str], sa_phase1: dict) -> tuple[list[dict], list[str], float]:
+    framework_evidence = sa_phase1.get("framework_evidence", []) or []
+    manifest_map: dict[str, dict] = {}
+    for item in framework_evidence:
+        name = (item.get("framework") or "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        manifest_map.setdefault(key, {"name": name, "evidence": []})
+        ref = f"{item.get('file', '')}: {item.get('reason', '')}".strip(": ")
+        if ref and ref not in manifest_map[key]["evidence"]:
+            manifest_map[key]["evidence"].append(ref)
+
+    detailed = []
+    seen = set()
+
+    for key, item in manifest_map.items():
+        seen.add(key)
+        detailed.append({
+            "name": item["name"],
+            "source": "manifest",
+            "confidence": min(1.0, 0.75 + len(item["evidence"]) * 0.08),
+            "evidence": item["evidence"][:3],
+        })
+
+    for suggestion in plain_suggestions or []:
+        name = (suggestion or "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        detailed.append({
+            "name": name,
+            "source": "inferred",
+            "confidence": 0.55,
+            "evidence": ["requirements/context 기반 추론"],
+        })
+
+    plain = [item["name"] for item in detailed]
+    if not detailed:
+        return [], plain_suggestions or [], 0.0
+
+    score = round(sum(item["confidence"] for item in detailed) / len(detailed), 2)
+    return detailed, plain, score
 
 
 def _save_project_state_md(spec: dict, project_name: str, run_id: str = "") -> str:
@@ -91,6 +141,7 @@ def context_spec_node(state: PipelineState) -> dict:
     rtm = sget("rtm_matrix", [])
     sg = sget("semantic_graph", {})
     meta = sget("metadata", {})
+    sa_phase1 = sget("sa_phase1", {}) or {}
     
     # 원본 아이디어와 문맥을 가져옵니다. (컨텍스트 기아 해결)
     project_context = sget("project_context", "")
@@ -108,6 +159,9 @@ def context_spec_node(state: PipelineState) -> dict:
         "categories": list(set(r.get("category", "") for r in rtm)),
         "semantic_nodes": len(sg.get("nodes", [])),
         "semantic_edges": len(sg.get("edges", [])),
+        "manifest_detected_frameworks": sa_phase1.get("detected_frameworks", []),
+        "manifest_evidence_count": len(sa_phase1.get("framework_evidence", []) or []),
+        "manifest_languages": len(sa_phase1.get("languages", {}) or {}),
         # 5개만 넘기는 대신, 비용 절감을 위해 ID와 카테고리 등 핵심 뼈대만 요약해서 전체를 넘김
         "requirements_summary": [{"ID": r.get("REQ_ID"), "cat": r.get("category"), "desc": r.get("description")} for r in rtm]
     }
@@ -126,6 +180,10 @@ def context_spec_node(state: PipelineState) -> dict:
 
         spec = result.model_dump()
         spec.pop("thinking", None)
+        detailed, plain, score = _build_tech_stack_details(spec.get("tech_stack_suggestions", []), sa_phase1)
+        spec["tech_stack_suggestions_detailed"] = detailed
+        spec["tech_stack_suggestions"] = plain
+        spec["stack_confidence_score"] = score
 
         project_name = meta.get("project_name", "unnamed")
         state_path = _save_project_state_md(spec, project_name, sget("run_id", ""))
@@ -142,7 +200,8 @@ def context_spec_node(state: PipelineState) -> dict:
     except Exception as e:
         return {
             "context_spec": {"summary": f"Error: {e}", "key_decisions": [], "open_questions": [],
-                             "tech_stack_suggestions": [], "risk_factors": [], "next_steps": []},
+                             "tech_stack_suggestions": [], "tech_stack_suggestions_detailed": [], "stack_confidence_score": 0.0,
+                             "risk_factors": [], "next_steps": []},
             # "requirements_rtm": sget("rtm_matrix", []), <-- 삭제!!!
             "metadata": {**meta, "status": "Completed_with_errors"},
             "project_state_path": "",

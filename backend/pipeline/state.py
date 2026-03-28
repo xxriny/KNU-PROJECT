@@ -50,6 +50,7 @@ class PipelineState(TypedDict):
 
     # ── 노드 5: 롤링 컨텍스트 명세서 ──────────
     context_spec: dict               # {"summary": "...", "key_decisions": [...], "open_questions": [...]}
+    sa_reverse_context: dict         # REVERSE_ENGINEER 전용 경량 컨텍스트 요약
 
     # ── 최종 출력 ─────────────────────────────
     metadata: dict                   # {"project_name": "...", "action_type": "...", "status": "..."}

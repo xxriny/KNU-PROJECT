@@ -30,6 +30,7 @@ const SA_PIPELINE_STEPS = [
   { key: "sa_phase6", label: "SA-06 보안 경계", desc: "RBAC/권한/신뢰경계 정의" },
   { key: "sa_phase7", label: "SA-07 인터페이스 계약", desc: "계약/가드레일/호환성 정의" },
   { key: "sa_phase8", label: "SA-08 위상 정렬", desc: "의존 순서/병렬 배치 계산" },
+  { key: "sa_reverse_context", label: "SA-09 Reverse Summary", desc: "역분석 전용 컨텍스트 요약 생성" },
 ];
 
 const SA_CREATE_STEPS = [

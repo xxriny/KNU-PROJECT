@@ -1,8 +1,9 @@
 import json
 import os
 from pathlib import Path
+from collections import defaultdict
 from pydantic import BaseModel, Field
-from pipeline.ast_scanner import extract_functions
+from pipeline.ast_scanner import extract_file_inventory, extract_functions
 from pipeline.state import PipelineState
 from pipeline.utils import call_structured
 
@@ -129,6 +130,40 @@ def _detect_framework_evidence(source_dir: str) -> tuple[list[str], list[dict], 
 
     return sorted(frameworks), dedup_evidence[:20], coverage
 
+
+def _build_representative_function_sample(functions: list[dict], max_items: int = 180) -> list[dict]:
+    by_file: dict[str, list[dict]] = defaultdict(list)
+    for fn in functions:
+        file_path = (fn.get("file") or "").strip()
+        if file_path:
+            by_file[file_path].append(fn)
+
+    sample: list[dict] = []
+    for file_path in sorted(by_file.keys()):
+        ranked = sorted(
+            by_file[file_path],
+            key=lambda item: (-len(item.get("docstring", "") or ""), item.get("lineno", 0), item.get("func_name", "")),
+        )
+        sample.append(ranked[0])
+
+    if len(sample) >= max_items:
+        return sample[:max_items]
+
+    seen = {
+        ((item.get("file") or ""), item.get("func_name") or "", item.get("lineno") or 0)
+        for item in sample
+    }
+    for fn in functions:
+        key = ((fn.get("file") or ""), fn.get("func_name") or "", fn.get("lineno") or 0)
+        if key in seen:
+            continue
+        sample.append(fn)
+        seen.add(key)
+        if len(sample) >= max_items:
+            break
+
+    return sample[:max_items]
+
 def sa_phase1_node(state: PipelineState) -> dict:
     def sget(key, default=None):
         if hasattr(state, "get"):
@@ -213,6 +248,8 @@ def sa_phase1_node(state: PipelineState) -> dict:
         }
 
     functions = extract_functions(source_dir, max_functions=300)
+    file_inventory = extract_file_inventory(source_dir, max_files=600)
+    representative_functions = _build_representative_function_sample(functions)
 
     by_lang = {}
     files = set()
@@ -233,6 +270,7 @@ def sa_phase1_node(state: PipelineState) -> dict:
             "scan_coverage": coverage,
             "languages": {},
             "sample_functions": [],
+            "file_inventory": [],
             "detected_frameworks": detected_frameworks,
             "framework_evidence": framework_evidence,
             "architecture_assessment": "소스 스캔 결과가 부족하여 구조 평가를 수행할 수 없습니다.",
@@ -287,7 +325,9 @@ def sa_phase1_node(state: PipelineState) -> dict:
                 "scanned_files": len(files),
                 "scan_coverage": coverage,
                 "languages": by_lang,
-                "sample_functions": functions[:30],
+                "sample_functions": representative_functions,
+                "sample_files_count": len({fn.get("file") for fn in representative_functions if fn.get("file")}),
+                "file_inventory": file_inventory,
                 "detected_frameworks": detected_frameworks,
                 "framework_evidence": framework_evidence,
                 "architecture_assessment": result.architecture_assessment,
@@ -307,7 +347,9 @@ def sa_phase1_node(state: PipelineState) -> dict:
                 "scanned_files": len(files),
                 "scan_coverage": coverage,
                 "languages": by_lang,
-                "sample_functions": functions[:30],
+                "sample_functions": representative_functions,
+                "sample_files_count": len({fn.get("file") for fn in representative_functions if fn.get("file")}),
+                "file_inventory": file_inventory,
                 "detected_frameworks": detected_frameworks,
                 "framework_evidence": framework_evidence,
                 "architecture_assessment": "LLM 분석이 실패해 통계 기반 결과로 대체했습니다.",

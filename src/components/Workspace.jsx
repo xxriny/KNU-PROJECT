@@ -15,15 +15,18 @@ import HomeScreen from "./HomeScreen";
 import PipelineProgress from "./PipelineProgress";
 import { X, Code2, LayoutDashboard, ChevronDown, House, Activity } from "lucide-react";
 
-const PM_TABS = ["rtm", "topology", "context"];
-const PM_LABELS = { rtm: "RTM", topology: "Topology", context: "Context" };
-const SA_TABS = ["sa_overview", "sa_feasibility", "sa_architecture", "sa_security", "sa_topology"];
+const PM_TABS = ["rtm", "context"];
+const PM_LABELS = { rtm: "RTM", context: "Context" };
+const SA_TABS = ["sa_architecture", "sa_security", "sa_topology", "sa_system", "sa_flowchart", "sa_uml", "sa_interfaces", "sa_decisions"];
 const SA_LABELS = {
-  sa_overview: "Overview",
-  sa_feasibility: "Feasibility",
   sa_architecture: "Architecture",
   sa_security: "Security",
   sa_topology: "Topology Queue",
+  sa_system: "System Diagram",
+  sa_flowchart: "Flowchart",
+  sa_uml: "UML Components",
+  sa_interfaces: "Interfaces",
+  sa_decisions: "Decision Table",
 };
 
 export default function Workspace() {
@@ -37,6 +40,7 @@ export default function Workspace() {
     pipelineType,
     thinkingLog,
     resultData,
+    sa_artifacts,
   } = useAppStore();
 
   const [pmOpen, setPmOpen] = useState(false);
@@ -47,11 +51,13 @@ export default function Workspace() {
   const isPmActive = PM_TABS.includes(activeOutputId);
   const isSaActive = SA_TABS.includes(activeOutputId);
   const hasProgress = pipelineStatus === "running" || pipelineStatus === "error" || thinkingLog.length > 0;
+  const SA_PIPELINE_TYPES = ["analysis_create", "analysis_reverse", "analysis_update"];
   const hasSaData = Boolean(
-    resultData?.sa_output ||
+    sa_artifacts ||
     resultData?.sa_phase1 ||
+    resultData?.sa_phase3 ||
     resultData?.sa_phase8
-  );
+  ) || (SA_PIPELINE_TYPES.includes(pipelineType) && pipelineStatus !== "idle");
 
   useEffect(() => {
     const handler = (e) => {
@@ -77,19 +83,26 @@ export default function Workspace() {
       case "progress":
         return <PipelineProgress />;
       case "overview":
-      case "rtm":
-      case "topology":
-      case "context":
       case "sa_overview":
       case "sa_feasibility":
+        return <ResultViewer tabId="overview" />;
+      case "rtm":
+      case "context":
       case "sa_architecture":
       case "sa_security":
       case "sa_topology":
+      case "sa_system":
+      case "sa_flowchart":
+      case "sa_uml":
+      case "sa_interfaces":
+      case "sa_decisions":
         return <ResultViewer tabId={activeOutputId} />;
       default:
         return <HomeScreen />;
     }
   };
+
+  const isCodeViewport = activeViewportTab?.kind === "code";
 
   return (
     <div className="h-full flex flex-col bg-slate-950 text-[15px]">
@@ -238,7 +251,15 @@ export default function Workspace() {
       </div>
 
       <div className="flex-1 overflow-hidden">
-        {renderViewport()}
+        {isCodeViewport ? (
+          renderViewport()
+        ) : (
+          <div className="h-full overflow-auto">
+            <div className="min-w-[1080px] h-full">
+              {renderViewport()}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

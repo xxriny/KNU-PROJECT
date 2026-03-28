@@ -11,8 +11,9 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['"Segoe UI"', "system-ui", "sans-serif"],
-        mono: ['"JetBrains Mono"', '"Fira Code"', "monospace"],
+        sans: ["Pretendard", "Inter", "system-ui", "sans-serif"],
+        display: ["Inter", "system-ui", "sans-serif"],
+        mono: ["\"JetBrains Mono\"", "\"Fira Code\"", "monospace"],
       },
     },
   },

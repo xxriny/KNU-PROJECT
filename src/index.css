@@ -24,18 +24,75 @@
 }
 
 html {
-  font-size: 16px;
+  font-size: 18px;
 }
 
 body {
   margin: 0;
   padding: 0;
-  font-size: 16px;
+  font-size: 18px;
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: "Pretendard", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-family: "Pretendard", "Inter", system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* 영문 전용 영역 (Inter) */
+.font-display {
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+/* 코드/ID 라벨 영역 (JetBrains Mono) */
+code, .font-mono {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+}
+
+/* ResultViewer 문서 탭 전용: 고정 px 텍스트를 +1px 확장 */
+.doc-font-up [class*="text-[10px]"] {
+  font-size: 11px !important;
+}
+
+.doc-font-up [class*="text-[11px]"] {
+  font-size: 12px !important;
+}
+
+.doc-font-up [class*="text-[12px]"] {
+  font-size: 13px !important;
+}
+
+.doc-font-up [class*="text-[13px]"] {
+  font-size: 14px !important;
+}
+
+.doc-font-up [class*="text-[14px]"] {
+  font-size: 15px !important;
+}
+
+.doc-font-up [class*="text-[15px]"] {
+  font-size: 16px !important;
+}
+
+/* SA 시스템 다이어그램 컨트롤: 밝은 배경 제거 */
+.sa-artifact-graph .react-flow__controls {
+  box-shadow: none;
+  background: transparent;
+  border: none;
+}
+
+.sa-artifact-graph .react-flow__controls-button {
+  background: rgba(11, 15, 26, 0.92);
+  border: 1px solid #172033;
+  color: #cbd5e1;
+  box-shadow: none;
+}
+
+.sa-artifact-graph .react-flow__controls-button:hover {
+  background: #172033;
+}
+
+.sa-artifact-graph .react-flow__controls-button svg {
+  fill: #cbd5e1;
 }
 
 .app-drag {

@@ -58,7 +58,7 @@ export default function App() {
 
       {/* ── 메인 3단 레이아웃 ──────────────── */}
       <div className="flex-1 overflow-hidden app-no-drag">
-        <PanelGroup direction="horizontal" autoSaveId="main-layout">
+        <PanelGroup direction="horizontal">
           {/* Left Panel: Sidebar (20%) */}
           <Panel defaultSize={20} minSize={15} maxSize={30}>
             <Sidebar />
@@ -75,11 +75,11 @@ export default function App() {
 
           {/* Right Panel: Chat + Sessions */}
           <Panel defaultSize={24} minSize={18} maxSize={38}>
-            <div className="h-full flex border-l border-slate-700/50 bg-slate-900 overflow-hidden">
-              <div className="flex-1 min-w-0 overflow-hidden">
+            <div className="h-full min-h-0 flex border-l border-slate-700/50 bg-slate-900 overflow-hidden">
+              <div className="flex-1 min-w-0 min-h-0 overflow-hidden">
                 <ChatPanel />
               </div>
-              <div className="w-56 border-l border-slate-700/50 min-w-0 overflow-hidden">
+              <div className="w-56 border-l border-slate-700/50 min-w-0 min-h-0 overflow-hidden">
                 <SessionPanel />
               </div>
             </div>

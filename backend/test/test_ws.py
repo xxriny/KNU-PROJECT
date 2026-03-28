@@ -108,6 +108,7 @@ class WebSocketTests(unittest.TestCase):
         self.assertEqual(messages[-1]["type"], "result")
         self.assertEqual(messages[-1]["data"]["metadata"]["status"], "Completed")
         self.assertNotIn("rtm_matrix", messages[-1]["data"])
+        self.assertNotIn("semantic_graph", messages[-1]["data"])
         self.assertEqual(messages[-1]["data"]["requirements_rtm"][0]["REQ_ID"], "REQ-001")
 
     def test_analyze_reverse_requires_source_dir(self):
@@ -203,6 +204,9 @@ class WebSocketTests(unittest.TestCase):
         self.assertIn("[함수 요약]", fake_pipeline.payload["project_context"])
         self.assertEqual(last_message["data"].get("pipeline_type"), "analysis_reverse")
         self.assertIn("sa_output", last_message["data"])
+        self.assertIn("sa_artifacts", last_message["data"])
+        self.assertIn("flowchart_spec", last_message["data"]["sa_artifacts"])
+        self.assertIn("uml_component_spec", last_message["data"]["sa_artifacts"])
 
     def test_analyze_update_streams_pm_then_sa(self):
         class FakePipeline:
@@ -272,6 +276,7 @@ class WebSocketTests(unittest.TestCase):
         self.assertEqual(messages[-1]["type"], "result")
         self.assertEqual(messages[-1]["data"].get("pipeline_type"), "analysis_update")
         self.assertIn("sa_output", messages[-1]["data"])
+        self.assertIn("sa_artifacts", messages[-1]["data"])
 
 
 if __name__ == "__main__":
