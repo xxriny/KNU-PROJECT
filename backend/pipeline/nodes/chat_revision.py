@@ -113,7 +113,7 @@ def chat_revision_node(state: PipelineState) -> dict:
             "위 정보를 바탕으로 Patch만 반환하세요."
         )
 
-        patch = call_structured(
+        llm_result = call_structured(
             api_key=api_key,
             model=model,
             schema=ChatRevisionPatchOutput,
@@ -122,6 +122,7 @@ def chat_revision_node(state: PipelineState) -> dict:
             max_retries=3,
             temperature=0.2,
         )
+        patch = llm_result.parsed
 
         new_rtm = _apply_revision_patch(prev_rtm, patch)
         new_graph = _normalize_semantic_graph(prev_graph, new_rtm)
@@ -141,7 +142,7 @@ def chat_revision_node(state: PipelineState) -> dict:
             "context_spec": new_spec,
             "agent_reply": agent_reply,
             "chat_history": new_history,
-            "thinking_log": [{"node": "chat_revision", "thinking": patch.thinking or agent_reply}],
+            "thinking_log": [{"node": "chat_revision", "thinking": llm_result.thinking or agent_reply}],
             "current_step": "chat_revision",
         }
 

@@ -128,24 +128,25 @@ def _handle_create_update(sget) -> dict:
     )
 
     try:
-        result: FeasibilityOutput = call_structured(
+        llm_result = call_structured(
             api_key=api_key,
             model=model,
             schema=FeasibilityOutput,
             system_prompt=system_prompt,
             user_msg=user_msg,
         )
+        parsed = llm_result.parsed
         output = {
-            "status": result.status,
-            "complexity_score": result.complexity_score,
-            "decision": result.status,
+            "status": parsed.status,
+            "complexity_score": parsed.complexity_score,
+            "decision": parsed.status,
             "diagnostic_code": "",
-            "reasons": result.reasons,
-            "alternatives": result.alternatives,
-            "high_risk_reqs": result.high_risk_reqs,
+            "reasons": parsed.reasons,
+            "alternatives": parsed.alternatives,
+            "high_risk_reqs": parsed.high_risk_reqs,
         }
         mode_str = "기술 부채 진단" if action_type == "REVERSE_ENGINEER" else "기술 타당성 검토"
-        thinking_msg = f"{mode_str} 완료: {result.status} (점수 {result.complexity_score}) — {result.thinking[:120]}"
+        thinking_msg = f"{mode_str} 완료: {parsed.status} (점수 {parsed.complexity_score}) — {llm_result.thinking[:120]}"
 
     except Exception as e:
         output = {
