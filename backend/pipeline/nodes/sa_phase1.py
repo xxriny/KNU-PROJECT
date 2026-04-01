@@ -305,13 +305,14 @@ def sa_phase1_node(state: PipelineState) -> dict:
         )
 
         try:
-            result: SAPhase1LLMOutput = call_structured(
+            llm_result = call_structured(
                 api_key=api_key,
                 model=model,
                 schema=SAPhase1LLMOutput,
                 system_prompt=SYSTEM_PROMPT,
                 user_msg=user_msg,
             )
+            result = llm_result.parsed
             output = {
                 "status": result.status,
                 "diagnostic_code": "",

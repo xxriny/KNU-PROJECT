@@ -149,7 +149,7 @@ def semantic_indexer_node(state: PipelineState) -> dict:
                     temperature=0.2,
                 )
                 ast_thinking = mapping_result.thinking
-                for m in mapping_result.mappings:
+                for m in mapping_result.parsed.mappings:
                     if m.confidence >= 0.4:
                         code_links_by_req.setdefault(m.req_id, []).append({
                             "file": m.file,

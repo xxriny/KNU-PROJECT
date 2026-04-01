@@ -108,7 +108,7 @@ def sa_phase4_node(state: PipelineState) -> dict:
 
     try:
         # 1. LLM을 통한 동적 패키지 추출
-        result: PackageExtractionOutput = call_structured(
+        llm_result = call_structured(
             api_key=api_key,
             model=model,
             schema=PackageExtractionOutput,
@@ -116,8 +116,8 @@ def sa_phase4_node(state: PipelineState) -> dict:
             user_msg=user_msg,
             max_retries=2
         )
-        proposed = result.proposed_packages
-        thinking_msg = result.thinking
+        proposed = llm_result.parsed.proposed_packages
+        thinking_msg = llm_result.thinking
     except Exception as e:
         proposed = ["langgraph", "pydantic", "python-dotenv", "google-genai"]
         thinking_msg = f"LLM 패키지 추출 실패로 인한 기본값 사용: {e}"
