@@ -111,16 +111,46 @@ function computeLayeredLayout(nodes, rtmMap) {
     });
   }
 
+  // 밀집 그래프에서 엣지 교차를 줄이기 위해 barycentric 정렬을 추가한다.
+  const levelNums = Object.keys(groups).map(Number).sort((a, b) => a - b);
+  for (let pass = 0; pass < 3; pass++) {
+    for (let i = 1; i < levelNums.length; i++) {
+      const curLv = levelNums[i];
+      const prevLv = levelNums[i - 1];
+      const prevOrder = groups[prevLv] || [];
+      const prevIndex = new Map(prevOrder.map((nid, idx) => [nid, idx]));
+      const current = groups[curLv] || [];
+
+      current.sort((a, b) => {
+        const aDeps = (depMap[a] || []).filter((id) => prevIndex.has(id));
+        const bDeps = (depMap[b] || []).filter((id) => prevIndex.has(id));
+        const aBary = aDeps.length
+          ? aDeps.reduce((sum, id) => sum + (prevIndex.get(id) || 0), 0) / aDeps.length
+          : Number.MAX_SAFE_INTEGER;
+        const bBary = bDeps.length
+          ? bDeps.reduce((sum, id) => sum + (prevIndex.get(id) || 0), 0) / bDeps.length
+          : Number.MAX_SAFE_INTEGER;
+        if (aBary !== bBary) return aBary - bBary;
+        const pa = pOrd[rtmMap[a]?.priority] ?? 2;
+        const pb = pOrd[rtmMap[b]?.priority] ?? 2;
+        return pa - pb || a.localeCompare(b);
+      });
+    }
+  }
+
   // 좌표 계산: x = 레이어, y = 세로 중앙 정렬 (v1 start_y 로직 대응)
   const positions = {};
-  const sortedLvs = Object.keys(groups).map(Number).sort((a, b) => a - b);
+  const sortedLvs = levelNums;
+  const maxPerLayer = Math.max(1, ...sortedLvs.map((lv) => (groups[lv] || []).length));
+  const dynamicVGap = Math.max(56, V_GAP - Math.min(30, (maxPerLayer - 3) * 4));
+  const dynamicHGap = Math.max(130, H_GAP - Math.min(70, Math.max(0, sortedLvs.length - 4) * 8));
   for (const lv of sortedLvs) {
     const nids = groups[lv];
-    const x = lv * (NODE_W + H_GAP) + 60;
-    const totalH = nids.length * (NODE_H + V_GAP) - V_GAP;
+    const x = lv * (NODE_W + dynamicHGap) + 60;
+    const totalH = nids.length * (NODE_H + dynamicVGap) - dynamicVGap;
     const startY = Math.max(40, 350 - totalH / 2);
     nids.forEach((nid, i) => {
-      positions[nid] = { x, y: startY + i * (NODE_H + V_GAP) };
+      positions[nid] = { x, y: startY + i * (NODE_H + dynamicVGap) };
     });
   }
 
