@@ -4,8 +4,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipeline.nodes.pm_phase4 import _dedupe_semantic_edges
-from pipeline.nodes.chat_revision import (
+from pipeline.domain.pm.nodes.pm_phase4 import _dedupe_semantic_edges
+from pipeline.domain.chat.chat_revision import (
     ChatRevisionPatchOutput,
     RTMRequirementPatch,
     RTMRevision,
@@ -172,7 +172,7 @@ class RevisionContractTests(unittest.TestCase):
         }
 
         from unittest.mock import patch
-        from pipeline.nodes.pm_phase3 import rtm_builder_node
+        from pipeline.domain.pm.nodes.pm_phase3 import rtm_builder_node
 
         class _Req:
             def __init__(self):
@@ -193,11 +193,30 @@ class RevisionContractTests(unittest.TestCase):
                     "test_criteria": self.test_criteria,
                 }
 
+        class _Req2:
+            def __init__(self):
+                self.REQ_ID = "REQ-002"
+                self.category = "Frontend"
+                self.description = "회원 가입 UI"
+                self.priority = "Must-have"
+                self.depends_on = ["REQ-001"]
+                self.test_criteria = "화면이 뜬다."
+
+            def model_dump(self):
+                return {
+                    "REQ_ID": self.REQ_ID,
+                    "category": self.category,
+                    "description": self.description,
+                    "priority": self.priority,
+                    "depends_on": self.depends_on,
+                    "test_criteria": self.test_criteria,
+                }
+
         class _Result:
             def __init__(self):
-                self.requirements = [_Req()]
+                self.requirements = [_Req(), _Req2()]
 
-        with patch("pipeline.nodes.pm_phase3.call_structured_with_thinking", return_value=(_Result(), "ok")):
+        with patch("pipeline.domain.pm.nodes.pm_phase3.call_structured_with_thinking", return_value=(_Result(), "ok")):
             result = rtm_builder_node(state)
 
         self.assertIn("requirements_rtm", result)

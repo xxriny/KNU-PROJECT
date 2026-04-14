@@ -5,7 +5,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipeline.nodes.sa_phase8 import sa_phase8_node
+from pipeline.domain.sa.nodes.sa_phase8 import sa_phase8_node
 
 
 class SAPhase8DependencyTests(unittest.TestCase):

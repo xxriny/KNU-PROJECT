@@ -5,7 +5,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipeline.nodes.pm_phase5 import _build_tech_stack_details
+from pipeline.domain.pm.nodes.pm_phase5 import _build_tech_stack_details
 
 
 class PMPhase5TechStackTests(unittest.TestCase):

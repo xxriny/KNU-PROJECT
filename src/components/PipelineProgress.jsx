@@ -13,6 +13,10 @@ import {
   Brain,
 } from "lucide-react";
 
+const SCAN_STEPS = [
+  { key: "sa_phase1", label: "프로젝트 분석", desc: "소스 코드 구조 및 프레임워크 스캔" },
+];
+
 const PM_PIPELINE_STEPS = [
   { key: "atomizer", label: "요구사항 원자화", desc: "아이디어를 원자 단위 요구사항으로 분해" },
   { key: "prioritizer", label: "비즈니스 우선순위", desc: "MoSCoW 기반 우선순위 부여" },
@@ -22,19 +26,9 @@ const PM_PIPELINE_STEPS = [
 ];
 
 const SA_PIPELINE_STEPS = [
-  { key: "sa_phase1", label: "SA-01 코드 구조 분석", desc: "함수/모듈 구조 스캔 및 언어 분포 파악" },
+  { key: "sa_merge_project", label: "분석 정보 병합", desc: "코드 분석과 PM 산출물 결합" },
   { key: "sa_phase2", label: "SA-02 영향도 분석", desc: "요구사항 기준 영향 파일과 갭 리포트 도출" },
   { key: "sa_phase3", label: "SA-03 기술 타당성", desc: "복잡도 및 구현 가능성 판정" },
-  { key: "sa_phase4", label: "SA-04 의존성 샌드박스", desc: "패키지/버전 충돌과 위험 검증" },
-  { key: "sa_phase5", label: "SA-05 아키텍처 매핑", desc: "레이어/패턴 기반 구조 매핑" },
-  { key: "sa_phase6", label: "SA-06 보안 경계", desc: "RBAC/권한/신뢰경계 정의" },
-  { key: "sa_phase7", label: "SA-07 인터페이스 계약", desc: "계약/가드레일/호환성 정의" },
-  { key: "sa_phase8", label: "SA-08 위상 정렬", desc: "의존 순서/병렬 배치 계산" },
-  { key: "sa_reverse_context", label: "SA-09 Reverse Summary", desc: "역분석 전용 컨텍스트 요약 생성" },
-];
-
-const SA_CREATE_STEPS = [
-  { key: "sa_phase3", label: "SA-03 기술 타당성", desc: "RTM 기반 복잡도 및 구현 가능성 판정" },
   { key: "sa_phase4", label: "SA-04 의존성 샌드박스", desc: "패키지/버전 충돌과 위험 검증" },
   { key: "sa_phase5", label: "SA-05 아키텍처 매핑", desc: "레이어/패턴 기반 구조 매핑" },
   { key: "sa_phase6", label: "SA-06 보안 경계", desc: "RBAC/권한/신뢰경계 정의" },
@@ -43,10 +37,10 @@ const SA_CREATE_STEPS = [
 ];
 
 const PIPELINE_STEPS_BY_TYPE = {
-  analysis: PM_PIPELINE_STEPS,
-  analysis_create: [...PM_PIPELINE_STEPS, ...SA_CREATE_STEPS],
-  analysis_reverse: SA_PIPELINE_STEPS,
-  analysis_update: [...PM_PIPELINE_STEPS, ...SA_PIPELINE_STEPS],
+  analysis: [...SCAN_STEPS, ...PM_PIPELINE_STEPS],
+  analysis_create: [...SCAN_STEPS, ...PM_PIPELINE_STEPS, ...SA_PIPELINE_STEPS],
+  analysis_reverse: [...SCAN_STEPS, ...SA_PIPELINE_STEPS],
+  analysis_update: [...SCAN_STEPS, ...PM_PIPELINE_STEPS, ...SA_PIPELINE_STEPS],
   revision: [
     { key: "chat_revision", label: "수정 반영", desc: "기존 RTM 결과를 최소 수정으로 갱신" },
   ],

@@ -17,8 +17,8 @@ from version import APP_VERSION, DEFAULT_MODEL
 from observability.logger import get_logger
 
 from connectors.result_logger import delete_session_files, delete_exact_file
-from pipeline.action_type import normalize_action_type
-from pipeline.graph import get_analysis_pipeline, get_revision_pipeline, get_idea_pipeline
+from pipeline.core.action_type import normalize_action_type
+from pipeline.orchestration.facade import get_analysis_pipeline, get_revision_pipeline, get_idea_pipeline
 from orchestration.executor import execute_pipeline
 from orchestration.pipeline_runner import (
     validate_analysis_inputs,
@@ -254,7 +254,7 @@ async def delete_session(run_id: str, req: Optional[DeleteSessionRequest] = None
         if exact_deleted:
             files_deleted += 1
 
-        from pipeline.chroma_client import delete_by_run_id as chroma_delete
+        from pipeline.core.chroma_client import delete_by_run_id as chroma_delete
         docs_deleted = chroma_delete(run_id)
 
         return {

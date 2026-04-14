@@ -1,5 +1,5 @@
 """
-Pipeline Orchestration 계층 (REQ-002)
+Pipeline Orchestration 계층 
 WebSocket 핸들러에서 파이프라인 실행 로직을 분리.
 _ws_run_* 시리즈 + 스트리밍 로직을 단일 모듈에서 관리.
 """
@@ -11,16 +11,22 @@ from datetime import datetime
 
 from fastapi import WebSocket
 
-from pipeline.graph import (
+from pipeline.orchestration.facade import (
     get_analysis_pipeline,
     get_revision_pipeline,
     get_idea_pipeline,
+    get_pm_pipeline,
+    get_sa_pipeline,
+    get_scan_pipeline,
     get_pipeline_routing_map,
+    get_pm_routing_map,
+    get_sa_routing_map,
+    get_scan_routing_map,
     get_revision_routing_map,
     get_idea_chat_routing_map,
 )
-from pipeline.action_type import ANALYSIS_ACTION_TYPES, normalize_action_type
-from pipeline.ast_scanner import extract_functions, summarize_for_llm
+from pipeline.core.action_type import ANALYSIS_ACTION_TYPES, normalize_action_type
+from pipeline.core.ast_scanner import extract_functions, summarize_for_llm
 from result_shaping.result_shaper import shape_result, deep_sanitize
 from observability.logger import get_logger
 from observability.metrics import track_node
@@ -85,32 +91,38 @@ async def _run_pipeline_base(
     save: bool = True,
     result_mutator=None,
     log=None,
-) -> None:
-    """공통 파이프라인 실행, 결과 정형화, 전송, 저장 처리."""
+) -> dict:
+    """공통 파이프라인 실행, 결과 정형화, 전송, 저장 처리.
+    연속 실행을 위해 최종 결과를 반환함.
+    """
     try:
         result = await stream_pipeline_updates(ws, pipeline, state_payload, routing=routing)
 
         if result.get("error"):
             await manager.send_json(ws, {"type": "error", "data": {"message": result["error"]}})
-            return
+            return result
 
-        shaped = shape_result(result)
-        shaped["pipeline_type"] = pipeline_type
-        if result_mutator is not None:
-            result_mutator(shaped)
-
-        await manager.send_json(ws, {"type": "result", "node": result_node, "data": shaped})
-
+        # 중간 단계에서는 저장을 스킵할 수 있음 (save=False)
         if save:
+            shaped = shape_result(result)
+            shaped["pipeline_type"] = pipeline_type
+            if result_mutator is not None:
+                result_mutator(shaped)
+
+            await manager.send_json(ws, {"type": "result", "node": result_node, "data": shaped})
+
             try:
                 save_result(shaped)
             except Exception as log_err:
                 active_log = log or get_logger(state_payload.get("run_id", ""))
                 active_log.warning("save_result_failed", error=str(log_err))
+        
+        return result
 
     except Exception as e:
         get_logger().exception("pipeline execution failed")
         await manager.send_json(ws, {"type": "error", "data": {"message": str(e)}})
+        return {"error": str(e)}
 
 
 # ─── WebSocket 파이프라인 실행 ────────────────────────────
@@ -141,19 +153,50 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
     log = get_logger(run_id)
     log.info("analysis_start", action_type=action_type)
 
-    await _run_pipeline_base(
+    initial_state = {
+        "api_key": api_key,
+        "model": model,
+        "input_idea": idea,
+        "project_context": context,
+        "source_dir": source_dir,
+        "action_type": action_type,
+        "run_id": run_id,
+    }
+
+    # 1. Project Scan (Stage 1) - AST 분석 등 기초 정보 수집
+    scan_result = await _run_pipeline_base(
         ws,
-        pipeline=get_analysis_pipeline(action_type),
-        routing=get_pipeline_routing_map(action_type),
-        state_payload={
-            "api_key": api_key,
-            "model": model,
-            "input_idea": idea,
-            "project_context": context,
-            "source_dir": source_dir,
-            "action_type": action_type,
-            "run_id": run_id,
-        },
+        pipeline=get_scan_pipeline(),
+        routing=get_scan_routing_map(),
+        state_payload=initial_state,
+        pipeline_type="scan_only",
+        save=False,
+        log=log,
+    )
+
+    if scan_result.get("error"):
+        return
+
+    # 2. PM Pipeline (Stage 2) - 요구사항 원자화 및 기획
+    pm_result = await _run_pipeline_base(
+        ws,
+        pipeline=get_pm_pipeline(),
+        routing=get_pm_routing_map(),
+        state_payload=scan_result,
+        pipeline_type="pm_only",
+        save=False,
+        log=log,
+    )
+
+    if pm_result.get("error"):
+        return
+
+    # 3. SA Pipeline (Stage 3) - 아키텍처 설계
+    sa_result = await _run_pipeline_base(
+        ws,
+        pipeline=get_sa_pipeline(),
+        routing=get_sa_routing_map(),
+        state_payload=pm_result,
         pipeline_type=analysis_pipeline_type(action_type),
         result_node="complete",
         save=True,
@@ -228,9 +271,7 @@ async def stream_pipeline_updates(
     start_message: str = routing.get("start_message", "파이프라인 시작...")
     action_type: str = payload.get("action_type", "unknown")
 
-    aggregated: dict = {}
-    if payload.get("run_id"):
-        aggregated["run_id"] = payload["run_id"]
+    aggregated: dict = {**payload}
     seen_thinking: set[tuple[str, str]] = set()
 
     await manager.send_json(ws, {

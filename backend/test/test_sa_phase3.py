@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipeline.nodes.sa_phase3 import sa_phase3_node
+from pipeline.domain.sa.nodes.sa_phase3 import sa_phase3_node
 
 
 def _write_file(path: str, content: str = ""):
@@ -63,7 +63,7 @@ class SAPhase3Tests(unittest.TestCase):
                 "thinking_log": [],
             }
 
-            with patch("pipeline.nodes.sa_phase3.call_structured", side_effect=AssertionError("reverse path should not call LLM")):
+            with patch("pipeline.domain.sa.nodes.sa_phase3.call_structured", side_effect=AssertionError("reverse path should not call LLM")):
                 result = sa_phase3_node(state)
 
             phase = result["sa_phase3"]
@@ -92,7 +92,7 @@ class SAPhase3Tests(unittest.TestCase):
             "thinking_log": [],
         }
 
-        with patch("pipeline.nodes.sa_phase3.call_structured", side_effect=AssertionError("reverse path should not call LLM")):
+        with patch("pipeline.domain.sa.nodes.sa_phase3.call_structured", side_effect=AssertionError("reverse path should not call LLM")):
             result = sa_phase3_node(state)
 
         phase = result["sa_phase3"]
