@@ -51,8 +51,8 @@ CONTAINER_GROUPS: list[dict[str, Any]] = [
         "id": "sa-pipeline",
         "label": "SA Pipeline",
         "layer": "Application",
-        "description": "시스템 아키텍처 분석 노드 체인 (sa_phase1 ~ sa_phase8, merge_project)",
-        "path_prefixes": ["backend/pipeline/sa/nodes/sa_"],
+        "description": "시스템 아키텍처 분석 노드 체인 (system_scan ~ sa_phase8, merge_project)",
+        "path_prefixes": ["backend/pipeline/domain/sa/nodes/", "backend/pipeline/domain/rag/nodes/"],
     },
     {
         "id": "pm-pipeline",
@@ -60,11 +60,9 @@ CONTAINER_GROUPS: list[dict[str, Any]] = [
         "layer": "Application",
         "description": "PM 분석 및 채팅 노드 (pm_phase1~5, atomizer, prioritizer, chat)",
         "path_prefixes": [
-            "backend/pipeline/pm/nodes/pm_",
-            "backend/pipeline/pm/nodes/atomizer",
-            "backend/pipeline/pm/nodes/prioritizer",
-            "backend/pipeline/analysis/idea_chat",
-            "backend/pipeline/analysis/chat_revision",
+            "backend/pipeline/domain/pm/nodes/",
+            "backend/pipeline/domain/chat/idea_chat/",
+            "backend/pipeline/domain/chat/chat_revision/",
         ],
     },
     {

@@ -18,14 +18,14 @@ from result_shaping.container_config import (
 
 
 def compile_sa_artifacts(result: dict[str, Any]) -> dict[str, Any]:
-    sa_phase1 = result.get("sa_phase1") or {}
+    system_scan = result.get("system_scan") or {}
     sa_phase3 = result.get("sa_phase3") or {}
     sa_phase5 = result.get("sa_phase5") or {}
     sa_phase6 = result.get("sa_phase6") or {}
     sa_phase7 = result.get("sa_phase7") or {}
     sa_phase8 = result.get("sa_phase8") or {}
 
-    container_diagram_spec = _build_container_diagram_spec(sa_phase1, sa_phase5)
+    container_diagram_spec = _build_container_diagram_spec(system_scan, sa_phase5)
     flowchart_spec = _build_flowchart_spec(sa_phase8)
     uml_component_spec = _build_uml_component_spec(sa_phase5, sa_phase7, sa_phase8)
     interface_definition_doc = _build_interface_definition_doc(sa_phase7)
@@ -204,12 +204,12 @@ def _normalize_layer_name(layer: str) -> str:
 
 
 def _build_container_diagram_spec(
-    sa_phase1: dict[str, Any],
+    system_scan: dict[str, Any],
     sa_phase5: dict[str, Any],
 ) -> dict[str, Any]:
     """파일 인벤토리를 논리 컨테이너로 그룹화한 Container-level 시스템 다이어그램 생성."""
-    file_inventory = sa_phase1.get("file_inventory") or []
-    detected_frameworks = sa_phase1.get("detected_frameworks") or []
+    file_inventory = system_scan.get("file_inventory") or []
+    detected_frameworks = system_scan.get("detected_frameworks") or []
     mapped_requirements = sa_phase5.get("mapped_requirements") or []
 
     # 1. 파일별 컨테이너 소속 집계 + raw imports 수집

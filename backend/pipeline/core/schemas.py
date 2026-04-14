@@ -159,7 +159,7 @@ class SAStatus(BaseModel):
     risks: List[str] = Field(default_factory=list)
 
 
-class SAPhase1Output(SAStatus):
+class SystemScanOutput(SAStatus):
     source_dir: str = ""
     scanned_files: int = 0
     scanned_functions: int = 0

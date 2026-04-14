@@ -10,14 +10,14 @@ from pipeline.domain.pm.nodes.pm_phase5 import _build_tech_stack_details
 
 class PMPhase5TechStackTests(unittest.TestCase):
     def test_manifest_frameworks_are_promoted_to_detailed_output(self):
-        sa_phase1 = {
+        system_scan = {
             "framework_evidence": [
                 {"framework": "React", "file": "package.json", "reason": "dependencies.react 발견"},
                 {"framework": "FastAPI", "file": "backend/main.py", "reason": "엔트리 파일 발견"},
             ]
         }
 
-        detailed, plain, score = _build_tech_stack_details(["React", "Redis"], sa_phase1)
+        detailed, plain, score = _build_tech_stack_details(["React", "Redis"], system_scan)
 
         detailed_by_name = {item["name"]: item for item in detailed}
         self.assertIn("React", plain)

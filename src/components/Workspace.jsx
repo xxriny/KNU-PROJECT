@@ -54,7 +54,7 @@ export default function Workspace() {
   const SA_PIPELINE_TYPES = ["analysis_create", "analysis_reverse", "analysis_update"];
   const hasSaData = Boolean(
     sa_artifacts ||
-    resultData?.sa_phase1 ||
+    resultData?.system_scan ||
     resultData?.sa_phase3 ||
     resultData?.sa_phase8
   ) || (SA_PIPELINE_TYPES.includes(pipelineType) && pipelineStatus !== "idle");

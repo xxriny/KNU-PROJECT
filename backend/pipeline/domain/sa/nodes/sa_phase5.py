@@ -20,13 +20,13 @@ def sa_phase5_node(state: PipelineState) -> dict:
 
     rtm = sget("requirements_rtm", [])
     action_type = (sget("action_type", "") or "CREATE").strip().upper()
-    sa_phase1 = sget("sa_phase1", {}) or {}
+    system_scan = sget("system_scan", {}) or {}
     api_key = sget("api_key", "")
     model = sget("model", DEFAULT_MODEL)
 
     if not rtm:
         if action_type == "REVERSE_ENGINEER":
-            reverse_mapping = build_reverse_module_mapping(sa_phase1, api_key=api_key, model=model)
+            reverse_mapping = build_reverse_module_mapping(system_scan, api_key=api_key, model=model)
             status = "Pass" if reverse_mapping else "Needs_Clarification"
             thinking = "reverse 모드에서 코드 스캔 기반 계층 매핑 생성" if reverse_mapping else "reverse 모드이지만 매핑 가능한 핵심 모듈이 없음"
             return {

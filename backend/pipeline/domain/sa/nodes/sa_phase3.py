@@ -72,12 +72,12 @@ def _validate_rtm_schema(rtm: list) -> tuple[bool, str]:
 # ── Strategy handlers ────────────────────────────────────────────────
 
 def _handle_reverse(sget) -> dict:
-    sa_phase1 = sget("sa_phase1", {}) or {}
+    system_scan = sget("system_scan", {}) or {}
     rtm = sget("requirements_rtm", [])
     sa_phase2 = sget("sa_phase2", {}) or {}
     gap_report = sa_phase2.get("gap_report", [])
 
-    result = assess_reverse(sget, sa_phase1, rtm, gap_report)
+    result = assess_reverse(sget, system_scan, rtm, gap_report)
     return {
         "sa_phase3": result["output"],
         "thinking_log": (sget("thinking_log", []) or [])

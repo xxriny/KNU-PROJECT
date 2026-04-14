@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 
 const SCAN_STEPS = [
-  { key: "sa_phase1", label: "프로젝트 분석", desc: "소스 코드 구조 및 프레임워크 스캔" },
+  { key: "system_scan", label: "프로젝트 분석", desc: "소스 코드 구조 및 프레임워크 스캔" },
 ];
 
 const PM_PIPELINE_STEPS = [

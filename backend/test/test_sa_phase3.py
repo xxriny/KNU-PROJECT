@@ -48,7 +48,7 @@ class SAPhase3Tests(unittest.TestCase):
             self._build_reverse_repo(temp_dir)
             state = {
                 "action_type": "REVERSE_ENGINEER",
-                "sa_phase1": {
+                "system_scan": {
                     "status": "Pass",
                     "source_dir": temp_dir,
                     "scanned_files": 32,
@@ -77,7 +77,7 @@ class SAPhase3Tests(unittest.TestCase):
     def test_reverse_mode_with_low_evidence_returns_needs_clarification(self):
         state = {
             "action_type": "REVERSE_ENGINEER",
-            "sa_phase1": {
+            "system_scan": {
                 "status": "Pass",
                 "source_dir": "",
                 "scanned_files": 2,
@@ -106,7 +106,7 @@ class SAPhase3Tests(unittest.TestCase):
             self._build_reverse_repo(temp_dir)
             state = {
                 "action_type": "REVERSE_ENGINEER",
-                "sa_phase1": {
+                "system_scan": {
                     "status": "Pass",
                     "source_dir": temp_dir,
                     "scanned_files": 18,
@@ -149,7 +149,7 @@ class SAPhase3Tests(unittest.TestCase):
             self._build_reverse_repo(temp_dir)
             state = {
                 "action_type": "REVERSE_ENGINEER",
-                "sa_phase1": {
+                "system_scan": {
                     "status": "Pass",
                     "source_dir": temp_dir,
                     "scanned_files": 22,
@@ -175,7 +175,7 @@ class SAPhase3Tests(unittest.TestCase):
             self._build_reverse_repo(temp_dir)
             state = {
                 "action_type": "REVERSE_ENGINEER",
-                "sa_phase1": {
+                "system_scan": {
                     "status": "Pass",
                     "source_dir": temp_dir,
                     "scanned_files": 25,
@@ -203,7 +203,7 @@ class SAPhase3Tests(unittest.TestCase):
             self._build_reverse_repo(temp_dir)
             state = {
                 "action_type": "REVERSE_ENGINEER",
-                "sa_phase1": {
+                "system_scan": {
                     "status": "Pass",
                     "source_dir": temp_dir,
                     "scanned_files": 15,

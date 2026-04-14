@@ -54,7 +54,7 @@ class _AnalysisFields(TypedDict, total=False):
     metadata: dict                   # {"project_name": "...", "action_type": "...", ...}
     clarification_questions: list    # Needs_Clarification 시 질문 목록
     project_state_path: str          # PROJECT_STATE.md 저장 경로
-    sa_phase1: dict                  # 기존 코드 구조 분석 결과
+    system_scan: dict                  # 기존 코드 구조 분석 결과
     sa_phase2: dict                  # 영향도 분석 결과
     sa_phase3: dict                  # 기술 타당성 결과
     sa_phase4: dict                  # 의존성 샌드박스 검증 결과

@@ -44,11 +44,11 @@ class ReverseAssessment(BaseModel):
 
 def _validate_phase1_readiness(phase1: dict) -> tuple[bool, str]:
     if not isinstance(phase1, dict) or not phase1:
-        return False, "sa_phase1 결과가 없습니다."
+        return False, "system_scan 결과가 없습니다."
 
     status = str(phase1.get("status", "")).strip()
     if status in {"Fail", "Error"}:
-        return False, f"sa_phase1 상태가 {status} 입니다."
+        return False, f"system_scan 상태가 {status} 입니다."
 
     scanned_functions = int(phase1.get("scanned_functions", 0) or 0)
     scanned_files = int(phase1.get("scanned_files", 0) or 0)
@@ -56,7 +56,7 @@ def _validate_phase1_readiness(phase1: dict) -> tuple[bool, str]:
     evidence = phase1.get("framework_evidence", []) or []
 
     if scanned_functions == 0 and scanned_files == 0 and not frameworks and not evidence:
-        return False, "sa_phase1에서 코드/프레임워크 증거를 확보하지 못했습니다."
+        return False, "system_scan에서 코드/프레임워크 증거를 확보하지 못했습니다."
 
     return True, ""
 
@@ -117,10 +117,10 @@ def _append_unique(items: list[str], message: str):
         items.append(message)
 
 
-def _collect_reverse_evidence(sa_phase1: dict, source_dir: str, has_rtm: bool) -> ReverseEvidence:
+def _collect_reverse_evidence(system_scan: dict, source_dir: str, has_rtm: bool) -> ReverseEvidence:
     root = (source_dir or "").strip()
-    framework_evidence = sa_phase1.get("framework_evidence", []) or []
-    languages = sa_phase1.get("languages", {}) or {}
+    framework_evidence = system_scan.get("framework_evidence", []) or []
+    languages = system_scan.get("languages", {}) or {}
 
     has_observability = (
         _path_exists(root, "backend", "observability", "logger.py")
@@ -142,8 +142,8 @@ def _collect_reverse_evidence(sa_phase1: dict, source_dir: str, has_rtm: bool) -
     )
 
     evidence_quality = 0
-    scanned_files = int(sa_phase1.get("scanned_files", 0) or 0)
-    scanned_functions = int(sa_phase1.get("scanned_functions", 0) or 0)
+    scanned_files = int(system_scan.get("scanned_files", 0) or 0)
+    scanned_functions = int(system_scan.get("scanned_functions", 0) or 0)
 
     if scanned_files >= 20:
         evidence_quality += 30
@@ -184,7 +184,7 @@ def _collect_reverse_evidence(sa_phase1: dict, source_dir: str, has_rtm: bool) -
         source_dir=root,
         scanned_files=scanned_files,
         scanned_functions=scanned_functions,
-        detected_frameworks=sa_phase1.get("detected_frameworks", []) or [],
+        detected_frameworks=system_scan.get("detected_frameworks", []) or [],
         framework_evidence_count=len(framework_evidence),
         language_count=len(languages),
         has_tests=_detect_tests(root),
@@ -219,8 +219,8 @@ def _collect_reverse_high_risk_reqs(rtm: list, gap_report: list) -> list[str]:
     return high_risk
 
 
-def _assess_reverse_maintainability(sa_phase1: dict, rtm: list, gap_report: list) -> ReverseAssessment:
-    evidence = _collect_reverse_evidence(sa_phase1, sa_phase1.get("source_dir", ""), bool(rtm))
+def _assess_reverse_maintainability(system_scan: dict, rtm: list, gap_report: list) -> ReverseAssessment:
+    evidence = _collect_reverse_evidence(system_scan, system_scan.get("source_dir", ""), bool(rtm))
     breakdown: list[dict] = []
 
     def add_score(code: str, delta: int, message: str):
@@ -346,10 +346,10 @@ def _assess_reverse_maintainability(sa_phase1: dict, rtm: list, gap_report: list
     )
 
 
-def assess_reverse(sget, sa_phase1: dict, rtm: list, gap_report: list) -> dict:
+def assess_reverse(sget, system_scan: dict, rtm: list, gap_report: list) -> dict:
     """REVERSE_ENGINEER 모드의 유지보수성 평가. 결과 dict와 thinking 메시지를 반환."""
     if not rtm:
-        ready, reason = _validate_phase1_readiness(sa_phase1)
+        ready, reason = _validate_phase1_readiness(system_scan)
         if not ready:
             return {
                 "output": {
@@ -364,7 +364,7 @@ def assess_reverse(sget, sa_phase1: dict, rtm: list, gap_report: list) -> dict:
                 "thinking_msg": "phase1 컨텍스트 부족 — reverse 진단 생략",
             }
 
-    assessment = _assess_reverse_maintainability(sa_phase1, rtm, gap_report)
+    assessment = _assess_reverse_maintainability(system_scan, rtm, gap_report)
     output = {
         "status": assessment.status,
         "complexity_score": assessment.complexity_score,

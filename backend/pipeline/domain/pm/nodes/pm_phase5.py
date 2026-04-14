@@ -34,8 +34,8 @@ SYSTEM_PROMPT = """\
 _LOG_DIR = LOG_DIR
 
 
-def _build_tech_stack_details(plain_suggestions: list[str], sa_phase1: dict) -> tuple[list[dict], list[str], float]:
-    framework_evidence = sa_phase1.get("framework_evidence", []) or []
+def _build_tech_stack_details(plain_suggestions: list[str], system_scan: dict) -> tuple[list[dict], list[str], float]:
+    framework_evidence = system_scan.get("framework_evidence", []) or []
     manifest_map: dict[str, dict] = {}
     for item in framework_evidence:
         name = (item.get("framework") or "").strip()
@@ -138,7 +138,7 @@ def context_spec_node(state: PipelineState) -> dict:
     rtm = sget("requirements_rtm", [])
     sg = sget("semantic_graph", {})
     meta = sget("metadata", {})
-    sa_phase1 = sget("sa_phase1", {}) or {}
+    system_scan = sget("system_scan", {}) or {}
     
     # 원본 아이디어와 문맥을 가져옵니다. (컨텍스트 기아 해결)
     project_context = sget("project_context", "")
@@ -156,9 +156,9 @@ def context_spec_node(state: PipelineState) -> dict:
         "categories": list(set(r.get("category", "") for r in rtm)),
         "semantic_nodes": len(sg.get("nodes", [])),
         "semantic_edges": len(sg.get("edges", [])),
-        "manifest_detected_frameworks": sa_phase1.get("detected_frameworks", []),
-        "manifest_evidence_count": len(sa_phase1.get("framework_evidence", []) or []),
-        "manifest_languages": len(sa_phase1.get("languages", {}) or {}),
+        "manifest_detected_frameworks": system_scan.get("detected_frameworks", []),
+        "manifest_evidence_count": len(system_scan.get("framework_evidence", []) or []),
+        "manifest_languages": len(system_scan.get("languages", {}) or {}),
         # 5개만 넘기는 대신, 비용 절감을 위해 ID와 카테고리 등 핵심 뼈대만 요약해서 전체를 넘김
         "requirements_summary": [{"ID": r.get("REQ_ID"), "cat": r.get("category"), "desc": r.get("description")} for r in rtm]
     }
@@ -177,7 +177,7 @@ def context_spec_node(state: PipelineState) -> dict:
 
         spec = result.model_dump()
         spec.pop("thinking", None)
-        detailed, plain, score = _build_tech_stack_details(spec.get("tech_stack_suggestions", []), sa_phase1)
+        detailed, plain, score = _build_tech_stack_details(spec.get("tech_stack_suggestions", []), system_scan)
         spec["tech_stack_suggestions_detailed"] = detailed
         spec["tech_stack_suggestions"] = plain
         spec["stack_confidence_score"] = score

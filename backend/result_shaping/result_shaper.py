@@ -63,7 +63,7 @@ _EXCLUDED_KEYS: frozenset[str] = frozenset({
 def _collect_skipped_phases(sanitized: dict[str, Any]) -> list[str]:
     return [
         phase
-        for phase in ("sa_phase1", "sa_phase2")
+        for phase in ("system_scan", "sa_phase2")
         if isinstance(sanitized.get(phase), dict)
         and sanitized.get(phase, {}).get("status") == "Skipped"
     ]
@@ -120,7 +120,7 @@ def _build_data_flags(
 ) -> dict[str, bool]:
     return {
         "has_rtm": len(requirements_rtm) > 0,
-        "has_phase1_scan": isinstance(sanitized.get("sa_phase1"), dict),
+        "has_phase1_scan": isinstance(sanitized.get("system_scan"), dict),
         "has_sa_artifacts": isinstance(sanitized.get("sa_artifacts"), dict),
     }
 

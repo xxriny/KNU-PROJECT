@@ -16,7 +16,7 @@ from pipeline.domain.pm.nodes.pm_phase4 import semantic_indexer_node
 from pipeline.domain.pm.nodes.pm_phase5 import context_spec_node
 
 # SA nodes
-from pipeline.domain.sa.nodes.sa_phase1 import sa_phase1_node
+from pipeline.domain.rag.nodes.system_scanner import system_scan_node
 from pipeline.domain.sa.nodes.merge_project import sa_merge_project_node
 from pipeline.domain.sa.nodes.sa_phase2 import sa_phase2_node
 from pipeline.domain.sa.nodes.sa_phase3 import sa_phase3_node
@@ -28,7 +28,7 @@ from pipeline.domain.sa.nodes.sa_phase8 import sa_phase8_node
 
 
 _SCAN_CHAIN: tuple[str, ...] = (
-    "sa_phase1",
+    "system_scan",
 )
 
 _PM_CHAIN: tuple[str, ...] = (
@@ -82,9 +82,9 @@ def _chain_to_next_nodes(chain: tuple[str, ...]) -> dict[str, list[str]]:
 
 def _build_scan_pipeline():
     workflow = StateGraph(PipelineState)
-    workflow.add_node("sa_phase1", sa_phase1_node)
-    workflow.add_edge(START, "sa_phase1")
-    workflow.add_edge("sa_phase1", END)
+    workflow.add_node("system_scan", system_scan_node)
+    workflow.add_edge(START, "system_scan")
+    workflow.add_edge("system_scan", END)
     return workflow.compile()
 
 
@@ -161,7 +161,7 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     """Compatibility shim."""
     workflow = StateGraph(PipelineState)
     # Scan
-    workflow.add_node("sa_phase1", sa_phase1_node)
+    workflow.add_node("system_scan", system_scan_node)
     # PM
     workflow.add_node("atomizer", atomizer_node)
     workflow.add_node("prioritizer", prioritizer_node)

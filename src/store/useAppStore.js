@@ -163,7 +163,7 @@ const useAppStore = create((set, get) => {
   sa_reverse_context: null,
   sa_output: null,
   sa_artifacts: null,
-  sa_phase1: null,
+  system_scan: null,
   sa_phase2: null,
   sa_phase3: null,
   sa_phase4: null,
