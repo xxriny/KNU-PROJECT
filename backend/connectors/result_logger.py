@@ -14,12 +14,13 @@ from pathlib import Path
 from observability.logger import get_logger
 
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# 신규 저장 위치: backend/Data
-DATA_DIR = os.path.join(_BACKEND_DIR, "Data")
+# 신규 저장 위치: backend/storage/sessions
+DATA_DIR = os.path.join(_BACKEND_DIR, "storage", "sessions")
 LOG_DIR = DATA_DIR
 
 # 과거 산출물 정리를 위한 레거시 경로 유지
 LEGACY_LOG_DIRS = [
+    os.path.join(_BACKEND_DIR, "Data"),
     os.path.join(_BACKEND_DIR, "test", "json"),
 ]
 

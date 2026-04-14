@@ -46,6 +46,8 @@ class _AnalysisFields(TypedDict, total=False):
     source_dir: str                  # AST 스캔 대상 소스코드 폴더 경로
     action_type: str                 # CREATE / UPDATE / REVERSE_ENGINEER / Needs_Clarification
     raw_requirements: list           # [{"id": "REQ-001", ...}]
+    features: list                   # RequirementFeature 목록 (requirement_analyzer 산출물)
+    next_crawler_inputs: list        # Planner -> Crawler 루프용 쿼리 목록
     prioritized_requirements: list   # raw_requirements + priority, rationale
     rtm_matrix: list                 # [DEPRECATED] requirements_rtm 사용 권장
     requirements_rtm: list           # 최종 RTM (모든 필드 포함)
@@ -53,7 +55,6 @@ class _AnalysisFields(TypedDict, total=False):
     context_spec: dict               # {"summary": "...", "key_decisions": [...], ...}
     metadata: dict                   # {"project_name": "...", "action_type": "...", ...}
     clarification_questions: list    # Needs_Clarification 시 질문 목록
-    project_state_path: str          # PROJECT_STATE.md 저장 경로
     system_scan: dict                  # 기존 코드 구조 분석 결과
     sa_phase2: dict                  # 영향도 분석 결과
     sa_phase3: dict                  # 기술 타당성 결과
@@ -65,6 +66,19 @@ class _AnalysisFields(TypedDict, total=False):
     sa_output: dict                  # SA 최종 통합 산출물
     merged_project: dict             # merge_project가 생성한 단일 결합 입력
     merge_report: dict               # merge_project 판정/병합 리포트
+
+    # ── 기술 스택 (PM Loop) 필드 ────────────────
+    loop_count: int                  # 회귀 루프 횟수 추적
+    stack_crawler_output: dict       # 크롤링 결과
+    guardian_output: dict            # 검증 결과
+    stack_embedding_output: dict     # 벡터화 결과
+    stack_planner_output: dict       # 최종 매핑 결과
+    stack_rag_context: str           # RAG에서 검색된 승인된 스택 정보
+
+    # ── PM Analysis 최종 산출물 ─────────────────
+    pm_bundle: dict                  # 최종 PM_BUNDLE JSON (RTM + tech_stacks)
+    pm_coverage_rate: float          # APPROVED 스택 커버리지 (0~1)
+    pm_warnings: list                # 미매핑/호환성 경고 목록
 
 
 # ── 채팅 수정 모드 필드 ─────────────────────────

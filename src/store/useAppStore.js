@@ -32,7 +32,20 @@ import { debounce } from "./debounce";
 const useAppStore = create((set, get) => {
   const debouncedSave = debounce(() => get().saveCurrentSession(), 500);
 
+  // 초기 테마 로드 (기본값 다크)
+  const savedTheme = localStorage.getItem("theme");
+  const initialDarkMode = savedTheme ? savedTheme === "dark" : true;
+
   return {
+    isDarkMode: initialDarkMode,
+    setDarkMode: (isDark) => {
+      set({ isDarkMode: isDark });
+      localStorage.setItem("theme", isDark ? "dark" : "light");
+    },
+    toggleDarkMode: () => {
+      const nextDark = !get().isDarkMode;
+      get().setDarkMode(nextDark);
+    },
   ...createWsSlice(set, get),
   ...createConfigSlice(set, get),
 
@@ -173,6 +186,13 @@ const useAppStore = create((set, get) => {
   sa_phase8: null,
   metadata: null,
   selectedMode: "create",
+
+  // ── 디버그 시스템 ──
+  debugLogs: [],
+  addDebugLog: (log) => set((state) => ({
+    debugLogs: [{ ...log, timestamp: Date.now() }, ...state.debugLogs].slice(0, 50)
+  })),
+  clearDebugLogs: () => set({ debugLogs: [] }),
 
   _processResult: (data, node = "complete") => {
     if (node === "idea_chat") {
@@ -517,18 +537,16 @@ const useAppStore = create((set, get) => {
   deleteSession: async (id) => {
     const { backendPort, sessions } = get();
     const session = sessions.find((entry) => entry.id === id);
-    const projectStatePath = session?.resultData?.project_state_path || "";
     const backendDeleteId = session?.resultData?.run_id
-      || extractRunId(projectStatePath)
-      || (extractRunId(id) || null);
+      || extractRunId(id) || null;
     
-    // 백엔드 DELETE API 호출 (세션 완전 삭제: JSON + PROJECT_STATE.md + ChromaDB)
+    // 백엔드 DELETE API 호출 (세션 완전 삭제: JSON + ChromaDB)
     if (backendPort && backendDeleteId) {
       try {
         const res = await fetch(`http://127.0.0.1:${backendPort}/api/session/${backendDeleteId}`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ project_state_path: projectStatePath }),
+          body: JSON.stringify({}),
         });
         if (!res.ok) {
           const errorData = await res.json();
@@ -539,10 +557,7 @@ const useAppStore = create((set, get) => {
         }
       } catch (err) {
         console.error("[Delete Session] Fetch failed:", err);
-        // UI는 낙관적 업데이트했으므로 계속 진행
       }
-    } else if (backendPort) {
-      console.warn("[Delete Session] Missing backend deletion id", { id, projectStatePath });
     }
     
     // 로컬 상태 정리 (기존 로직)

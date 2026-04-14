@@ -70,14 +70,16 @@ export default function HomeScreen() {
     }
   };
 
+  const { isDarkMode } = useAppStore();
+
   return (
-    <div className="h-full flex flex-col items-center justify-center bg-slate-950 px-8">
+    <div className={`h-full flex flex-col items-center justify-center px-8 transition-colors duration-200 ${isDarkMode ? "bg-[var(--bg-primary)]" : "bg-[var(--bg-secondary)]"}`}>
       {/* ── 타이틀 ────────────────────────── */}
       <div className="text-center mb-8">
-        <h1 className="text-2xl font-bold text-slate-200 mb-2">
+        <h1 className={`text-2xl font-bold mb-2 ${isDarkMode ? "text-slate-100" : "text-slate-900"}`}>
           PM Agent Pipeline
         </h1>
-        <p className="text-sm text-slate-500">
+        <p className={`text-sm ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>
           아이디어를 구조화된 요구사항 명세서로 변환합니다
         </p>
       </div>
@@ -93,8 +95,10 @@ export default function HomeScreen() {
               onClick={() => setSelectedMode(mode.key)}
               className={`relative w-48 p-4 rounded-xl border-2 transition-all duration-200 text-left ${
                 isSelected
-                  ? `${mode.borderColor} bg-slate-800/80 shadow-lg scale-[1.02]`
-                  : "border-slate-700/50 bg-slate-900/50 hover:border-slate-600 hover:bg-slate-800/50"
+                  ? `${mode.borderColor} ${isDarkMode ? "bg-slate-800/80 shadow-lg" : "bg-white shadow-md"} scale-[1.02]`
+                  : isDarkMode
+                    ? "border-slate-800 bg-slate-900/50 hover:border-slate-700 hover:bg-slate-800/50"
+                    : "border-slate-200 bg-white/50 hover:border-slate-300 hover:bg-white"
               }`}
             >
               <div
@@ -102,7 +106,7 @@ export default function HomeScreen() {
               >
                 <Icon size={20} className="text-white" />
               </div>
-              <h3 className="text-sm font-semibold text-slate-200 mb-1">
+              <h3 className={`text-sm font-semibold mb-1 ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>
                 {mode.label}
               </h3>
               <p className="text-[12px] text-slate-500 leading-relaxed">
@@ -139,7 +143,11 @@ export default function HomeScreen() {
               value={contextText}
               onChange={(e) => setContextText(e.target.value)}
               placeholder="기존 프로젝트 컨텍스트 (코드, 문서 등)를 붙여넣으세요..."
-              className="w-full h-24 px-4 py-3 text-sm bg-slate-900 border border-slate-700 rounded-lg text-slate-300 placeholder-slate-600 resize-none focus:outline-none focus:border-blue-500 transition-colors"
+              className={`w-full h-24 px-4 py-3 text-sm border rounded-lg resize-none focus:outline-none focus:border-blue-500 transition-colors ${
+                isDarkMode 
+                  ? "bg-slate-900 border-slate-700 text-slate-300 placeholder-slate-600" 
+                  : "bg-white border-slate-200 text-slate-700 placeholder-slate-400"
+              }`}
             />
           </div>
         )}
@@ -158,7 +166,11 @@ export default function HomeScreen() {
                   : "모드를 선택하고 아이디어를 입력하세요..."
               }
               rows={2}
-              className="w-full px-4 py-3 pr-24 text-sm bg-slate-900 border border-slate-700 rounded-xl text-slate-300 placeholder-slate-600 resize-none focus:outline-none focus:border-blue-500 transition-colors"
+              className={`w-full px-4 py-3 pr-24 text-sm border rounded-xl resize-none focus:outline-none focus:border-blue-500 transition-colors ${
+                isDarkMode 
+                  ? "bg-slate-900 border-slate-700 text-slate-300 placeholder-slate-600" 
+                  : "bg-white border-slate-200 text-slate-700 placeholder-slate-400"
+              }`}
             />
             <div className="absolute right-2 bottom-2 flex items-center gap-1">
               <button

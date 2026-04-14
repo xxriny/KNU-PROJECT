@@ -12,6 +12,7 @@
 import React, { useEffect } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import useAppStore from "./store/useAppStore";
+import GlobalErrorBoundary from "./components/GlobalErrorBoundary";
 import Sidebar from "./components/Sidebar";
 import Workspace from "./components/Workspace";
 import ChatPanel from "./components/ChatPanel";
@@ -20,6 +21,7 @@ import StatusBar from "./components/StatusBar";
 
 export default function App() {
   const {
+    isDarkMode,
     setBackendPort,
     connectWebSocket,
     fetchConfig,
@@ -50,10 +52,21 @@ export default function App() {
     initBackend();
   }, []);
 
+  // ── 테마 동기화 (Electron TitleBarOverlay) ──
+  useEffect(() => {
+    if (window.electronAPI?.setTitleBarTheme) {
+      // 윈도우 프레임 업데이트 안정성을 위해 아주 짧은 지연 후 호출
+      const timer = setTimeout(() => {
+        window.electronAPI.setTitleBarTheme(isDarkMode);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isDarkMode]);
+
   return (
-    <div className="h-screen w-screen flex flex-col bg-slate-950 overflow-hidden">
-      <div className="h-9 app-drag flex items-center border-b border-slate-800 bg-slate-950/95 px-3">
-        <span className="text-[13px] text-slate-400 tracking-wide">PM Agent Pipeline v2</span>
+    <div className={`h-screen w-screen flex flex-col overflow-hidden transition-colors duration-200 ${isDarkMode ? "dark bg-[var(--bg-primary)] text-[var(--text-primary)]" : "bg-[var(--bg-primary)] text-[var(--text-primary)]"}`}>
+      <div className={`h-9 app-drag flex items-center border-b px-3 ${isDarkMode ? "border-[var(--border)] bg-[var(--bg-primary)]" : "border-[var(--border)] bg-[var(--bg-secondary)]"}`}>
+        <span className={`text-[13px] tracking-wide ${isDarkMode ? "text-[var(--text-secondary)]" : "text-[var(--text-secondary)]"}`}>PM Agent Pipeline v2</span>
       </div>
 
       {/* ── 메인 3단 레이아웃 ──────────────── */}
@@ -68,7 +81,9 @@ export default function App() {
 
           {/* Center Panel: Workspace (60%) */}
           <Panel defaultSize={60} minSize={40}>
-            <Workspace />
+            <GlobalErrorBoundary>
+              <Workspace />
+            </GlobalErrorBoundary>
           </Panel>
 
           <PanelResizeHandle />
