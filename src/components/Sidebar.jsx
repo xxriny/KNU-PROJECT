@@ -16,6 +16,8 @@ import {
   Settings,
   Key,
   Cpu,
+  Sun,
+  Moon,
 } from "lucide-react";
 
 export default function Sidebar() {
@@ -29,12 +31,14 @@ export default function Sidebar() {
     backendHasKey,
     projectFolder,
     selectAndScanFolder,
+    isDarkMode,
+    toggleDarkMode,
   } = useAppStore();
 
   const [showSettings, setShowSettings] = useState(false);
 
   return (
-    <div className="h-full flex flex-col bg-slate-900 border-r border-slate-700/50 text-[15px]">
+    <div className="h-full flex flex-col bg-[var(--bg-secondary)] border-r border-[var(--border)] text-[15px] transition-colors duration-200">
       {/* ── 헤더 ──────────────────────────── */}
       <div className="px-4 py-3 border-b border-slate-700/50">
         <div className="flex items-center gap-2">
@@ -42,7 +46,7 @@ export default function Sidebar() {
             <Cpu size={14} className="text-white" />
           </div>
           <div>
-            <h1 className="text-base font-semibold text-slate-200">PM Agent</h1>
+            <h1 className={`text-base font-semibold ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>PM Agent</h1>
             <p className="text-[12px] text-slate-500">Pipeline v2.0</p>
           </div>
         </div>
@@ -136,7 +140,11 @@ export default function Sidebar() {
               <select
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
-                className="w-full px-2.5 py-1.5 text-[15px] bg-slate-800 border border-slate-700 rounded-md text-slate-300 focus:outline-none focus:border-blue-500 transition-colors"
+                className={`w-full px-2.5 py-1.5 text-[15px] border rounded-md focus:outline-none focus:border-blue-500 transition-colors ${
+                  isDarkMode 
+                    ? "bg-slate-800 border-slate-700 text-slate-300" 
+                    : "bg-white border-slate-200 text-slate-700"
+                }`}
               >
                 {availableModels.map((availableModel) => (
                   <option key={availableModel} value={availableModel}>
@@ -144,6 +152,21 @@ export default function Sidebar() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* Theme Toggle */}
+            <div className="pt-2 border-t border-slate-700/30">
+              <button
+                onClick={toggleDarkMode}
+                className={`w-full flex items-center gap-2 px-2.5 py-2 text-[14px] rounded-md transition-all ${
+                  isDarkMode
+                    ? "bg-slate-800/50 text-slate-400 hover:text-yellow-400"
+                    : "bg-slate-200/50 text-slate-600 hover:text-blue-600"
+                }`}
+              >
+                {isDarkMode ? <Sun size={13} /> : <Moon size={13} />}
+                <span>{isDarkMode ? "라이트 모드" : "다크 모드"}</span>
+              </button>
             </div>
           </div>
         )}

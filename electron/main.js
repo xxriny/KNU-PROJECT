@@ -238,8 +238,7 @@ function killPythonProcess() {
 // ═══════════════════════════════════════════
 
 function createWindow() {
-  // Windows 네이티브 프레임과 앱 테마를 강제로 다크로 동기화
-  nativeTheme.themeSource = "dark";
+  // 초기 테마는 시스템 설정을 따르거나 기본값 유지 (렌더러에서 나중에 업데이트됨)
 
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -247,11 +246,11 @@ function createWindow() {
     minWidth: 1200,
     minHeight: 700,
     title: "PM Agent Pipeline v2",
-    backgroundColor: "#0f172a",
+    backgroundColor: "#020617",
     titleBarStyle: "hidden",
     titleBarOverlay: {
-      color: "#0f172a",
-      symbolColor: "#ffffff",
+      color: "#020617",
+      symbolColor: "#94a3b8",
       height: 36,
     },
     autoHideMenuBar: true,
@@ -299,6 +298,30 @@ ipcMain.handle("select-folder", async () => {
     title: "프로젝트 폴더 선택",
   });
   return result.canceled ? null : result.filePaths[0];
+});
+
+// 타이틀 바 오버레이 테마 실시간 업데이트 (Windows 전용)
+ipcMain.handle("set-titlebar-theme", (event, isDark) => {
+  if (!mainWindow) return;
+
+  safeLog(`[Electron] Received theme update request: isDark=${isDark}`);
+
+  try {
+    // 1. 네이티브 테마 소스 먼저 변경
+    nativeTheme.themeSource = isDark ? "dark" : "light";
+
+    // 2. 오버레이 색상 적용
+    const themeColors = isDark 
+      ? { color: "#020617", symbolColor: "#94a3b8" }  // Dark (index.css --bg-primary 기반)
+      : { color: "#f8fafc", symbolColor: "#475569" }; // Light (index.css --bg-secondary 기반)
+
+    mainWindow.setTitleBarOverlay({
+      ...themeColors,
+      height: 36,
+    });
+  } catch (err) {
+    safeError("[Electron] Failed to update title bar overlay:", err.message);
+  }
 });
 
 // 렌더러가 백엔드 상태를 요청

@@ -8,7 +8,7 @@ import useAppStore from "../store/useAppStore";
 import { Wifi, WifiOff, Loader2, Cpu } from "lucide-react";
 
 export default function StatusBar() {
-  const { wsStatus, pipelineStatus, model, backendPort } = useAppStore();
+  const { wsStatus, pipelineStatus, model, backendPort, isDarkMode } = useAppStore();
 
   const wsColors = {
     connected: "text-green-400",
@@ -32,7 +32,11 @@ export default function StatusBar() {
   };
 
   return (
-    <div className="h-6 flex items-center justify-between px-3 bg-slate-900 border-t border-slate-700/50 text-[12px] text-slate-500">
+    <div className={`h-7 px-3 flex items-center justify-between border-t transition-colors duration-200 text-[12px] ${
+      isDarkMode 
+        ? "bg-slate-950 border-slate-800 text-slate-500" 
+        : "bg-slate-50 border-slate-200 text-slate-500"
+    }`}>
       {/* 좌측 */}
       <div className="flex items-center gap-4">
         {/* WebSocket 상태 */}

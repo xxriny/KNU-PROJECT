@@ -18,11 +18,11 @@ const SCAN_STEPS = [
 ];
 
 const PM_PIPELINE_STEPS = [
-  { key: "atomizer", label: "요구사항 원자화", desc: "아이디어를 원자 단위 요구사항으로 분해" },
-  { key: "prioritizer", label: "비즈니스 우선순위", desc: "MoSCoW 기반 우선순위 부여" },
-  { key: "rtm_builder", label: "RTM 매트릭스", desc: "의존성 매핑 및 추적 매트릭스 생성" },
-  { key: "semantic_indexer", label: "시맨틱 인덱싱", desc: "의미 기반 그래프 구조화" },
-  { key: "context_spec", label: "컨텍스트 명세서", desc: "프로젝트 컨텍스트 종합 정리" },
+  { key: "requirement_analyzer", label: "요구사항 분석", desc: "사용자 아이디어를 원자 단위 요구사항으로 정밀 분석" },
+  { key: "stack_planner", label: "기술 스택 전략", desc: "요구사항별 최적의 라이브러리 및 프레임워크 선정" },
+  { key: "stack_crawling", label: "지능형 지식 탐색", desc: "부족한 기술 지식을 외부 레지스트리에서 자율 검색" },
+  { key: "guardian", label: "기술 정합성 검증", desc: "선정된 스택의 호환성, 보안성 및 품질 최종 검토" },
+  { key: "pm_analysis", label: "통합 분석 및 번들링", desc: "분석 결과 통합 및 최종 PM_BUNDLE 스펙 확정" },
 ];
 
 const SA_PIPELINE_STEPS = [
@@ -50,7 +50,7 @@ const PIPELINE_STEPS_BY_TYPE = {
 };
 
 export default function PipelineProgress() {
-  const { pipelineNodes, thinkingLog, pipelineStatus, pipelineError, pipelineType } = useAppStore();
+  const { pipelineNodes, thinkingLog, pipelineStatus, pipelineError, pipelineType, isDarkMode } = useAppStore();
   const logEndRef = useRef(null);
   const steps = PIPELINE_STEPS_BY_TYPE[pipelineType] || PM_PIPELINE_STEPS;
 
@@ -59,9 +59,9 @@ export default function PipelineProgress() {
   }, [thinkingLog]);
 
   return (
-    <div className="h-full flex bg-slate-950 text-sm">
+    <div className={`h-full flex transition-colors duration-200 ${isDarkMode ? "bg-slate-950 text-sm" : "bg-white text-sm"}`}>
       {/* ── 좌측: 파이프라인 스텝 ──────────── */}
-      <div className="w-72 border-r border-slate-700/50 p-4 space-y-2">
+      <div className={`w-72 border-r p-4 space-y-2 ${isDarkMode ? "border-slate-700/50 bg-slate-900/10" : "border-slate-200 bg-slate-50/30"}`}>
         <h3 className="text-sm font-medium text-slate-400 mb-3 uppercase tracking-wider">
           Pipeline Progress
         </h3>
@@ -73,6 +73,7 @@ export default function PipelineProgress() {
               label={step.label}
               desc={step.desc}
               status={status}
+              isDarkMode={isDarkMode}
             />
           );
         })}
@@ -92,12 +93,12 @@ export default function PipelineProgress() {
 
       {/* ── 우측: Thinking Log ─────────────── */}
       <div className="flex-1 flex flex-col">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-700/50">
+        <div className={`flex items-center gap-2 px-4 py-3 border-b ${isDarkMode ? "border-slate-700/50 bg-slate-900/20" : "border-slate-200 bg-white"}`}>
           <Brain size={14} className="text-purple-400" />
-          <span className="text-sm font-medium text-slate-400">
+          <span className={`text-sm font-medium ${isDarkMode ? "text-slate-400" : "text-slate-700"}`}>
             Thinking Log
           </span>
-          <span className="text-[12px] text-slate-600">
+          <span className="text-[12px] text-slate-500">
             ({thinkingLog.length} entries)
           </span>
         </div>
@@ -117,17 +118,23 @@ export default function PipelineProgress() {
             thinkingLog.map((log, idx) => (
               <div
                 key={idx}
-                className="bg-slate-900/50 rounded-lg p-3 border border-slate-700/50"
+                className={`rounded-lg p-3 border transition-all ${
+                  isDarkMode 
+                    ? "bg-slate-900/50 border-slate-700/50" 
+                    : "bg-slate-50 border-slate-200 shadow-sm"
+                }`}
               >
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="px-1.5 py-0.5 rounded bg-purple-600/20 text-purple-300 text-[12px] font-mono">
+                  <span className={`px-1.5 py-0.5 rounded text-[12px] font-mono ${
+                    isDarkMode ? "bg-purple-600/20 text-purple-300" : "bg-purple-50 text-purple-600 border border-purple-100"
+                  }`}>
                     {log.node}
                   </span>
-                  <span className="text-[12px] text-slate-600">
+                  <span className="text-[12px] text-slate-500">
                     {new Date(log.timestamp).toLocaleTimeString()}
                   </span>
                 </div>
-                <p className="text-sm text-slate-400 leading-relaxed whitespace-pre-wrap">
+                <p className={`text-sm leading-relaxed whitespace-pre-wrap ${isDarkMode ? "text-slate-400" : "text-slate-700"}`}>
                   {log.text}
                 </p>
               </div>
@@ -140,21 +147,21 @@ export default function PipelineProgress() {
   );
 }
 
-function StepItem({ label, desc, status }) {
+function StepItem({ label, desc, status, isDarkMode }) {
   const icons = {
-    pending: <Circle size={14} className="text-slate-600" />,
-    running: <Loader2 size={14} className="text-blue-400 animate-spin" />,
-    done: <CheckCircle2 size={14} className="text-green-400" />,
-    error: <AlertCircle size={14} className="text-red-400" />,
+    pending: <Circle size={14} className={isDarkMode ? "text-slate-600" : "text-slate-300"} />,
+    running: <Loader2 size={14} className="text-blue-500 animate-spin" />,
+    done: <CheckCircle2 size={14} className="text-green-500" />,
+    error: <AlertCircle size={14} className="text-red-500" />,
   };
 
   return (
     <div
       className={`flex items-start gap-3 p-2.5 rounded-lg transition-colors ${
         status === "running"
-          ? "bg-blue-600/10 border border-blue-500/30"
+          ? isDarkMode ? "bg-blue-600/10 border border-blue-500/30" : "bg-blue-50 border border-blue-200 shadow-sm"
           : status === "done"
-          ? "bg-green-600/5"
+          ? isDarkMode ? "bg-green-600/5" : "bg-green-50/50"
           : ""
       }`}
     >
@@ -163,15 +170,15 @@ function StepItem({ label, desc, status }) {
         <div
           className={`text-sm font-medium ${
             status === "running"
-              ? "text-blue-300"
+              ? isDarkMode ? "text-blue-300" : "text-blue-600"
               : status === "done"
-              ? "text-green-300"
-              : "text-slate-500"
+              ? isDarkMode ? "text-green-300" : "text-green-600"
+              : isDarkMode ? "text-slate-500" : "text-slate-400"
           }`}
         >
           {label}
         </div>
-        <div className="text-[12px] text-slate-600 mt-0.5">{desc}</div>
+        <div className={`text-[12px] mt-0.5 ${isDarkMode ? "text-slate-600" : "text-slate-500"}`}>{desc}</div>
       </div>
     </div>
   );

@@ -20,6 +20,7 @@ export default function ChatPanel() {
     pipelineStatus,
     apiKey,
     model,
+    isDarkMode,
   } = useAppStore();
 
   const messagesEndRef = useRef(null);
@@ -59,9 +60,9 @@ export default function ChatPanel() {
   };
 
   return (
-    <div className="h-full min-h-0 flex flex-col bg-slate-900 min-w-0 overflow-hidden text-[15px]">
+    <div className={`h-full min-h-0 flex flex-col min-w-0 overflow-hidden text-[15px] transition-colors duration-200 ${isDarkMode ? "bg-slate-900" : "bg-white"}`}>
       {/* ── 헤더 ──────────────────────────── */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
+      <div className={`flex items-center justify-between px-4 py-3 border-b ${isDarkMode ? "border-slate-700/50" : "border-slate-200 bg-slate-50"}`}>
         <div className="flex items-center gap-2">
           <MessageSquare size={14} className="text-blue-400" />
           <span className="text-[15px] font-medium text-slate-300">AI 채팅</span>
@@ -139,7 +140,11 @@ export default function ChatPanel() {
             }
             rows={2}
             disabled={pipelineStatus === "running"}
-            className="w-full px-3 py-2 pr-10 text-[15px] bg-slate-800 border border-slate-700 rounded-lg text-slate-300 placeholder-slate-600 resize-none focus:outline-none focus:border-blue-500 disabled:opacity-50 transition-colors"
+            className={`w-full px-3 py-2 pr-10 text-[15px] border rounded-lg resize-none focus:outline-none focus:border-blue-500 disabled:opacity-50 transition-colors ${
+              isDarkMode 
+                ? "bg-slate-800 border-slate-700 text-slate-300 placeholder-slate-600" 
+                : "bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400"
+            }`}
           />
           <button
             onClick={handleSend}
@@ -156,25 +161,30 @@ export default function ChatPanel() {
 
 function ChatMessage({ message }) {
   const isUser = message.role === "user";
+  const { isDarkMode } = useAppStore();
 
   return (
     <div className={`flex gap-2 ${isUser ? "flex-row-reverse" : ""}`}>
       <div
         className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
-          isUser ? "bg-blue-600" : "bg-slate-700"
+          isUser ? "bg-blue-600" : (isDarkMode ? "bg-slate-700" : "bg-slate-200")
         }`}
       >
         {isUser ? (
           <User size={12} className="text-white" />
         ) : (
-          <Bot size={12} className="text-blue-300" />
+          <Bot size={12} className={isDarkMode ? "text-blue-300" : "text-blue-600"} />
         )}
       </div>
       <div
         className={`max-w-[85%] px-3 py-2 rounded-lg text-[14px] leading-relaxed ${
           isUser
-            ? "bg-blue-600/20 text-blue-100 rounded-tr-sm"
-            : "bg-slate-800 text-slate-300 rounded-tl-sm"
+            ? isDarkMode 
+                ? "bg-blue-600/20 text-blue-100 rounded-tr-sm" 
+                : "bg-blue-50 text-blue-900 border border-blue-100 rounded-tr-sm"
+            : isDarkMode
+                ? "bg-slate-800 text-slate-300 rounded-tl-sm"
+                : "bg-slate-100 text-slate-800 rounded-tl-sm"
         }`}
       >
         <div className="whitespace-pre-wrap">{message.content}</div>

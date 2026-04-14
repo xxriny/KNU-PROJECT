@@ -16,7 +16,7 @@ import PipelineProgress from "./PipelineProgress";
 import { X, Code2, LayoutDashboard, ChevronDown, House, Activity } from "lucide-react";
 
 const PM_TABS = ["rtm", "context"];
-const PM_LABELS = { rtm: "RTM", context: "Context" };
+const PM_LABELS = { rtm: "RTM & Stack", context: "PM Report" };
 const SA_TABS = ["sa_architecture", "sa_security", "sa_topology", "sa_system", "sa_flowchart", "sa_uml", "sa_interfaces", "sa_decisions"];
 const SA_LABELS = {
   sa_architecture: "Architecture",
@@ -41,6 +41,7 @@ export default function Workspace() {
     thinkingLog,
     resultData,
     sa_artifacts,
+    isDarkMode,
   } = useAppStore();
 
   const [pmOpen, setPmOpen] = useState(false);
@@ -105,8 +106,8 @@ export default function Workspace() {
   const isCodeViewport = activeViewportTab?.kind === "code";
 
   return (
-    <div className="h-full flex flex-col bg-slate-950 text-[15px]">
-      <div className="flex items-center border-b border-slate-700/50 bg-slate-900/50 min-h-9">
+    <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[15px] transition-colors duration-200">
+      <div className={`flex items-center border-b border-[var(--border)] min-h-9 ${isDarkMode ? "bg-slate-900/50" : "bg-slate-50"}`}>
         <div className="flex items-center gap-0.5 px-1 py-0.5 overflow-x-auto w-full">
           {openFiles.length === 0 ? (
             <div className="px-3 py-1.5 text-[15px] text-slate-600">열린 코드 탭이 없습니다</div>
@@ -138,7 +139,7 @@ export default function Workspace() {
         </div>
       </div>
 
-      <div className="flex items-center border-b border-slate-700/50 bg-slate-900/60 px-1 min-h-9">
+      <div className={`flex items-center border-b border-[var(--border)] px-1 min-h-9 ${isDarkMode ? "bg-slate-900/60" : "bg-white"}`}>
         <button
           onClick={() => activateOutputTab("home")}
           className={`flex items-center gap-1 px-3 py-1.5 text-[15px] transition-colors ${

@@ -3,13 +3,13 @@ import useAppStore from "../store/useAppStore";
 import { Clock3, X as XIcon } from "lucide-react";
 
 export default function SessionPanel() {
-  const { sessions, currentSessionId, loadSession, deleteSession } = useAppStore();
+  const { sessions, currentSessionId, loadSession, deleteSession, isDarkMode } = useAppStore();
 
   return (
-    <div className="h-full min-h-0 flex flex-col bg-slate-900 text-sm overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-3 border-b border-slate-700/50">
+    <div className={`h-full min-h-0 flex flex-col transition-colors duration-200 ${isDarkMode ? "bg-slate-900" : "bg-slate-50"}`}>
+      <div className={`flex items-center gap-2 px-3 py-3 border-b ${isDarkMode ? "border-slate-700/50 bg-slate-800/30" : "border-slate-200 bg-white"}`}>
         <Clock3 size={14} className="text-blue-400" />
-        <span className="text-sm font-medium text-slate-300">세션</span>
+        <span className={`text-sm font-medium ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>세션</span>
         <span className="ml-auto text-[12px] text-slate-500">{sessions.length}</span>
       </div>
 
@@ -25,16 +25,18 @@ export default function SessionPanel() {
               <div
                 key={session.id}
                 onClick={() => loadSession(session.id)}
-                className={`group rounded-md px-2 py-2 cursor-pointer transition-colors ${
+                className={`group rounded-md px-2 py-2 border cursor-pointer transition-all ${
                   isActive
-                    ? "bg-blue-600/15 text-blue-300"
-                    : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+                    ? "bg-blue-600/15 border-blue-500/50 text-blue-300"
+                    : isDarkMode
+                      ? "border-transparent text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+                      : "border-transparent bg-white shadow-sm text-slate-600 hover:bg-slate-100"
                 }`}
               >
                 <div className="flex items-start gap-2">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm truncate">{session.projectName || session.name}</p>
-                    <p className="mt-1 text-[12px] text-slate-600 truncate">
+                    <p className="mt-1 text-[12px] text-slate-500 truncate">
                       {new Date(session.createdAt).toLocaleString("ko", {
                         month: "2-digit",
                         day: "2-digit",

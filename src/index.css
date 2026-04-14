@@ -4,19 +4,37 @@
 
 /* ── 글로벌 스타일 ────────────────────── */
 :root {
-  --bg-primary: #0f172a;
-  --bg-secondary: #1e293b;
-  --bg-card: #1a2332;
-  --bg-hover: #2d3a4f;
-  --border: #2d3748;
+  /* ── 라이트 테마 (기본) ── */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8fafc;
+  --bg-card: #f1f5f9;
+  --bg-hover: #e2e8f0;
+  --border: #f1f5f9;
   --accent: #3b82f6;
   --accent-hover: #2563eb;
-  --text-primary: #e2e8f0;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --green: #16a34a;
+  --yellow: #ca8a04;
+  --red: #dc2626;
+}
+
+.dark {
+  /* ── 다크 테마 (오버라이드) ── */
+  --bg-primary: #020617;
+  --bg-secondary: #0f172a;
+  --bg-card: #1e293b;
+  --bg-hover: #334155;
+  --border: #1e293b;
+  --accent: #60a5fa;
+  --accent-hover: #3b82f6;
+  --text-primary: #f8fafc;
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
-  --green: #22c55e;
-  --yellow: #eab308;
-  --red: #ef4444;
+  --green: #4ade80;
+  --yellow: #facc15;
+  --red: #f87171;
 }
 
 * {

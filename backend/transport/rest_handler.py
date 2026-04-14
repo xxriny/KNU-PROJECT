@@ -93,7 +93,7 @@ class ReadFileRequest(BaseModel):
 
 
 class DeleteSessionRequest(BaseModel):
-    project_state_path: str = ""
+    pass
 
 
 class HealthResponse(BaseModel):
@@ -250,12 +250,10 @@ async def delete_session(run_id: str, req: Optional[DeleteSessionRequest] = None
 
     try:
         files_deleted = delete_session_files(run_id)
-        exact_deleted = delete_exact_file(req.project_state_path) if req else False
-        if exact_deleted:
-            files_deleted += 1
-
-        from pipeline.core.chroma_client import delete_by_run_id as chroma_delete
-        docs_deleted = chroma_delete(run_id)
+        
+        # New Tech Stack DB deletion
+        from pipeline.domain.pm.nodes.stack_db import delete_session_knowledge
+        docs_deleted = delete_session_knowledge(run_id)
 
         return {
             "status": "ok",

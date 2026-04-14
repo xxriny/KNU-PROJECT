@@ -7,13 +7,18 @@ export default function OverviewTab() {
   const {
     metadata,
     requirements_rtm,
-    context_spec,
-    sa_reverse_context,
+    pm_bundle,
+    pm_coverage_rate,
+    pm_warnings,
     sa_phase2,
     sa_phase3,
     sa_phase5,
     sa_artifacts,
     resultData,
+    thinking_log,
+    context_spec,
+    sa_reverse_context,
+    isDarkMode,
   } = useAppStore();
   const projectOverview = resultData?.project_overview || null;
   const pmOverview = resultData?.pm_overview || null;
@@ -36,11 +41,12 @@ export default function OverviewTab() {
     return <EmptyState text="분석 결과가 없습니다" />;
   }
 
+  const safeRtm = Array.isArray(requirements_rtm) ? requirements_rtm : [];
   const fallbackStats = {
-    total: requirements_rtm.length,
-    must: requirements_rtm.filter((r) => r.priority === "Must-have").length,
-    should: requirements_rtm.filter((r) => r.priority === "Should-have").length,
-    could: requirements_rtm.filter((r) => r.priority === "Could-have").length,
+    total: safeRtm.length,
+    must: safeRtm.filter((r) => r.priority === "Must-have").length,
+    should: safeRtm.filter((r) => r.priority === "Should-have").length,
+    could: safeRtm.filter((r) => r.priority === "Could-have").length,
   };
   const stats = {
     total: projectOverview?.requirement_count ?? fallbackStats.total,
@@ -50,7 +56,7 @@ export default function OverviewTab() {
   };
 
   const categories = {};
-  requirements_rtm.forEach((r) => {
+  safeRtm.forEach((r) => {
     const cat = r.category || "기타";
     categories[cat] = (categories[cat] || 0) + 1;
   });
@@ -84,10 +90,11 @@ export default function OverviewTab() {
     projectOverview?.container_summary?.external_count ??
     (fallbackContainerSummary.external_count || 0);
 
-  const pmStatus = pmOverview?.status || metadata?.status || "-";
-  const pmSummary = pmOverview?.summary || context_spec?.summary || "";
-  const pmRequirementCount = Number(pmOverview?.requirement_count ?? stats.total ?? 0);
-  const pmRiskList = Array.isArray(pmOverview?.risks) ? pmOverview.risks : risks;
+  const pmStatus = pm_bundle ? (pm_coverage_rate >= 0.9 ? "Perfect" : "Pass") : "-";
+  const safeThinkingLog = Array.isArray(thinking_log) ? thinking_log : [];
+  const pmSummary = safeThinkingLog.find((l) => l.node === "pm_analysis")?.thinking || "";
+  const pmRequirementCount = safeRtm.length;
+  const pmRiskList = Array.isArray(pm_warnings) ? pm_warnings : (typeof pm_warnings === "string" ? [pm_warnings] : []);
 
   const feasibility = saOverview?.feasibility || sa_phase3 || {};
   const saStatus = feasibility?.status || "Needs_Clarification";
@@ -119,9 +126,9 @@ export default function OverviewTab() {
     (isReverseMode
       ? "핵심 모듈 기준으로 통합 테스트와 관측성(로그/메트릭) 검증을 먼저 진행하세요."
       : "요구사항 우선순위 기준으로 MVP 범위를 확정하고 구현 순서를 고정하세요.");
-  const nextActionsList = (projectOverview?.next_actions || []).length > 0
-    ? projectOverview.next_actions
-    : [nextAction];
+  const nextActionsUnsafe = projectOverview?.next_actions;
+  const nextActionsSafe = Array.isArray(nextActionsUnsafe) ? nextActionsUnsafe : (typeof nextActionsUnsafe === "string" ? [nextActionsUnsafe] : []);
+  const nextActionsList = nextActionsSafe.length > 0 ? nextActionsSafe : [nextAction];
 
   let decisionLabel = "진행 가능";
   let decisionTone = "bg-green-600/20 text-green-300";
@@ -147,9 +154,9 @@ export default function OverviewTab() {
   const hasPmContent = Boolean(pmSummary || visibleTopStats.length > 0 || hasCategoryData || pmRiskList.length > 0);
 
   return (
-    <div className="h-full overflow-y-auto p-4 space-y-4 text-[15px]">
-      <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/50">
-        <h3 className="text-sm font-semibold text-slate-200 mb-2">
+    <div className={`h-full overflow-y-auto p-4 space-y-4 text-[15px] transition-colors duration-200 ${isDarkMode ? "bg-[var(--bg-primary)]" : "bg-[var(--bg-secondary)]"}`}>
+      <div className={`rounded-lg p-4 border transition-all ${isDarkMode ? "bg-slate-900/50 border-slate-700/50" : "bg-white border-slate-200 shadow-sm"}`}>
+        <h3 className={`text-sm font-semibold mb-2 ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>
           {projectName}
         </h3>
         <div className="flex items-center gap-3 text-[12px]">
@@ -166,13 +173,13 @@ export default function OverviewTab() {
             {status}
           </span>
           {hasProjectOverview && (
-            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+            <span className={`px-2 py-0.5 rounded ${isDarkMode ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600 border border-slate-200"}`}>
               Unified Overview
             </span>
           )}
         </div>
         {summaryText && (
-          <p className="mt-3 text-[15px] text-slate-300 leading-relaxed">
+          <p className={`mt-3 text-[15px] leading-relaxed ${isDarkMode ? "text-slate-300" : "text-slate-600"}`}>
             {summaryText}
           </p>
         )}
@@ -180,33 +187,31 @@ export default function OverviewTab() {
 
       {(hasProjectOverview || hasSaFallbackSummary) && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/50 text-center">
-            <div className={`text-3xl font-bold ${criticalGapCount > 0 ? "text-orange-300" : "text-slate-500"}`}>{criticalGapCount}</div>
-            <div className="text-[12px] text-slate-500 mt-1">막힌 항목</div>
-          </div>
-          <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/50 text-center">
-            <div className="text-3xl font-bold text-blue-300">{componentCount}</div>
-            <div className="text-[12px] text-slate-500 mt-1">주요 컴포넌트</div>
-          </div>
-          <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/50 text-center">
-            <div className={`text-3xl font-bold ${externalCount > 0 ? "text-amber-300" : "text-slate-500"}`}>{externalCount}</div>
-            <div className="text-[12px] text-slate-500 mt-1">외부 의존 경계</div>
-          </div>
+          {[
+            { label: "막힌 항목", value: criticalGapCount, color: criticalGapCount > 0 ? "text-orange-400" : (isDarkMode ? "text-slate-500" : "text-slate-300") },
+            { label: "주요 컴포넌트", value: componentCount, color: "text-blue-500" },
+            { label: "외부 의존 경계", value: externalCount, color: externalCount > 0 ? "text-amber-500" : (isDarkMode ? "text-slate-500" : "text-slate-300") }
+          ].map((stat, i) => (
+            <div key={i} className={`rounded-lg p-4 border text-center transition-all ${isDarkMode ? "bg-slate-900/50 border-slate-700/50" : "bg-white border-slate-200 shadow-sm"}`}>
+              <div className={`text-3xl font-bold ${stat.color}`}>{stat.value}</div>
+              <div className="text-[12px] text-slate-500 mt-1">{stat.label}</div>
+            </div>
+          ))}
         </div>
       )}
 
-      <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/50 space-y-3">
+      <div className={`rounded-lg p-4 border space-y-3 transition-all ${isDarkMode ? "bg-slate-900/50 border-slate-700/50" : "bg-white border-slate-200 shadow-sm"}`}>
         <div className="flex items-center gap-2">
-          <h4 className="text-sm font-medium text-slate-300">의사결정 요약</h4>
+          <h4 className={`text-sm font-medium ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>의사결정 요약</h4>
           <span className={`px-2 py-0.5 rounded text-[12px] ${decisionTone}`}>{decisionLabel}</span>
           {isReverseMode && (
-            <span className="px-2 py-0.5 rounded text-[12px] bg-slate-800 text-slate-300">역공학 모드</span>
+            <span className={`px-2 py-0.5 rounded text-[12px] ${isDarkMode ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600 border border-slate-200"}`}>역공학 모드</span>
           )}
         </div>
         {decisionReasons.length > 0 ? (
           <ul className="space-y-1">
             {decisionReasons.map((reason, idx) => (
-              <li key={idx} className="text-sm text-slate-300">- {reason}</li>
+              <li key={idx} className={`text-sm ${isDarkMode ? "text-slate-300" : "text-slate-600"}`}>- {reason}</li>
             ))}
           </ul>
         ) : (
@@ -215,10 +220,10 @@ export default function OverviewTab() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/50 space-y-3">
+        <div className={`rounded-lg p-4 border space-y-3 transition-all ${isDarkMode ? "bg-slate-900/50 border-slate-700/50" : "bg-white border-slate-200 shadow-sm"}`}>
           <div className="flex items-center gap-2">
-            <h4 className="text-sm font-medium text-slate-300">PM 요약</h4>
-            <span className={`px-2 py-0.5 rounded text-[12px] ${pmStatus === "Success" || pmStatus === "Pass" ? "bg-green-600/20 text-green-300" : "bg-yellow-600/20 text-yellow-300"}`}>
+            <h4 className={`text-sm font-medium ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>PM 요약</h4>
+            <span className={`px-2 py-0.5 rounded text-[12px] ${pmStatus === "Success" || pmStatus === "Pass" ? "bg-green-600/20 text-green-300" : "bg-green-100 text-green-700 border border-green-200"}`}>
               {pmStatus}
             </span>
           </div>
@@ -226,39 +231,30 @@ export default function OverviewTab() {
           {hasPmContent ? (
             <>
               {pmSummary ? (
-                <p className="text-[14px] text-slate-300 leading-relaxed">{pmSummary}</p>
+                <p className={`text-[14px] leading-relaxed ${isDarkMode ? "text-slate-300" : "text-slate-600"}`}>{pmSummary}</p>
               ) : (
-                <div className="min-h-16 rounded border border-slate-800/80 bg-slate-900/30 flex items-center justify-center text-center text-[13px] text-slate-500 px-3">
+                <div className={`min-h-16 rounded border flex items-center justify-center text-center text-[13px] px-3 ${isDarkMode ? "border-slate-800/80 bg-slate-900/30 text-slate-500" : "border-slate-100 bg-slate-50 text-slate-400"}`}>
                   요약 텍스트는 없지만 요구사항/리스크 구조는 확인 가능합니다.
                 </div>
               )}
 
-              {visibleTopStats.length > 0 && (
-                <div className={`grid gap-3 ${visibleTopStats.length >= 4 ? "grid-cols-4" : visibleTopStats.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
-                  {visibleTopStats.map((item) => (
-                    <StatCard key={item.label} label={item.label} value={item.value} color={item.color} />
-                  ))}
-                </div>
-              )}
-
-              {visiblePmStats.length > 0 && (
-                <div className={`grid gap-3 ${visiblePmStats.length >= 2 ? "grid-cols-2" : "grid-cols-1"}`}>
-                  {visiblePmStats.map((item) => (
-                    <StatCard key={item.label} label={item.label} value={item.value} color={item.color} />
-                  ))}
+              {(pm_bundle || visibleTopStats.length > 0) && (
+                <div className="grid grid-cols-2 gap-3">
+                  <StatCard label="기술 커버리지" value={`${(pm_coverage_rate * 100).toFixed(0)}%`} color="text-blue-400" />
+                  <StatCard label="발견된 리스크" value={pmRiskList.length} color="text-orange-400" />
                 </div>
               )}
 
               <div>
-                <h5 className="text-sm font-medium text-slate-400 mb-2">카테고리 분포</h5>
+                <h5 className={`text-sm font-medium mb-2 ${isDarkMode ? "text-slate-400" : "text-slate-700"}`}>카테고리 분포</h5>
                 {hasCategoryData ? (
                   <div className="space-y-2">
                     {Object.entries(categories).map(([cat, count]) => (
                       <div key={cat} className="flex items-center gap-2">
                         <Tag size={11} className="text-slate-500" />
-                        <span className="text-sm text-slate-300 flex-1">{cat}</span>
+                        <span className={`text-sm flex-1 ${isDarkMode ? "text-slate-300" : "text-slate-600"}`}>{cat}</span>
                         <span className="text-sm text-slate-500">{count}</span>
-                        <div className="w-24 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div className={`w-24 h-1.5 rounded-full overflow-hidden ${isDarkMode ? "bg-slate-800" : "bg-slate-100"}`}>
                           <div
                             className="h-full bg-blue-500 rounded-full"
                             style={{ width: `${stats.total > 0 ? (count / stats.total) * 100 : 0}%` }}
@@ -268,7 +264,7 @@ export default function OverviewTab() {
                     ))}
                   </div>
                 ) : (
-                  <div className="min-h-16 rounded border border-dashed border-slate-700/80 bg-slate-900/20 flex items-center justify-center text-center text-[13px] text-slate-500 px-3">
+                  <div className={`min-h-16 rounded border border-dashed flex items-center justify-center text-center text-[13px] px-3 ${isDarkMode ? "border-slate-700/80 bg-slate-900/20 text-slate-500" : "border-slate-200 bg-slate-50/50 text-slate-400"}`}>
                     {isReverseMode
                       ? "RTM 데이터가 입력되지 않아 분석이 생략되었습니다."
                       : "카테고리 데이터가 없어 분포를 계산할 수 없습니다."}
@@ -281,14 +277,14 @@ export default function OverviewTab() {
                   <div className="text-[12px] text-slate-500 mb-1.5">리스크</div>
                   <ul className="space-y-1">
                     {pmRiskList.slice(0, 8).map((risk, idx) => (
-                      <li key={idx} className="text-sm text-slate-300">- {risk}</li>
+                      <li key={idx} className={`text-sm ${isDarkMode ? "text-slate-300" : "text-slate-600"}`}>- {risk}</li>
                     ))}
                   </ul>
                 </div>
               )}
             </>
           ) : (
-            <div className="min-h-20 rounded border border-dashed border-slate-700/80 bg-slate-900/20 flex items-center justify-center text-center text-[13px] text-slate-500 px-3">
+            <div className={`min-h-20 rounded border border-dashed flex items-center justify-center text-center text-[13px] px-3 ${isDarkMode ? "border-slate-700/80 bg-slate-900/20 text-slate-500" : "border-slate-200 bg-slate-50/50 text-slate-400"}`}>
               {isReverseMode
                 ? "RTM 데이터가 입력되지 않아 PM 분석이 생략되었습니다."
                 : "PM 요약 데이터가 아직 생성되지 않았습니다."}
@@ -296,13 +292,13 @@ export default function OverviewTab() {
           )}
         </div>
 
-        <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/50 space-y-3">
+        <div className={`rounded-lg p-4 border space-y-3 transition-all ${isDarkMode ? "bg-slate-900/50 border-slate-700/50" : "bg-white border-slate-200 shadow-sm"}`}>
           <div className="flex items-center gap-2">
-            <h4 className="text-sm font-medium text-slate-300">SA 요약</h4>
-            <span className={`px-2 py-0.5 rounded text-[12px] ${saStatus === "Pass" ? "bg-green-600/20 text-green-300" : "bg-yellow-600/20 text-yellow-300"}`}>
+            <h4 className={`text-sm font-medium ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>SA 요약</h4>
+            <span className={`px-2 py-0.5 rounded text-[12px] ${saStatus === "Pass" ? "bg-green-600/20 text-green-300" : "bg-yellow-100 text-yellow-700 border border-yellow-200"}`}>
               {saStatus}
             </span>
-            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[12px]">{architecturePattern}</span>
+            <span className={`px-2 py-0.5 rounded text-[12px] ${isDarkMode ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600 border border-slate-200"}`}>{architecturePattern}</span>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -343,11 +339,13 @@ export default function OverviewTab() {
       </div>
 
       {nextActionsList.length > 0 && (
-        <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/50">
-          <h4 className="text-sm font-medium text-slate-400 mb-3">권장 다음 단계</h4>
+        <div className={`rounded-lg p-4 border transition-all ${isDarkMode ? "bg-slate-900/50 border-slate-700/50" : "bg-white border-slate-200 shadow-sm"}`}>
+          <h4 className={`text-sm font-medium mb-3 ${isDarkMode ? "text-slate-400" : "text-slate-700"}`}>권장 다음 단계</h4>
           <ol className="space-y-1">
             {nextActionsList.map((action, idx) => (
-              <li key={idx} className="text-sm text-slate-300">{idx + 1}. {action}</li>
+              <li key={idx} className={`text-sm ${isDarkMode ? "text-slate-300" : "text-slate-600"}`}>
+                {idx + 1}. {typeof action === "string" ? action : String(action)}
+              </li>
             ))}
           </ol>
         </div>

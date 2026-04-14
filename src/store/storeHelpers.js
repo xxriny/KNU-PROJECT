@@ -91,14 +91,56 @@ export const EMPTY_RESULT_FIELDS = {
   sa_phase6: null,
   sa_phase7: null,
   sa_phase8: null,
+  pm_bundle: null,
+  pm_coverage_rate: 0,
+  pm_warnings: [],
   metadata: null,
 };
 
+import useAppStore from "./useAppStore";
+
+/** 배열 타입 검증 및 디버깅 로그 기록 */
+function validateArray(key, data, fallback = []) {
+  if (Array.isArray(data)) return data;
+  if (!data && data !== "") return fallback;
+
+  // 타입 불일치 발생 시 디버그 로그 기록
+  const actualType = typeof data;
+  const message = `[TypeMismatch] '${key}' expected Array, but got ${actualType}`;
+  
+  // Zustand store의 getState를 통해 직접 액션 호출
+  if (useAppStore.getState().addDebugLog) {
+    useAppStore.getState().addDebugLog({
+      level: "error",
+      key,
+      message,
+      rawData: data
+    });
+  }
+  
+  // 문자열인데 내용이 있는 경우 등 상황에 따라 래핑 혹은 빈 배열 반환
+  if (typeof data === "string" && data.length > 0) return [data];
+  return fallback;
+}
+
 /** resultData에서 개별 필드를 추출하는 공통 로직 */
 export function spreadResultData(data) {
+  const pmBundle = data?.pm_bundle || null;
+  
+  // 검증 유틸リティ를 통한 안전한 데이터 추출
+  const rtm = validateArray("requirements_rtm", pmBundle?.data?.rtm || data?.requirements_rtm || data?.raw_requirements);
+  const techStacks = validateArray("tech_stacks", pmBundle?.data?.tech_stacks || data?.stack_planner_output?.stack_mapping);
+  const pmWarnings = validateArray("pm_warnings", data?.pm_warnings);
+  const thinkingLog = validateArray("thinking_log", data?.thinking_log);
+
   return {
-    resultData: data,
-    requirements_rtm: data?.requirements_rtm || [],
+    resultData: data || null,
+    pm_bundle: pmBundle,
+    pm_coverage_rate: data?.pm_coverage_rate || 0,
+    pm_warnings: pmWarnings,
+    requirements_rtm: rtm,
+    tech_stacks: techStacks,
+    metadata: data?.metadata || null,
     semantic_graph: data?.semantic_graph || null,
     context_spec: data?.context_spec || null,
     sa_reverse_context: data?.sa_reverse_context || null,
@@ -112,6 +154,6 @@ export function spreadResultData(data) {
     sa_phase6: data?.sa_phase6 || null,
     sa_phase7: data?.sa_phase7 || null,
     sa_phase8: data?.sa_phase8 || null,
-    metadata: data?.metadata || null,
+    thinking_log: thinkingLog,
   };
 }

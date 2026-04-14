@@ -28,4 +28,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
    * @returns {Promise<string|null>} 선택된 폴더 절대 경로, 취소 시 null
    */
   selectFolder: () => ipcRenderer.invoke("select-folder"),
+  /**
+   * 윈도우 타이틀 바 테마를 동적으로 변경한다 (Windows TitleBarOverlay 대응).
+   * @param {boolean} isDark - 다크 모드 여부
+   */
+  setTitleBarTheme: (isDark) => ipcRenderer.invoke("set-titlebar-theme", isDark),
 });
