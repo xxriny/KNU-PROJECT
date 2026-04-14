@@ -5,7 +5,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipeline.nodes.sa_phase5 import _build_reverse_module_mapping
+from pipeline.domain.sa.nodes.sa_phase5 import _build_reverse_module_mapping
 
 
 class SAPhase5MappingTests(unittest.TestCase):

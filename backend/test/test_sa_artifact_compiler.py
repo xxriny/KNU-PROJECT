@@ -92,7 +92,7 @@ class SAArtifactCompilerTests(unittest.TestCase):
                 "file_inventory": [
                     {"file": "backend/main.py", "raw_imports": ["fastapi"]},
                     {"file": "backend/transport/ws_handler.py", "raw_imports": ["fastapi"]},
-                    {"file": "backend/pipeline/nodes/sa_phase1.py", "raw_imports": ["google.generativeai"]},
+                    {"file": "backend/pipeline/sa/nodes/sa_phase1.py", "raw_imports": ["google.generativeai"]},
                     {"file": "backend/connectors/folder_connector.py", "raw_imports": ["chromadb"]},
                     {"file": "src/App.jsx", "raw_imports": []},
                     {"file": "electron/main.js", "raw_imports": []},

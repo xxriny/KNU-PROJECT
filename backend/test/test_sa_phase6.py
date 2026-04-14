@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipeline.nodes.sa_phase6 import (
+from pipeline.domain.sa.nodes.sa_phase6 import (
     AuthzMatrixItem,
     RoleDefinition,
     SecurityDesignOutput,
@@ -83,7 +83,7 @@ class SAPhase6Tests(unittest.TestCase):
         )
 
         with patch(
-            "pipeline.nodes.sa_phase6.call_structured_with_thinking",
+            "pipeline.domain.sa.nodes.sa_phase6.call_structured_with_thinking",
             return_value=(mock_output, "ok"),
         ):
             result = sa_phase6_node(state)

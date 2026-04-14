@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 from result_shaping.sa_artifact_compiler import compile_sa_artifacts
-from pipeline.utils import to_serializable
+from pipeline.core.utils import to_serializable
 
 
 # ─── 스키마 ───────────────────────────────────────────────
@@ -72,14 +72,13 @@ def _collect_skipped_phases(sanitized: dict[str, Any]) -> list[str]:
 def _build_pm_overview(
     metadata: dict,
     context_spec: dict,
-    reverse_context: dict,
     requirements_rtm: list,
 ) -> dict:
     return PMOverview(
         status=metadata.get("status"),
-        summary=context_spec.get("summary") or reverse_context.get("summary"),
+        summary=context_spec.get("summary"),
         requirement_count=len(requirements_rtm),
-        risks=context_spec.get("risk_factors", []) or reverse_context.get("risk_factors", []),
+        risks=context_spec.get("risk_factors", []),
     ).model_dump()
 
 
@@ -91,11 +90,11 @@ def _build_sa_overview(sa_phase2: dict, sa_phase3: dict, skipped_phases: list[st
     ).model_dump()
 
 
-def _resolve_summary(context_spec: dict, reverse_context: dict) -> tuple[str | None, str]:
+def _resolve_summary(context_spec: dict, sa_output: dict) -> tuple[str | None, str]:
     if context_spec.get("summary"):
         return context_spec.get("summary"), "context_spec"
-    if reverse_context.get("summary"):
-        return reverse_context.get("summary"), "sa_reverse_context"
+    if sa_output.get("summary"):
+        return sa_output.get("summary"), "sa_output"
     return None, "none"
 
 
@@ -118,12 +117,10 @@ def _build_layer_distribution(sa_phase5: dict) -> dict[str, int]:
 def _build_data_flags(
     requirements_rtm: list,
     sanitized: dict[str, Any],
-    reverse_context: dict,
 ) -> dict[str, bool]:
     return {
         "has_rtm": len(requirements_rtm) > 0,
         "has_phase1_scan": isinstance(sanitized.get("sa_phase1"), dict),
-        "has_reverse_context": bool(reverse_context.get("summary")),
         "has_sa_artifacts": isinstance(sanitized.get("sa_artifacts"), dict),
     }
 
@@ -149,7 +146,7 @@ def _build_project_overview(
     requirements_rtm: list,
     priority_counts: dict[str, int],
     context_spec: dict,
-    reverse_context: dict,
+    sa_output: dict,
     sa_phase2: dict,
     sa_phase3: dict,
     sa_phase5: dict,
@@ -167,7 +164,7 @@ def _build_project_overview(
         summary_source=summary_source,
         requirement_count=len(requirements_rtm),
         priority_counts=priority_counts,
-        risks=context_spec.get("risk_factors", []) or reverse_context.get("risk_factors", []),
+        risks=context_spec.get("risk_factors", []),
         feasibility_status=sa_phase3.get("status"),
         complexity_score=sa_phase3.get("complexity_score"),
         critical_gap_count=len(sa_phase2.get("gap_report", []) or []),
@@ -197,32 +194,31 @@ def shape_result(raw_result: dict) -> dict:
 
     requirements_rtm: list = sanitized.get("requirements_rtm") or []
     context_spec: dict = sanitized.get("context_spec") or {}
-    reverse_context: dict = sanitized.get("sa_reverse_context") or {}
     metadata: dict = sanitized.get("metadata") or {}
     sa_phase2: dict = sanitized.get("sa_phase2") or {}
     sa_phase3: dict = sanitized.get("sa_phase3") or {}
     sa_phase5: dict = sanitized.get("sa_phase5") or {}
+    sa_output: dict = sanitized.get("sa_output") or {}
 
     skipped_phases = _collect_skipped_phases(sanitized)
 
     sanitized["pm_overview"] = _build_pm_overview(
         metadata=metadata,
         context_spec=context_spec,
-        reverse_context=reverse_context,
         requirements_rtm=requirements_rtm,
     )
     sanitized["sa_overview"] = _build_sa_overview(sa_phase2, sa_phase3, skipped_phases)
 
     sanitized["sa_artifacts"] = compile_sa_artifacts(sanitized)
 
-    summary_text, summary_source = _resolve_summary(context_spec, reverse_context)
+    summary_text, summary_source = _resolve_summary(context_spec, sa_output)
     priority_counts = _build_priority_counts(requirements_rtm)
     layer_distribution = _build_layer_distribution(sa_phase5)
 
     container_spec = (sanitized.get("sa_artifacts") or {}).get("container_diagram_spec") or {}
     container_summary = container_spec.get("summary") or {}
 
-    data_flags = _build_data_flags(requirements_rtm, sanitized, reverse_context)
+    data_flags = _build_data_flags(requirements_rtm, sanitized)
     next_actions = _compute_next_actions(data_flags, sa_phase3, container_summary)
 
     sanitized["project_overview"] = _build_project_overview(
@@ -232,7 +228,7 @@ def shape_result(raw_result: dict) -> dict:
         requirements_rtm=requirements_rtm,
         priority_counts=priority_counts,
         context_spec=context_spec,
-        reverse_context=reverse_context,
+        sa_output=sa_output,
         sa_phase2=sa_phase2,
         sa_phase3=sa_phase3,
         sa_phase5=sa_phase5,
