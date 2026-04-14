@@ -69,14 +69,14 @@ def sa_phase4_node(state: PipelineState) -> dict:
 
     context_spec = sget("context_spec", {}) or {}
     tech_stack = context_spec.get("tech_stack_suggestions", []) or []
-    sa_phase1 = sget("sa_phase1", {}) or {}
+    system_scan = sget("system_scan", {}) or {}
     api_key = sget("api_key", "")
     model = sget("model", DEFAULT_MODEL)
     action_type = (sget("action_type", "") or "CREATE").strip().upper()
 
     if not tech_stack:
         if action_type == "REVERSE_ENGINEER":
-            languages = sa_phase1.get("languages", {}) or {}
+            languages = system_scan.get("languages", {}) or {}
             notes = "기술 스택 명시가 없어 의존성 후보 검증을 생략합니다."
             if languages:
                 notes += f" 코드 스캔 기준 언어 분포: {languages}"

@@ -29,7 +29,7 @@ class GapReportOutput(BaseModel):
     overall_risk: str = Field(description="프로젝트 전체의 아키텍처 수정 위험도 요약")
     gap_report: List[RequirementImpact] = Field(description="요구사항별 상세 영향도 분석")
 
-class SAPhase1Output(SAStatus):
+class SystemScanOutput(SAStatus):
     thinking: str = ""
     architecture_assessment: str = ""
     key_modules: List[str] = Field(default_factory=list)

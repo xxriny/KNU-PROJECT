@@ -3,12 +3,12 @@ import os
 from pathlib import Path
 from collections import defaultdict
 from pydantic import BaseModel, Field
-from pipeline.core.ast_scanner import extract_file_inventory, extract_functions
+from pipeline.domain.rag.ast_scanner import extract_file_inventory, extract_functions
 from pipeline.core.state import PipelineState, make_sget
 from pipeline.core.utils import call_structured
 from version import DEFAULT_MODEL
 
-class SAPhase1LLMOutput(BaseModel):
+class SystemScanLLMOutput(BaseModel):
     thinking: str = Field(default="", description="분석 추론")
     status: str = Field(description="Pass | Needs_Clarification | Fail")
     confidence: float = Field(default=0.7, description="0.0 ~ 1.0")
@@ -165,7 +165,7 @@ def _build_representative_function_sample(functions: list[dict], max_items: int 
 
     return sample[:max_items]
 
-def sa_phase1_node(state: PipelineState) -> dict:
+def system_scan_node(state: PipelineState) -> dict:
     sget = make_sget(state)
 
     action_type = (sget("action_type", "CREATE") or "CREATE").strip().upper()
@@ -174,7 +174,7 @@ def sa_phase1_node(state: PipelineState) -> dict:
     # 1. CREATE 모드 방어 로직 (기존 코드가 없으므로 분석 생략)
     if action_type == "CREATE":
         return {
-            "sa_phase1": {
+            "system_scan": {
                 "status": "Skipped",
                 "confidence": 1.0,
                 "architecture_assessment": "신규 프로젝트(CREATE 모드)로 기존 코드 구조 분석을 생략합니다.",
@@ -184,8 +184,8 @@ def sa_phase1_node(state: PipelineState) -> dict:
                 "concerns": [],
                 "recommended_focus": ["초기 아키텍처 설계 및 기술 스택 선정에 집중"]
             },
-            "thinking_log": sget("thinking_log", []) + [{"node": "sa_phase1", "thinking": "CREATE 모드 감지. 코드 스캔 스킵."}],
-            "current_step": "sa_phase1_done",
+            "thinking_log": sget("thinking_log", []) + [{"node": "system_scan", "thinking": "CREATE 모드 감지. 코드 스캔 스킵."}],
+            "current_step": "system_scan_done",
         }
 
     api_key = sget("api_key", "")
@@ -211,11 +211,11 @@ def sa_phase1_node(state: PipelineState) -> dict:
             "concerns": ["분석 대상 디렉터리가 지정되지 않았습니다."],
             "recommended_focus": ["프로젝트 루트를 선택한 뒤 다시 실행하세요."],
         }
-        msg = "source_dir 누락으로 sa_phase1 진단 보류"
+        msg = "source_dir 누락으로 system_scan 진단 보류"
         return {
-            "sa_phase1": output,
-            "thinking_log": (sget("thinking_log", []) or []) + [{"node": "sa_phase1", "thinking": msg}],
-            "current_step": "sa_phase1_done",
+            "system_scan": output,
+            "thinking_log": (sget("thinking_log", []) or []) + [{"node": "system_scan", "thinking": msg}],
+            "current_step": "system_scan_done",
         }
 
     if not os.path.isdir(source_dir):
@@ -236,11 +236,11 @@ def sa_phase1_node(state: PipelineState) -> dict:
             "concerns": [f"유효하지 않은 source_dir: {source_dir}"],
             "recommended_focus": ["프로젝트 루트를 다시 선택해 주세요."],
         }
-        msg = "source_dir 경로가 유효하지 않아 sa_phase1 진단 보류"
+        msg = "source_dir 경로가 유효하지 않아 system_scan 진단 보류"
         return {
-            "sa_phase1": output,
-            "thinking_log": (sget("thinking_log", []) or []) + [{"node": "sa_phase1", "thinking": msg}],
-            "current_step": "sa_phase1_done",
+            "system_scan": output,
+            "thinking_log": (sget("thinking_log", []) or []) + [{"node": "system_scan", "thinking": msg}],
+            "current_step": "system_scan_done",
         }
 
     functions = extract_functions(source_dir, max_functions=300)
@@ -274,7 +274,7 @@ def sa_phase1_node(state: PipelineState) -> dict:
             "concerns": ["소스 코드 함수 추출 결과가 없습니다."],
             "recommended_focus": ["프로젝트 루트 또는 source_dir 경로와 파일 확장자 구성을 확인하세요."],
         }
-        msg = "함수 추출 결과 및 프레임워크 단서가 없어 sa_phase1 진단 보류"
+        msg = "함수 추출 결과 및 프레임워크 단서가 없어 system_scan 진단 보류"
     else:
         compact = [
             {
@@ -308,7 +308,7 @@ def sa_phase1_node(state: PipelineState) -> dict:
             llm_result = call_structured(
                 api_key=api_key,
                 model=model,
-                schema=SAPhase1LLMOutput,
+                schema=SystemScanLLMOutput,
                 system_prompt=SYSTEM_PROMPT,
                 user_msg=user_msg,
             )
@@ -357,8 +357,8 @@ def sa_phase1_node(state: PipelineState) -> dict:
             msg = "기존 코드 구조 분석 완료 (통계 기반 폴백)"
 
     return {
-        "sa_phase1": output,
-        "thinking_log": (sget("thinking_log", []) or []) + [{"node": "sa_phase1", "thinking": msg}],
-        "current_step": "sa_phase1_done",
+        "system_scan": output,
+        "thinking_log": (sget("thinking_log", []) or []) + [{"node": "system_scan", "thinking": msg}],
+        "current_step": "system_scan_done",
     }
 

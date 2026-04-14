@@ -72,7 +72,7 @@ def atomizer_node(state: PipelineState) -> dict:
         ctx = (sget("project_context", "") or "").strip()
         idea = (sget("input_idea", "") or "").strip()
         requested_action_type = (sget("action_type", "") or "").strip().upper()
-        sa_phase1 = sget("sa_phase1", {}) or {}
+        system_scan = sget("system_scan", {}) or {}
 
         # 모드에 따른 프롬프트 선택
         system_prompt = REVERSE_SYSTEM_PROMPT if requested_action_type == "REVERSE_ENGINEER" else PM_SYSTEM_PROMPT
@@ -84,28 +84,28 @@ def atomizer_node(state: PipelineState) -> dict:
             parts.append(f"<project_context>\n{ctx}\n</project_context>")
         if idea:
             parts.append(f"<input_idea>\n{idea}\n</input_idea>")
-        # REVERSE 모드: sa_phase1 스캔 함수 목록을 명시 주입 (환각 방지 가드레일)
-        if requested_action_type == "REVERSE_ENGINEER" and sa_phase1:
-            scanned_funcs = sa_phase1.get("sample_functions", []) or []
+        # REVERSE 모드: system_scan 스캔 함수 목록을 명시 주입 (환각 방지 가드레일)
+        if requested_action_type == "REVERSE_ENGINEER" and system_scan:
+            scanned_funcs = system_scan.get("sample_functions", []) or []
             if scanned_funcs:
                 funcs_text = "\n".join(f"- {f}" for f in scanned_funcs)
                 parts.append(f"<scanned_functions>\n{funcs_text}\n</scanned_functions>")
-        if requested_action_type == "UPDATE" and sa_phase1:
+        if requested_action_type == "UPDATE" and system_scan:
             analysis_lines = []
-            if sa_phase1.get("architecture_assessment"):
-                analysis_lines.append(f"- architecture_assessment: {sa_phase1['architecture_assessment']}")
-            if sa_phase1.get("scanned_files") is not None:
-                analysis_lines.append(f"- scanned_files: {sa_phase1.get('scanned_files', 0)}")
-            if sa_phase1.get("scanned_functions") is not None:
-                analysis_lines.append(f"- scanned_functions: {sa_phase1.get('scanned_functions', 0)}")
-            if sa_phase1.get("languages"):
-                analysis_lines.append(f"- languages: {sa_phase1['languages']}")
-            if sa_phase1.get("key_modules"):
-                analysis_lines.append(f"- key_modules: {sa_phase1['key_modules']}")
-            if sa_phase1.get("concerns"):
-                analysis_lines.append(f"- concerns: {sa_phase1['concerns']}")
-            if sa_phase1.get("recommended_focus"):
-                analysis_lines.append(f"- recommended_focus: {sa_phase1['recommended_focus']}")
+            if system_scan.get("architecture_assessment"):
+                analysis_lines.append(f"- architecture_assessment: {system_scan['architecture_assessment']}")
+            if system_scan.get("scanned_files") is not None:
+                analysis_lines.append(f"- scanned_files: {system_scan.get('scanned_files', 0)}")
+            if system_scan.get("scanned_functions") is not None:
+                analysis_lines.append(f"- scanned_functions: {system_scan.get('scanned_functions', 0)}")
+            if system_scan.get("languages"):
+                analysis_lines.append(f"- languages: {system_scan['languages']}")
+            if system_scan.get("key_modules"):
+                analysis_lines.append(f"- key_modules: {system_scan['key_modules']}")
+            if system_scan.get("concerns"):
+                analysis_lines.append(f"- concerns: {system_scan['concerns']}")
+            if system_scan.get("recommended_focus"):
+                analysis_lines.append(f"- recommended_focus: {system_scan['recommended_focus']}")
             if analysis_lines:
                 parts.append("<existing_code_analysis>\n" + "\n".join(analysis_lines) + "\n</existing_code_analysis>")
         user_content = "\n\n".join(parts)

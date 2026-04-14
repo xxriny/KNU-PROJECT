@@ -17,13 +17,13 @@ from .sa_layer_heuristics import (
 MAX_REVERSE_MODULES = 120
 
 
-def build_reverse_module_profiles(sa_phase1: dict) -> list[dict]:
-    """sa_phase1 스캔 결과에서 모듈 프로파일 리스트를 구축한다."""
-    sample_functions = sa_phase1.get("sample_functions", []) or []
-    key_modules = sa_phase1.get("key_modules", []) or []
-    file_inventory = sa_phase1.get("file_inventory", []) or []
-    detected_frameworks = sa_phase1.get("detected_frameworks", []) or []
-    framework_evidence = sa_phase1.get("framework_evidence", []) or []
+def build_reverse_module_profiles(system_scan: dict) -> list[dict]:
+    """system_scan 스캔 결과에서 모듈 프로파일 리스트를 구축한다."""
+    sample_functions = system_scan.get("sample_functions", []) or []
+    key_modules = system_scan.get("key_modules", []) or []
+    file_inventory = system_scan.get("file_inventory", []) or []
+    detected_frameworks = system_scan.get("detected_frameworks", []) or []
+    framework_evidence = system_scan.get("framework_evidence", []) or []
 
     functions_by_file: dict[str, list[dict]] = defaultdict(list)
     for fn in sample_functions:
@@ -151,9 +151,9 @@ def batch_label_modules(profiles: list[dict], api_key: str, model: str) -> dict[
         return {}
 
 
-def build_reverse_module_mapping(sa_phase1: dict, *, api_key: str = "", model: str = DEFAULT_MODEL) -> list[dict]:
-    """REVERSE 모드: sa_phase1 스캔 결과를 아키텍처 매핑 리스트로 변환."""
-    profiles = build_reverse_module_profiles(sa_phase1)
+def build_reverse_module_mapping(system_scan: dict, *, api_key: str = "", model: str = DEFAULT_MODEL) -> list[dict]:
+    """REVERSE 모드: system_scan 스캔 결과를 아키텍처 매핑 리스트로 변환."""
+    profiles = build_reverse_module_profiles(system_scan)
     label_map = batch_label_modules(profiles, api_key, model)
 
     mapped = []

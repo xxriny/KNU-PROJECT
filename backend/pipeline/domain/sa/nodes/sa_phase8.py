@@ -282,7 +282,7 @@ def sa_phase8_node(state: PipelineState) -> dict:
     }
 
     sa_output = {
-        "code_analysis": sget("sa_phase1", {}),
+        "code_analysis": sget("system_scan", {}),
         "impact_analysis": sget("sa_phase2", {}),
         "feasibility": sget("sa_phase3", {}),
         "dependency_sandbox": sget("sa_phase4", {}),

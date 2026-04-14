@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from pipeline.core.state import PipelineState, make_sget
 from pipeline.core.schemas import SemanticIndexerOutput, CodeFunctionLink
 from pipeline.core.utils import call_structured_with_thinking, call_structured
-from pipeline.core.ast_scanner import extract_functions, summarize_for_llm
+from pipeline.domain.rag.ast_scanner import extract_functions, summarize_for_llm
 from pipeline.core.chroma_client import add_knowledge
 from version import DEFAULT_MODEL
 

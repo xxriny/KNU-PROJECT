@@ -3,22 +3,22 @@ from __future__ import annotations
 from pipeline.core.state import PipelineState, make_sget
 
 
-def _scan_is_sufficient(sa_phase1: dict) -> bool:
-    if not isinstance(sa_phase1, dict):
+def _scan_is_sufficient(system_scan: dict) -> bool:
+    if not isinstance(system_scan, dict):
         return False
-    status = (sa_phase1.get("status") or "").strip()
+    status = (system_scan.get("status") or "").strip()
     if status == "Skipped":
         return False
-    scanned_files = int(sa_phase1.get("scanned_files", 0) or 0)
-    scanned_functions = int(sa_phase1.get("scanned_functions", 0) or 0)
-    detected_frameworks = sa_phase1.get("detected_frameworks", []) or []
+    scanned_files = int(system_scan.get("scanned_files", 0) or 0)
+    scanned_functions = int(system_scan.get("scanned_functions", 0) or 0)
+    detected_frameworks = system_scan.get("detected_frameworks", []) or []
     return (scanned_files >= 3 and scanned_functions >= 10) or bool(detected_frameworks)
 
 
-def _decide_mode(input_idea: str, sa_phase1: dict) -> tuple[str, str]:
+def _decide_mode(input_idea: str, system_scan: dict) -> tuple[str, str]:
     """Return (mode, reason). Mode is one of CREATE|UPDATE|REVERSE_ENGINEER."""
     idea = (input_idea or "").strip()
-    has_scan = _scan_is_sufficient(sa_phase1)
+    has_scan = _scan_is_sufficient(system_scan)
     if not idea and has_scan:
         return "REVERSE_ENGINEER", "input_idea 비어있고 As-Is 스캔 증거가 충분하여 REVERSE_ENGINEER로 판정"
     if idea and has_scan:
@@ -38,18 +38,18 @@ def sa_merge_project_node(state: PipelineState) -> dict:
 
     input_idea = sget("input_idea", "") or ""
     project_context = sget("project_context", "") or ""
-    sa_phase1 = sget("sa_phase1", {}) or {}
+    system_scan = sget("system_scan", {}) or {}
 
     requirements_rtm = sget("requirements_rtm", []) or []
     semantic_graph = sget("semantic_graph", {}) or {}
     context_spec = sget("context_spec", {}) or {}
 
-    mode, reason = _decide_mode(input_idea, sa_phase1)
+    mode, reason = _decide_mode(input_idea, system_scan)
     intent = "AS_IS" if mode == "REVERSE_ENGINEER" else "TO_BE"
 
     as_is = {
-        "source": "sa_phase1",
-        "scan": sa_phase1,
+        "source": "system_scan",
+        "scan": system_scan,
         "project_context": project_context,
     }
     plan = {

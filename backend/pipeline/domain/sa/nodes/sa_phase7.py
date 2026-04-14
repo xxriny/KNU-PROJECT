@@ -32,7 +32,7 @@ def sa_phase7_node(state: PipelineState) -> dict:
 
     phase5 = sget("sa_phase5", {}) or {}
     phase6 = sget("sa_phase6", {}) or {}
-    sa_phase1 = sget("sa_phase1", {}) or {}
+    system_scan = sget("system_scan", {}) or {}
     
     mapped_reqs = phase5.get("mapped_requirements", []) or []
     trust_boundaries = phase6.get("trust_boundaries", []) or []
@@ -52,7 +52,7 @@ def sa_phase7_node(state: PipelineState) -> dict:
         }
 
     functions_by_file: dict[str, list[str]] = {}
-    for fn in sa_phase1.get("sample_functions", []) or []:
+    for fn in system_scan.get("sample_functions", []) or []:
         file_path = (fn.get("file") or "").replace("\\", "/").lower()
         func_name = (fn.get("func_name") or "").strip()
         if not file_path or not func_name:

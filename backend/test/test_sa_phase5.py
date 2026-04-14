@@ -10,7 +10,7 @@ from pipeline.domain.sa.nodes.sa_phase5 import _build_reverse_module_mapping
 
 class SAPhase5MappingTests(unittest.TestCase):
     def test_reverse_mapping_uses_multiple_layers_from_evidence(self):
-        sa_phase1 = {
+        system_scan = {
             "detected_frameworks": ["React", "FastAPI"],
             "sample_functions": [
                 {
@@ -35,7 +35,7 @@ class SAPhase5MappingTests(unittest.TestCase):
             "key_modules": [],
         }
 
-        mapped = _build_reverse_module_mapping(sa_phase1)
+        mapped = _build_reverse_module_mapping(system_scan)
         layers = {item["layer"] for item in mapped}
 
         self.assertIn("Presentation", layers)
@@ -48,7 +48,7 @@ class SAPhase5MappingTests(unittest.TestCase):
             self.assertTrue(item["mapping_reason"])
 
     def test_framework_hints_are_scoped_per_module(self):
-        sa_phase1 = {
+        system_scan = {
             "detected_frameworks": ["React", "FastAPI"],
             "framework_evidence": [
                 {"framework": "React", "file": "src/App.jsx", "reason": "dependencies.react 발견"},
@@ -71,7 +71,7 @@ class SAPhase5MappingTests(unittest.TestCase):
             "key_modules": [],
         }
 
-        mapped = _build_reverse_module_mapping(sa_phase1)
+        mapped = _build_reverse_module_mapping(system_scan)
         backend_main = next(item for item in mapped if "backend/main.py" in item["description"])
         frontend_app = next(item for item in mapped if "src/App.jsx" in item["description"])
 
@@ -80,7 +80,7 @@ class SAPhase5MappingTests(unittest.TestCase):
         self.assertEqual(frontend_app["layer"], "Presentation")
 
     def test_file_inventory_drives_reverse_mapping_and_dedupes_key_modules(self):
-        sa_phase1 = {
+        system_scan = {
             "detected_frameworks": ["FastAPI"],
             "framework_evidence": [{"framework": "FastAPI", "file": "backend/main.py", "reason": "entrypoint"}],
             "sample_functions": [
@@ -95,7 +95,7 @@ class SAPhase5MappingTests(unittest.TestCase):
             "key_modules": ["backend/orchestration/pipeline_runner.py (파이프라인 실행 관리)"],
         }
 
-        mapped = _build_reverse_module_mapping(sa_phase1)
+        mapped = _build_reverse_module_mapping(system_scan)
 
         self.assertEqual(len(mapped), 3)
         self.assertTrue(all(item.get("file_path") for item in mapped))

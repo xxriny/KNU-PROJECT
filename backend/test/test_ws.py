@@ -155,9 +155,9 @@ class WebSocketTests(unittest.TestCase):
                 self.payload = payload
                 self.stream_mode = stream_mode
                 yield {
-                    "sa_phase1": {
-                        "sa_phase1": {"status": "Pass", "scanned_files": 3, "scanned_functions": 9},
-                        "thinking_log": [{"node": "sa_phase1", "thinking": "구조 분석 완료"}],
+                    "system_scan": {
+                        "system_scan": {"status": "Pass", "scanned_files": 3, "scanned_functions": 9},
+                        "thinking_log": [{"node": "system_scan", "thinking": "구조 분석 완료"}],
                     }
                 }
                 yield {
@@ -221,9 +221,9 @@ class WebSocketTests(unittest.TestCase):
                     }
                 }
                 yield {
-                    "sa_phase1": {
-                        "sa_phase1": {"status": "Pass", "scanned_files": 3, "scanned_functions": 9},
-                        "thinking_log": [{"node": "sa_phase1", "thinking": "구조 분석 완료"}],
+                    "system_scan": {
+                        "system_scan": {"status": "Pass", "scanned_files": 3, "scanned_functions": 9},
+                        "thinking_log": [{"node": "system_scan", "thinking": "구조 분석 완료"}],
                     }
                 }
                 yield {
@@ -271,8 +271,8 @@ class WebSocketTests(unittest.TestCase):
 
         running_nodes = [msg.get("node") for msg in messages if msg.get("type") == "status" and msg.get("data", {}).get("status") == "running"]
         self.assertIn("prioritizer", running_nodes)
-        self.assertIn("sa_phase1", running_nodes)
-        self.assertLess(running_nodes.index("atomizer"), running_nodes.index("sa_phase1"))
+        self.assertIn("system_scan", running_nodes)
+        self.assertLess(running_nodes.index("atomizer"), running_nodes.index("system_scan"))
         self.assertEqual(messages[-1]["type"], "result")
         self.assertEqual(messages[-1]["data"].get("pipeline_type"), "analysis_update")
         self.assertIn("sa_output", messages[-1]["data"])

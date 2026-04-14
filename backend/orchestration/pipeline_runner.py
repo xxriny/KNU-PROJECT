@@ -26,7 +26,7 @@ from pipeline.orchestration.facade import (
     get_idea_chat_routing_map,
 )
 from pipeline.core.action_type import ANALYSIS_ACTION_TYPES, normalize_action_type
-from pipeline.core.ast_scanner import extract_functions, summarize_for_llm
+from pipeline.domain.rag.ast_scanner import extract_functions, summarize_for_llm
 from result_shaping.result_shaper import shape_result, deep_sanitize
 from observability.logger import get_logger
 from observability.metrics import track_node
