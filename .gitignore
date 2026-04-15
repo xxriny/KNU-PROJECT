@@ -35,9 +35,18 @@ backend/test/json/*.json
 backend/test/json/*_PROJECT_STATE.md
 
 # Backend auto-generated data (세션 저장 파일, ChromaDB)
+**/chroma_db/
+**/vector_db/
+**/storage/
+**/*.sqlite3
+**/*.bin
+**/*.gguf
+backend/models/
 backend/Data/*.json
-backend/Data/*_PROJECT_STATE.md
-backend/Data/chroma_db/
+backend/storage/sessions/*.json
+
+# Benchmark Reports
+backend/pipeline/domain/pm/benchmark/reports/*.md
 
 # Electron build cache
 release/

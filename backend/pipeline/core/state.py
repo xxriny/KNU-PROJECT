@@ -27,6 +27,20 @@ def _keep_last_step(existing_step, new_step):
     return new_step
 
 
+def _merge_usage_history(existing, new):
+    """토큰 사용 이력을 누적합니다."""
+    if not isinstance(existing, list):
+        existing = []
+    if not isinstance(new, list):
+        new = []
+    return existing + new
+
+
+def _sum_cost(existing, new):
+    """비용을 합산합니다."""
+    return (existing or 0.0) + (new or 0.0)
+
+
 # ── 기본 상태 (모든 모드 공통) ───────────────────
 
 class _BaseState(TypedDict):
@@ -36,6 +50,11 @@ class _BaseState(TypedDict):
     error: str
     thinking_log: Annotated[list, _merge_thinking_logs]
     current_step: Annotated[str, _keep_last_step]
+    total_retries: int               # LLM 재시도 횟수 누적 (Benchmark용)
+    
+    # ── 비용 및 토큰 추적 (REQ-010/Phase 0) ──────
+    accumulated_usage: Annotated[list, _merge_usage_history] # [{"node": "...", "total_tokens": 100, ...}]
+    accumulated_cost: Annotated[float, _sum_cost]           # 총 USD 소모 비용
 
 
 # ── 분석 모드 필드 ──────────────────────────────
@@ -79,6 +98,7 @@ class _AnalysisFields(TypedDict, total=False):
     pm_bundle: dict                  # 최종 PM_BUNDLE JSON (RTM + tech_stacks)
     pm_coverage_rate: float          # APPROVED 스택 커버리지 (0~1)
     pm_warnings: list                # 미매핑/호환성 경고 목록
+    is_integration_fail: bool        # 데이터 정합성 실패 여부 (Gate용)
 
 
 # ── 채팅 수정 모드 필드 ─────────────────────────

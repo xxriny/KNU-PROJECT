@@ -10,24 +10,11 @@ from sentence_transformers import SentenceTransformer
 
 from pipeline.core.state import PipelineState, make_sget
 from pipeline.domain.pm.schemas import StackSourceData, EmbeddingOutput
+from pipeline.domain.pm.nodes.stack_db import upsert_stack_entry
+from pipeline.core.models.stack_embedding_model import get_stack_embeddings, MODEL_NAME
 from observability.logger import get_logger
 
 logger = get_logger()
-
-# ── 모델 싱글톤 로더 ────────────────────────────────
-_model_instance: Optional[SentenceTransformer] = None
-_model_lock = threading.Lock()
-MODEL_NAME = "intfloat/multilingual-e5-small"
-
-def get_embedding_model() -> SentenceTransformer:
-    global _model_instance
-    if _model_instance is None:
-        with _model_lock:
-            if _model_instance is None:
-                logger.info(f"Loading embedding model: {MODEL_NAME}...")
-                # 처음 실행 시 모델 다운로드로 인해 시간이 소요될 수 있음
-                _model_instance = SentenceTransformer(MODEL_NAME)
-    return _model_instance
 
 def stack_embedding_node(state: PipelineState) -> Dict[str, Any]:
     sget = make_sget(state)
@@ -57,12 +44,28 @@ def stack_embedding_node(state: PipelineState) -> Dict[str, Any]:
     text_to_embed = f"{final_data.name}: {final_data.description}"
     
     try:
-        # 2. 모델 로드 및 벡터 추출
-        model = get_embedding_model()
-        vector = model.encode(text_to_embed).tolist() # JSON 직렬화를 위해 list로 변환
+        # 2. 모델 로드 및 벡터 추출 (공용 엔진 사용)
+        vector = get_stack_embeddings(text_to_embed)
         
         thinking_msg = f"'{final_data.name}' 데이터를 {MODEL_NAME} 모델로 임베딩 완료 (차원: {len(vector)})"
-        
+
+        # 3. [RAG Persistence] 기술 스택 지식 전용 DB에 저장
+        try:
+            run_id = sget("run_id", "unknown")
+            upsert_stack_entry(
+                session_id=run_id,
+                stack_data={
+                    "package_name": final_data.name,
+                    "domain": sget("current_domain", "unknown"),
+                    "version_req": final_data.version,
+                    "install_cmd": final_data.install_cmd or "unknown",
+                    "content_text": text_to_embed
+                },
+                vector=vector
+            )
+        except Exception as db_err:
+            logger.warning(f"Failed to persist stack entry to stack_db: {db_err}")
+
         return {
             "stack_embedding_output": {
                 "vector": vector,

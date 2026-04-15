@@ -302,6 +302,8 @@ def sa_phase8_node(state: PipelineState) -> dict:
     )
     sa_output["summary"] = summary
 
+    # [Knowledge Persistence] -> sa_embedding_node에서 처리하도록 위임
+
     return {
         "sa_phase8": output,
         "sa_output": sa_output,
