@@ -8,23 +8,32 @@ PM Agent Pipeline — 유틸리티 v6.3 (FastAPI 구조 적용)
 """
 
 import json, re, os, threading
+from contextvars import ContextVar
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Generic, Type, TypeVar
 from pydantic import BaseModel, ValidationError
+from pipeline.core.models.gemini_model import get_gemini_client, get_raw_genai_client
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from pipeline.core.cost_manager import calculate_cost
 from version import DEFAULT_MODEL, DEFAULT_TEMPERATURE, MAX_LLM_RETRIES
 
 T = TypeVar("T", bound=BaseModel)
 _CACHE_LIMIT = 32
+
+# ── 비용 및 토큰 추적용 전역 컨텍스트 (Phase 0) ──────
+# 각 노드 실행 중 발생하는 모든 LLM 호출의 사용량을 임시 저장합니다.
+active_usage_log: ContextVar[list] = ContextVar("active_usage_log", default=[])
 
 
 @dataclass
 class LLMResult(Generic[T]):
     parsed: T
     usage: dict
+    cost: float
     thinking: str
+    retry_count: int = 0
 
 
 def _make_llm_cache_key(api_key: str, model: str, temperature: float) -> str:
@@ -63,36 +72,9 @@ def _get_effective_key(api_key: str) -> str:
     return key
 
 
-# ── LangChain LLM 싱글턴 캐싱 ─────────────────
-_llm_cache: OrderedDict[str, ChatGoogleGenerativeAI] = OrderedDict()
-_raw_cache: OrderedDict[str, Any] = OrderedDict()
-_llm_cache_lock = threading.Lock()
-_raw_cache_lock = threading.Lock()
-
-
 def get_llm(api_key: str, model: str = DEFAULT_MODEL, temperature: float = DEFAULT_TEMPERATURE) -> ChatGoogleGenerativeAI:
-    """ChatGoogleGenerativeAI 싱글턴 (api_key + model 조합으로 캐싱)"""
-    try:
-        effective_key = _get_effective_key(api_key)
-        cache_key = _make_llm_cache_key(effective_key, model, temperature)
-
-        with _llm_cache_lock:
-            cached_llm = _llm_cache.get(cache_key)
-            if cached_llm is not None:
-                _llm_cache.move_to_end(cache_key)
-                return cached_llm
-
-            llm = ChatGoogleGenerativeAI(
-                model=model,
-                google_api_key=effective_key,
-                temperature=temperature,
-            )
-            _remember_cache_entry(_llm_cache, cache_key, llm)
-        return llm
-    except ValueError:
-        raise
-    except Exception as e:
-        raise RuntimeError(f"LLM 초기화 오류: {str(e)}")
+    """ChatGoogleGenerativeAI 위임 (core/models/gemini_model 사용)"""
+    return get_gemini_client(api_key, model, temperature)
 
 
 def _retry_loop(structured_llm, messages: list, max_retries: int, label: str):
@@ -103,7 +85,7 @@ def _retry_loop(structured_llm, messages: list, max_retries: int, label: str):
         result = None
         try:
             result = structured_llm.invoke(messages)
-            return result
+            return result, attempt # 결과와 시도 횟수(0-based) 반환
         except ValidationError as e:
             last_error = e
             error_msg = str(e)
@@ -147,14 +129,15 @@ def call_structured(
         structured_llm = llm.with_structured_output(schema, include_raw=True)
     except TypeError:
         structured_llm = llm.with_structured_output(schema)
-        parsed = _retry_loop(structured_llm, messages, max_retries, "Structured output")
+        parsed, retries = _retry_loop(structured_llm, messages, max_retries, "Structured output")
         return LLMResult(
             parsed=parsed,
             usage={**_ZERO_USAGE},
             thinking=getattr(parsed, "thinking", ""),
+            retry_count=retries,
         )
 
-    raw_result = _retry_loop(structured_llm, messages, max_retries, "Structured output")
+    raw_result, retries = _retry_loop(structured_llm, messages, max_retries, "Structured output")
 
     if isinstance(raw_result, dict):
         parsed = raw_result.get("parsed")
@@ -175,11 +158,25 @@ def call_structured(
         "output_tokens": usage_meta.get("output_tokens", usage_meta.get("candidates_token_count", 0)) or 0,
         "total_tokens": usage_meta.get("total_tokens", usage_meta.get("total_token_count", 0)) or 0,
     }
+    
+    cost = calculate_cost(model, usage["input_tokens"], usage["output_tokens"])
+
+    # 중앙 집중형 추적을 위해 컨텍스트에 기록 (Phase 0)
+    current_log = active_usage_log.get().copy()
+    current_log.append({
+        "model": model,
+        "input": usage["input_tokens"],
+        "output": usage["output_tokens"],
+        "cost": cost
+    })
+    active_usage_log.set(current_log)
 
     return LLMResult(
         parsed=parsed,
         usage=usage,
+        cost=cost,
         thinking=getattr(parsed, "thinking", ""),
+        retry_count=retries,
     )
 
 
@@ -224,19 +221,8 @@ from google import genai
 from google.genai import types
 
 def _get_raw_client(api_key: str):
-    try:
-        effective_key = _get_effective_key(api_key)
-        with _raw_cache_lock:
-            cached_client = _raw_cache.get(effective_key)
-            if cached_client is not None:
-                _raw_cache.move_to_end(effective_key)
-                return cached_client
-
-            client = genai.Client(api_key=effective_key)
-            _remember_cache_entry(_raw_cache, effective_key, client)
-        return client
-    except Exception as e:
-        raise RuntimeError(f"Gemini 클라이언트 초기화 오류: {str(e)}")
+    """원시 클라이언트 위임 (core/models/gemini_model 사용)"""
+    return get_raw_genai_client(api_key)
 
 
 def call_gemini(api_key: str, model: str = DEFAULT_MODEL, system: str = "",

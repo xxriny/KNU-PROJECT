@@ -6,24 +6,24 @@ Stack Planner Node
 
 from typing import List, Dict, Any, Optional
 from pipeline.core.state import PipelineState, make_sget
-from pipeline.core.utils import call_structured_with_usage
+from pipeline.core.utils import call_structured
 from pipeline.domain.pm.schemas import StackPlannerOutput
 from observability.logger import get_logger
 from version import DEFAULT_MODEL
 
 logger = get_logger()
 
-STACK_PLANNER_SYSTEM_PROMPT = """당신은 프로젝트의 기술적 일관성을 책임지는 '스택 설계자'이자 '기술 스택 가디언'입니다.
-Requirement Analyzer가 넘겨준 기능 목록에 대해, 제공된 'STACK_RAG' 컨텍스트 안에서만 기술을 선택합니다.
-
-[핵심 규칙]
-1. RAG 컨텍스트(approved_stacks)에 없는 라이브러리는 절대로 추천하지 마세요.
-2. 특정 기능에 꼭 필요한 라이브러리가 RAG에 없다면, 해당 항목의 status를 'PENDING_CRAWL' 상태로 마킹하세요. 이것은 가디언 노드의 개입을 요청하는 신호입니다.
-3. 동일한 도메인(예: Frontend) 내에서는 반드시 동일한 상태 관리/스타일 라이브러리를 사용하도록 강제하세요. 기능마다 다른 라이브러리를 쓰면 안 됩니다.
-4. 각 선택에 대해 'reason' 필드에 명확한 기술적 근거(RAG 매핑 이유 등)를 기술하세요.
-5. 'PENDING_CRAWL' 상태인 항목은 반드시 'suggested_query' 필드에 크롤러가 NPM이나 PyPI에서 즉시 조회할 수 있는 **정확한 단일 패키지 영문명(Exact Package Name)**을 추론하여 기입하세요. 절대 문장형으로 작성하면 안 됩니다.
-   - ❌ 나쁜 예 (문장형): "React 환경에서 사용 가능한 실시간 차트 라이브러리 추천", "고성능 시계열 데이터베이스"
-   - ⭕ 좋은 예 (패키지명): "recharts", "lightweight-charts", "influxdb", "timescaledb"
+STACK_PLANNER_SYSTEM_PROMPT = """# 역할: 기술 경제학자 (YAGNI / 최소 권한 원칙)
+## 목표: 프로젝트 규모(SCALE)에 맞는 최적/최소의 기술 스택 선정.
+## 규칙:
+1. 규모 판단: Tiny | Medium | Enterprise 중 선택.
+2. 오버엔지니어링 금지: 단순 앱에 DB/서버/무거운 상태관리 도입 시 감점.
+3. RAG 준수: 제공된 컨텍스트 내 기술 우선 검색. 없으면 'PENDING_CRAWL'.
+4. 논리적 근거: 왜 더 간단한 대안 대신 이 기술을 택했는지 설명.
+## 예시:
+- 시나리오: "단순 정적 블로그"
+  - ❌ Bad: MSA + Kafka + K8s (YAGNI 위반).
+  - ✅ Good: Next.js + Supabase/SQLite (규모 적합).
 """
 
 def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
@@ -67,24 +67,24 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
 """
 
     try:
-        out, usage = call_structured_with_usage(
+        res = call_structured(
             api_key=sget("api_key", ""),
             model=sget("model", DEFAULT_MODEL),
             schema=StackPlannerOutput,
             system_prompt=STACK_PLANNER_SYSTEM_PROMPT,
             user_msg=user_msg,
-            temperature=0.1
         )
-        
-        thinking_msg = out.thinking
+        out = res.parsed
+        retry_count = res.retry_count
+        thinking_msg = out.th
         
         # 4. 회귀 로직을 위한 크롤러 입력 생성 (사용자 제안 반영)
-        pending_items = [m for m in out.stack_mapping if m.status == "PENDING_CRAWL"]
+        pending_items = [item for item in out.m if item.status == "PENDING_CRAWL"]
         next_crawler_inputs = []
         for item in pending_items:
             next_crawler_inputs.append({
-                "target": "npm" if item.domain == "Frontend" else "pypi",
-                "query": item.suggested_query or item.package
+                "target": "npm" if item.dom == "Frontend" else "pypi",
+                "query": item.query or item.pkg
             })
 
         return {

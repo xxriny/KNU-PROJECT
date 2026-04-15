@@ -1,89 +1,95 @@
 """
-Stack DB — 기술 스택 지식 벡터 저장소 (PM Domain 전용)
-기존 ChromaDB 클라이언트를 PM 도메인에 수렴시키고, 새로운 임베딩 모델 도입을 위한 기반을 마련합니다.
+Stack DB — 기술 스택 지식 벡터 저장소
+제시된 'STACK RAG - 테이블 정의서(Table 05)'를 준수하며, 스택 명세 정보만을 전문적으로 관리합니다.
 """
 
 import os
 import chromadb
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
+from pipeline.core.models.stack_embedding_model import get_stack_embeddings
 from observability.logger import get_logger
 
-_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-# 신규 저장 위치: backend/storage/vector_db
-DB_PATH = os.path.join(_BACKEND_DIR, "storage", "vector_db")
+# backend 디렉토리 위치 계산 (backend/pipeline/domain/pm/nodes/stack_db.py 기준)
+_BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+DB_PATH = os.path.join(_BACKEND_ROOT, "storage", "stack_vector_db")
 
 # 글로벌 ChromaDB 클라이언트 (싱글톤)
 _client: Optional[chromadb.PersistentClient] = None
 _collection: Optional[chromadb.Collection] = None
 
-def _init_db():
-    """DB 초기화 (신규 경로 유지)"""
+def _get_collection():
     global _client, _collection
     if _client is None:
         os.makedirs(DB_PATH, exist_ok=True)
         _client = chromadb.PersistentClient(path=DB_PATH)
         _collection = _client.get_or_create_collection(
-            name="pm_tech_stack_knowledge",
+            name="tech_stack_knowledge",
             metadata={"hnsw:space": "cosine"}
         )
     return _collection
 
-def upsert_bundle_knowledge(
-    run_id: str,
-    bundle_data: Dict,
-    project_name: str = "unknown"
-) -> None:
+def upsert_stack_entry(
+    session_id: str,
+    stack_data: Dict[str, Any],
+    stack_id: Optional[str] = None,
+    vector: Optional[List[float]] = None
+) -> str:
     """
-    PM_BUNDLE의 최종 확정 스택 정보를 지식화하여 저장합니다.
+    개별 기술 스택 정보(Table 05)를 RAG에 저장합니다.
     """
-    collection = _init_db()
+    collection = _get_collection()
     
-    rtm = bundle_data.get("data", {}).get("rtm", [])
-    stacks = bundle_data.get("data", {}).get("tech_stacks", [])
+    sid = stack_id or f"stack_{stack_data.get('package_name', 'unknown')}_{session_id}"
+    domain = stack_data.get("domain", "unknown")
+    package_name = stack_data.get("package_name", "unknown")
+    version_req = stack_data.get("version_req", "unknown")
+    install_cmd = stack_data.get("install_cmd", "unknown")
+    content_text = stack_data.get("content_text", "")
     
-    # 기능별로 루프를 돌며 지식화
-    for feature in rtm:
-        feat_id = feature.get("feature_id")
-        desc = feature.get("description", "")
-        
-        # 해당 기능에 매핑된 APPROVED 스택 찾기
-        feat_stacks = [s for s in stacks if s.get("feature_id") == feat_id and s.get("status") == "APPROVED"]
-        if not feat_stacks:
-            continue
-            
-        stack_info = ", ".join([f"{s.get('package')} ({s.get('domain')})" for s in feat_stacks])
-        document = f"Feature: {desc} | Recommended Stacks: {stack_info}"
-        
-        metadata = {
-            "run_id": run_id,
-            "project_name": project_name,
-            "feature_id": feat_id,
-            "type": "pm_final_bundle"
-        }
-        
-        doc_id = f"{run_id}:{feat_id}"
-        collection.upsert(
-            ids=[doc_id],
-            documents=[document],
-            metadatas=[metadata]
-        )
-        
-    get_logger(run_id).info(f"[StackDB] Persisted {len(rtm)} features to knowledge base.")
+    metadata = {
+        "session_id": session_id,
+        "stack_id": sid,
+        "domain": domain,
+        "package_name": package_name,
+        "version_req": version_req,
+        "install_cmd": install_cmd
+    }
+    
+    upsert_args = {
+        "ids": [sid],
+        "documents": [content_text],
+        "metadatas": [metadata]
+    }
+    # 벡터가 없을 경우 자동 임베딩 수행 (Table 05 기술 스택 지식)
+    if not vector:
+        text_to_embed = stack_data.get("content_text") or f"{stack_data.get('package_name')}: {str(stack_data)[:1000]}"
+        try:
+            vector = get_stack_embeddings(text_to_embed)
+        except Exception as e:
+            logger.warning(f"[StackDB] Auto-embedding failed: {e}")
 
-def delete_session_knowledge(run_id: str) -> int:
-    """세션 관련 지식 삭제 (세션 정리용)"""
-    collection = _init_db()
-    results = collection.get(where={"run_id": run_id})
+    if vector:
+        upsert_args["embeddings"] = [vector]
+        
+    collection.upsert(**upsert_args)
+    get_logger(session_id).info(f"[StackDB] Persisted stack: {sid} ({package_name})")
+    return sid
+
+def delete_session_knowledge(session_id: str) -> int:
+    """세션 관련 기술 스택 지식 삭제"""
+    collection = _get_collection()
+    results = collection.get(where={"session_id": session_id})
     if results["ids"]:
         collection.delete(ids=results["ids"])
         return len(results["ids"])
     return 0
 
 def search_tech_stacks(query: str, top_k: int = 5) -> List[Dict]:
-    """유사 사례 기반 기술 스택 검색"""
-    collection = _init_db()
+    """유사 사례 기반 기술 스택 검색 (1024차원 수동 임베딩 적용)"""
+    collection = _get_collection()
+    query_vector = get_stack_embeddings(query)
     results = collection.query(
-        query_texts=[query],
+        query_embeddings=[query_vector],
         n_results=top_k
     )
     
@@ -92,8 +98,10 @@ def search_tech_stacks(query: str, top_k: int = 5) -> List[Dict]:
         for i, doc_id in enumerate(results["ids"][0]):
             metadata = results["metadatas"][0][i]
             output.append({
-                "description": results["documents"][0][i],
-                "similarity": 1 - (results["distances"][0][i] / 2) if results["distances"] else 0,
-                "project": metadata.get("project_name", "unknown")
+                "package_name": metadata.get("package_name"),
+                "install_cmd": metadata.get("install_cmd"),
+                "version_req": metadata.get("version_req"),
+                "content": results["documents"][0][i],
+                "similarity": 1 - (results["distances"][0][i] / 2) if results["distances"] else 0
             })
     return output

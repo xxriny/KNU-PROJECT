@@ -15,8 +15,6 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from version import APP_VERSION, DEFAULT_MODEL
 from observability.logger import get_logger
-
-from connectors.result_logger import delete_session_files, delete_exact_file
 from pipeline.core.action_type import normalize_action_type
 from pipeline.orchestration.facade import get_analysis_pipeline, get_revision_pipeline, get_idea_pipeline
 from orchestration.executor import execute_pipeline
@@ -249,17 +247,21 @@ async def delete_session(run_id: str, req: Optional[DeleteSessionRequest] = None
         return {"status": "error", "error": "Invalid run_id format. Expected YYYYMMDD_HHMMSS"}
 
     try:
-        files_deleted = delete_session_files(run_id)
-        
-        # New Tech Stack DB deletion
+        # DB 지식 삭제
+        from pipeline.domain.pm.nodes.pm_db import delete_pm_knowledge
+        from pipeline.domain.sa.nodes.sa_db import delete_sa_knowledge
         from pipeline.domain.pm.nodes.stack_db import delete_session_knowledge
-        docs_deleted = delete_session_knowledge(run_id)
+        
+        pm_deleted = delete_pm_knowledge(run_id)
+        sa_deleted = delete_sa_knowledge(run_id)
+        stack_deleted = delete_session_knowledge(run_id)
 
         return {
             "status": "ok",
-            "message": f"Session {run_id} deleted",
-            "files_deleted": files_deleted,
-            "documents_deleted": docs_deleted,
+            "message": f"Session {run_id} deleted from RAG",
+            "pm_docs_deleted": pm_deleted,
+            "sa_docs_deleted": sa_deleted,
+            "stack_docs_deleted": stack_deleted,
         }
     except Exception as e:
         get_logger().exception(f"delete_session failed for run_id={run_id}")

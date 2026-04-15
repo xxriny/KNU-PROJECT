@@ -31,7 +31,6 @@ from result_shaping.result_shaper import shape_result, deep_sanitize
 from observability.logger import get_logger
 from observability.metrics import track_node
 from transport.connection_manager import manager
-from connectors.result_logger import save_result
 from version import DEFAULT_MODEL
 
 
@@ -110,12 +109,6 @@ async def _run_pipeline_base(
                 result_mutator(shaped)
 
             await manager.send_json(ws, {"type": "result", "node": result_node, "data": shaped})
-
-            try:
-                save_result(shaped)
-            except Exception as log_err:
-                active_log = log or get_logger(state_payload.get("run_id", ""))
-                active_log.warning("save_result_failed", error=str(log_err))
         
         return result
 
