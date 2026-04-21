@@ -1,8 +1,3 @@
-/**
- * PipelineProgress — 파이프라인 실행 중 진행 상태 표시
- * Thinking Log 실시간 스트리밍 + 노드별 상태 표시
- */
-
 import React, { useRef, useEffect } from "react";
 import useAppStore from "../store/useAppStore";
 import {
@@ -11,6 +6,7 @@ import {
   Circle,
   AlertCircle,
   Brain,
+  Sparkles,
 } from "lucide-react";
 
 const SCAN_STEPS = [
@@ -18,7 +14,7 @@ const SCAN_STEPS = [
 ];
 
 const PM_PIPELINE_STEPS = [
-  { key: "requirement_analyzer", label: "요구사항 분석", desc: "사용자 아이디어를 원자 단위 요구사항으로 정밀 분석" },
+  { key: "requirement_analyzer", label: "요구사항 분석", desc: "아이디어를 원자 단위 요구사항으로 정밀 분석" },
   { key: "stack_planner", label: "기술 스택 전략", desc: "요구사항별 최적의 라이브러리 및 프레임워크 선정" },
   { key: "stack_crawling", label: "지능형 지식 탐색", desc: "부족한 기술 지식을 외부 레지스트리에서 자율 검색" },
   { key: "guardian", label: "기술 정합성 검증", desc: "선정된 스택의 호환성, 보안성 및 품질 최종 검토" },
@@ -56,82 +52,102 @@ export default function PipelineProgress() {
   }, [thinkingLog]);
 
   return (
-    <div className="h-full w-full flex bg-transparent text-sm transition-colors duration-300 overflow-hidden">
+    <div className="h-full w-full flex bg-transparent text-sm overflow-hidden p-4 gap-4">
       {/* ── 좌측: 파이프라인 스텝 ──────────── */}
-      <div className="w-72 shrink-0 border-r border-[var(--border)] bg-transparent flex flex-col min-h-0">
-        <div className="p-4 pb-2 shrink-0">
-          <h3 className="text-sm font-medium text-slate-400 uppercase tracking-wider">
-            Pipeline Progress
+      <div className="w-80 shrink-0 glass-panel rounded-2xl flex flex-col min-h-0 shadow-premium overflow-hidden">
+        <div className="p-5 border-b border-white/5 bg-white/5">
+          <h3 className="text-[12px] font-bold text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2">
+            <Sparkles size={14} className="text-blue-400" />
+            Pipeline Engine
           </h3>
         </div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-4 space-y-2 min-h-0">
-        {steps.map((step) => {
-          const status = pipelineNodes[step.key] || "pending";
-          return (
-            <StepItem
-              key={step.key}
-              label={step.label}
-              desc={step.desc}
-              status={status}
-              isDarkMode={isDarkMode}
-            />
-          );
-        })}
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2 min-h-0">
+          {steps.map((step) => {
+            const status = pipelineNodes[step.key] || "pending";
+            return (
+              <StepItem
+                key={step.key}
+                label={step.label}
+                desc={step.desc}
+                status={status}
+                isDarkMode={isDarkMode}
+              />
+            );
+          })}
 
-        {pipelineError && (
-          <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-            <div className="flex items-center gap-1.5 text-sm text-red-400 mb-1">
-              <AlertCircle size={12} />
-              오류 발생
+          {pipelineError && (
+            <div 
+              className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl"
+            >
+              <div className="flex items-center gap-2 text-[13px] text-red-400 font-bold mb-1">
+                <AlertCircle size={14} />
+                오류 발생
+              </div>
+              <p className="text-[12px] text-red-300/80 leading-relaxed">
+                {pipelineError}
+              </p>
             </div>
-            <p className="text-[12px] text-red-300/70 leading-relaxed">
-              {pipelineError}
-            </p>
-          </div>
-        )}
+          )}
         </div>
       </div>
 
       {/* ── 우측: Thinking Log ─────────────── */}
-      <div className="flex-1 min-w-0 flex flex-col bg-transparent">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--border)] shrink-0">
-          <Brain size={14} className="text-purple-400" />
-          <span className={`text-sm font-medium ${isDarkMode ? "text-slate-400" : "text-slate-700"}`}>
-            Thinking Log
-          </span>
-          <span className="text-[12px] text-slate-500">
-            ({thinkingLog.length} entries)
+      <div className="flex-1 min-w-0 flex flex-col glass-panel rounded-2xl shadow-premium overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/5">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center">
+              <Brain size={18} className="text-purple-400" />
+            </div>
+            <div>
+              <span className={`text-[15px] font-bold ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>
+                Thinking Log
+              </span>
+              <div className="text-[11px] text-slate-500 uppercase tracking-widest font-medium">
+                Real-time Agent Reasoning Stream
+              </div>
+            </div>
+          </div>
+          <span className="text-[13px] font-mono text-purple-400/80 bg-purple-500/10 px-2 py-0.5 rounded-lg border border-purple-500/20">
+            {thinkingLog.length} entries
           </span>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+        <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4 custom-scrollbar">
           {thinkingLog.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full">
-              <Loader2
-                size={24}
-                className="text-blue-400 animate-spin mb-3"
-              />
-              <p className="text-sm text-slate-500">
-                AI 에이전트가 분석 중입니다...
-              </p>
+            <div 
+              className="flex flex-col items-center justify-center h-full space-y-4"
+            >
+              <div className="relative">
+                <Loader2 size={40} className="text-blue-500 animate-spin" />
+                <Brain size={20} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-purple-400" />
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-bold text-slate-300">잠시만 기다려 주세요</p>
+                <p className="text-sm text-slate-500">AI 에이전트가 소스 코드를 읽고 설계를 구성하는 중입니다...</p>
+              </div>
             </div>
           ) : (
             thinkingLog.map((log, idx) => (
               <div
                 key={idx}
-                className={`rounded-lg p-3 border transition-all glass-card border-[var(--border)]`}
+                className={`group rounded-2xl p-4 border transition-all glass-card ${
+                  isDarkMode ? "bg-white/5 border-white/5" : "bg-slate-50 border-slate-200 shadow-sm"
+                }`}
               >
-                <div className="flex items-center gap-2 mb-2">
-                  <span className={`px-1.5 py-0.5 rounded text-[12px] font-mono ${
-                    isDarkMode ? "bg-purple-600/20 text-purple-300" : "bg-purple-50 text-purple-600 border border-purple-100"
-                  }`}>
-                    {log.node}
-                  </span>
-                  <span className="text-[12px] text-slate-500">
-                    {new Date(log.timestamp).toLocaleTimeString()}
-                  </span>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded-lg text-[11px] font-bold uppercase tracking-wider ${
+                      isDarkMode ? "bg-purple-600/20 text-purple-300" : "bg-purple-100 text-purple-600 border border-purple-200"
+                    }`}>
+                      {log.node}
+                    </span>
+                    <div className="w-1 h-1 rounded-full bg-slate-700" />
+                    <span className="text-[11px] font-medium text-slate-500 font-mono">
+                      {new Date(log.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
                 </div>
-                <p className={`text-sm leading-relaxed whitespace-pre-wrap ${isDarkMode ? "text-slate-400" : "text-slate-700"}`}>
+                <p className={`text-[14px] leading-relaxed whitespace-pre-wrap ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
                   {log.text}
                 </p>
               </div>
@@ -146,36 +162,31 @@ export default function PipelineProgress() {
 
 function StepItem({ label, desc, status, isDarkMode }) {
   const icons = {
-    pending: <Circle size={14} className={isDarkMode ? "text-slate-600" : "text-slate-300"} />,
-    running: <Loader2 size={14} className="text-blue-500 animate-spin" />,
-    done: <CheckCircle2 size={14} className="text-green-500" />,
-    error: <AlertCircle size={14} className="text-red-500" />,
+    pending: <Circle size={16} className={isDarkMode ? "text-slate-700" : "text-slate-300"} />,
+    running: <Loader2 size={16} className="text-blue-500 animate-spin" />,
+    done: <CheckCircle2 size={16} className="text-green-500" />,
+    error: <AlertCircle size={16} className="text-red-500" />,
+  };
+
+  const statusThemes = {
+    running: "bg-blue-500/10 border-blue-500/30 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.1)]",
+    done: "bg-green-500/10 border-green-500/20 text-green-500 opacity-90",
+    pending: "border-transparent opacity-40",
+    error: "bg-red-500/10 border-red-500/30 text-red-400"
   };
 
   return (
     <div
-      className={`flex items-start gap-3 p-2.5 rounded-lg transition-all border ${
-        status === "running"
-          ? "bg-[var(--accent)]/10 border-[var(--accent)]/30 shadow-[inset_0_0_12px_rgba(56,189,248,0.1)]"
-          : status === "done"
-          ? "bg-[var(--green)]/10 border-[var(--green)]/20"
-          : "border-transparent opacity-60"
-      }`}
+      className={`flex items-start gap-4 p-4 rounded-2xl transition-all border ${statusThemes[status] || statusThemes.pending}`}
     >
-      <div className="mt-0.5">{icons[status] || icons.pending}</div>
+      <div className="mt-1 shrink-0">{icons[status] || icons.pending}</div>
       <div>
-        <div
-          className={`text-sm font-medium ${
-            status === "running"
-              ? "text-[var(--accent)]"
-              : status === "done"
-              ? "text-[var(--green)]"
-              : "text-[var(--text-secondary)]"
-          }`}
-        >
+        <div className={`text-[14px] font-bold leading-none mb-1.5 ${status === "pending" ? "text-slate-500" : ""}`}>
           {label}
         </div>
-        <div className={`text-[12px] mt-0.5 text-[var(--text-muted)]`}>{desc}</div>
+        <div className={`text-[11px] leading-relaxed font-medium ${status === "pending" ? "text-slate-600" : "opacity-70"}`}>
+          {desc}
+        </div>
       </div>
     </div>
   );

@@ -69,7 +69,7 @@ export default function StatusBar() {
           <Cpu size={10} />
           <span>{model}</span>
         </div>
-        <span>PM Agent Pipeline v2.0</span>
+        <span>NAVIGATOR v2.0</span>
       </div>
     </div>
   );

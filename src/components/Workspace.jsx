@@ -1,12 +1,3 @@
-/**
- * Workspace — 중앙 패널
- *
- * Two-Tier 탭 구조:
- * - Tier 1: 코드 파일 탭
- * - Tier 2: Output 탭 (Home, Progress, Overview, PM)
- * - Shared Viewport: 단 하나의 렌더링 영역
- */
-
 import React, { useEffect, useRef, useState } from "react";
 import useAppStore from "../store/useAppStore";
 import CodeViewer from "./CodeViewer";
@@ -71,51 +62,69 @@ export default function Workspace() {
 
   const renderViewport = () => {
     if (activeViewportTab?.kind === "code") {
-      return <CodeViewer />;
+      return (
+        <div
+          key="code-viewer"
+          className="h-full w-full"
+        >
+          <CodeViewer />
+        </div>
+      );
     }
 
-    switch (activeOutputId) {
-      case "home":
-        return <HomeScreen />;
-      case "progress":
-        return <PipelineProgress />;
-      case "overview":
-      case "sa_overview":
-      case "sa_components":
-      case "sa_api":
-      case "sa_db":
-        return <ResultViewer tabId={activeOutputId} />;
-      default:
-        return <HomeScreen />;
-    }
+    const content = (() => {
+      switch (activeOutputId) {
+        case "home":
+          return <HomeScreen />;
+        case "progress":
+          return <PipelineProgress />;
+        case "overview":
+        case "sa_overview":
+        case "sa_components":
+        case "sa_api":
+        case "sa_db":
+          return <ResultViewer tabId={activeOutputId} />;
+        default:
+          return <HomeScreen />;
+      }
+    })();
+
+    return (
+      <div
+        key={activeOutputId || "fallback"}
+        className="h-full w-full"
+      >
+        {content}
+      </div>
+    );
   };
 
   const isCodeViewport = activeViewportTab?.kind === "code";
 
   return (
-    <div className="h-full flex flex-col bg-transparent text-[15px] transition-colors duration-300">
-      <div className={`flex items-center border-b border-[var(--border)] min-h-10 px-2`}>
-        <div className="flex items-center gap-0.5 px-1 py-0.5 overflow-x-auto w-full">
+    <div className={`h-full flex flex-col bg-transparent text-[15px] transition-colors duration-300 ${isDarkMode ? "dark" : "light"}`}>
+      <div className={`flex items-center border-b border-[var(--border)] min-h-11 px-2`}>
+        <div className="flex items-center gap-0.5 px-1 py-0.5 overflow-x-auto w-full scrollbar-hide">
           {openFiles.length === 0 ? (
-            <div className="px-3 py-1.5 text-[15px] text-slate-600">열린 코드 탭이 없습니다</div>
+            <div className="px-3 py-1.5 text-[14px] text-slate-500 font-medium">열린 코드 탭이 없습니다</div>
           ) : (
             openFiles.map((file) => {
               const isActive = activeViewportTab?.kind === "code" && activeViewportTab.id === file.id;
               return (
                 <div
                   key={file.id}
-                  className={`group flex items-center gap-1.5 px-3 py-1.5 text-[15px] rounded-t cursor-pointer transition-colors ${
+                  className={`group flex items-center gap-2 px-4 py-2 text-[14px] rounded-xl cursor-pointer transition-all ${
                     isActive
-                      ? "bg-[var(--accent)]/20 text-[var(--accent)] border-b-2 border-[var(--accent)] font-semibold"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+                      ? "bg-[var(--accent)]/10 text-[var(--accent)] font-bold shadow-sm"
+                      : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
                   }`}
                   onClick={() => activateCodeTab(file.id)}
                 >
-                  <Code2 size={11} />
+                  <Code2 size={13} className={isActive ? "text-[var(--accent)]" : "text-slate-500"} />
                   <span className="truncate max-w-[160px]">{file.name}</span>
                   <button
                     onClick={(e) => { e.stopPropagation(); closeFile(file.id); }}
-                    className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
+                    className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity p-0.5"
                   >
                     <X size={11} />
                   </button>
@@ -126,71 +135,73 @@ export default function Workspace() {
         </div>
       </div>
 
-      <div className={`flex items-center border-b border-[var(--border)] px-2 min-h-10 bg-transparent`}>
+      <div className={`flex items-center border-b border-[var(--border)] px-4 min-h-12 bg-transparent gap-1`}>
         <button
           onClick={() => activateOutputTab("home")}
-          className={`flex items-center gap-1 px-3 py-1.5 text-[15px] transition-colors ${
+          className={`flex items-center gap-2 px-4 py-2 text-[14px] font-bold rounded-xl transition-all ${
             activeOutputId === "home"
-              ? "text-blue-300 border-b-2 border-blue-500"
-              : "text-slate-500 hover:text-slate-300"
+              ? "bg-[var(--accent)]/10 text-[var(--accent)] shadow-sm"
+              : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
           }`}
         >
-          <House size={12} />
+          <House size={14} />
           <span>Home</span>
         </button>
 
         {hasProgress && (
           <button
             onClick={() => activateOutputTab("progress")}
-            className={`flex items-center gap-1 px-3 py-1.5 text-[15px] transition-colors ${
+            className={`flex items-center gap-2 px-4 py-2 text-[14px] font-bold rounded-xl transition-all ${
               activeOutputId === "progress"
-                ? "text-blue-300 border-b-2 border-blue-500"
-                : "text-slate-500 hover:text-slate-300"
+                ? "bg-[var(--accent)]/10 text-[var(--accent)] shadow-sm"
+                : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
             }`}
           >
-            <Activity size={12} />
+            <Activity size={14} />
             <span>Progress</span>
           </button>
         )}
 
         <button
           onClick={() => activateOutputTab("overview")}
-          className={`flex items-center gap-1 px-3 py-1.5 text-[15px] transition-colors ${
+          className={`flex items-center gap-2 px-4 py-2 text-[14px] font-bold rounded-xl transition-all ${
             activeOutputId === "overview"
-              ? "text-blue-300 border-b-2 border-blue-500"
-              : "text-slate-500 hover:text-slate-300"
+              ? "bg-[var(--accent)]/10 text-[var(--accent)] shadow-sm"
+              : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
           }`}
         >
-          <LayoutDashboard size={12} />
+          <LayoutDashboard size={14} />
           <span>Overview</span>
         </button>
 
-        <div className="relative" ref={pmRef}>
+        <div className="relative h-full flex items-center" ref={pmRef}>
           <button
             onClick={() => setPmOpen((open) => !open)}
-            className={`flex items-center gap-1 px-3 py-1.5 text-[15px] transition-colors ${
+            className={`flex items-center gap-2 px-4 py-2 text-[14px] font-bold rounded-xl transition-all ${
               isPmActive
-                ? "text-blue-300 border-b-2 border-blue-500"
-                : "text-slate-500 hover:text-slate-300"
+                ? "bg-[var(--accent)]/10 text-[var(--accent)] shadow-sm"
+                : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
             }`}
           >
             <span>PM</span>
             {isPmActive && (
-              <span className="text-[12px] text-slate-400">› {PM_LABELS[activeOutputId]}</span>
+              <span className="text-[12px] opacity-60 ml-1">› {PM_LABELS[activeOutputId]}</span>
             )}
-            <ChevronDown size={11} className={`transition-transform ${pmOpen ? "rotate-180" : ""}`} />
+            <ChevronDown size={13} className={`transition-transform duration-300 ${pmOpen ? "rotate-180" : ""}`} />
           </button>
 
           {pmOpen && (
-            <div className="absolute top-full left-0 z-50 mt-1 glass-card rounded-lg shadow-2xl overflow-hidden min-w-[200px]">
-              <div className="py-1">{PM_TABS.map((id) => (
+            <div 
+              className="absolute top-full left-0 z-50 glass-panel rounded-xl shadow-2xl overflow-hidden min-w-[200px] border border-white/10"
+            >
+              <div className="py-2">{PM_TABS.map((id) => (
                 <button
                   key={id}
                   onClick={() => { activateOutputTab(id); setPmOpen(false); }}
-                  className={`block w-full text-left px-4 py-2 text-[15px] transition-colors ${
+                  className={`block w-full text-left px-5 py-2.5 text-[14px] font-medium transition-colors ${
                     activeOutputId === id
-                      ? "bg-[var(--bg-hover)] text-[var(--accent)]"
-                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      ? "bg-[var(--accent)]/20 text-[var(--accent)]"
+                      : "text-slate-400 hover:bg-white/5 hover:text-white"
                   }`}
                 >
                   {PM_LABELS[id]}
@@ -201,32 +212,34 @@ export default function Workspace() {
         </div>
 
         {hasSaData && (
-          <div className="relative" ref={saRef}>
+          <div className="relative h-full flex items-center" ref={saRef}>
             <button
               onClick={() => setSaOpen((open) => !open)}
-              className={`flex items-center gap-1 px-3 py-1.5 text-[15px] transition-colors ${
+              className={`flex items-center gap-2 px-4 py-2 text-[14px] font-bold rounded-xl transition-all ${
                 isSaActive
-                  ? "text-blue-300 border-b-2 border-blue-500"
-                  : "text-slate-500 hover:text-slate-300"
+                  ? "bg-[var(--accent)]/10 text-[var(--accent)] shadow-sm"
+                  : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
               }`}
             >
               <span>SA</span>
               {isSaActive && (
-                <span className="text-[12px] text-slate-400">› {SA_LABELS[activeOutputId]}</span>
+                <span className="text-[12px] opacity-60 ml-1">› {SA_LABELS[activeOutputId]}</span>
               )}
-              <ChevronDown size={11} className={`transition-transform ${saOpen ? "rotate-180" : ""}`} />
+              <ChevronDown size={13} className={`transition-transform duration-300 ${saOpen ? "rotate-180" : ""}`} />
             </button>
 
             {saOpen && (
-              <div className="absolute top-full left-0 z-50 mt-1 glass-card rounded-lg shadow-2xl overflow-hidden min-w-[200px]">
-                <div className="py-1">{SA_TABS.map((id) => (
+              <div 
+                className="absolute top-full left-0 z-50 glass-panel rounded-xl shadow-2xl overflow-hidden min-w-[200px] border border-white/10"
+              >
+                <div className="py-2">{SA_TABS.map((id) => (
                   <button
                     key={id}
                     onClick={() => { activateOutputTab(id); setSaOpen(false); }}
-                    className={`block w-full text-left px-4 py-2 text-[15px] transition-colors ${
+                    className={`block w-full text-left px-5 py-2.5 text-[14px] font-medium transition-colors ${
                       activeOutputId === id
-                        ? "bg-[var(--bg-hover)] text-[var(--accent)]"
-                        : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                        ? "bg-[var(--accent)]/20 text-[var(--accent)]"
+                        : "text-slate-400 hover:bg-white/5 hover:text-white"
                     }`}
                   >
                     {SA_LABELS[id]}
@@ -240,13 +253,7 @@ export default function Workspace() {
       </div>
 
       <div className="flex-1 overflow-hidden">
-        {isCodeViewport ? (
-          renderViewport()
-        ) : (
-          <div className="h-full w-full overflow-auto">
-            {renderViewport()}
-          </div>
-        )}
+        {renderViewport()}
       </div>
     </div>
   );

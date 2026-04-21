@@ -60,12 +60,12 @@ export default function ChatPanel() {
   };
 
   return (
-    <div className={`h-full min-h-0 flex flex-col min-w-0 overflow-hidden text-[15px] bg-transparent transition-colors duration-300`}>
+    <div className={`h-full min-h-0 flex flex-col min-w-0 overflow-hidden text-[16px] bg-transparent transition-colors duration-300`}>
       {/* ── 헤더 ──────────────────────────── */}
-      <div className={`flex items-center justify-between px-4 py-3 border-b ${isDarkMode ? "border-slate-700/50" : "border-slate-200 bg-slate-50"}`}>
+      <div className={`flex items-center justify-between px-4 py-4 border-b ${isDarkMode ? "border-slate-700/50" : "border-slate-200 bg-slate-50"}`}>
         <div className="flex items-center gap-2">
-          <MessageSquare size={14} className="text-blue-400" />
-          <span className="text-[15px] font-medium text-slate-300">AI 채팅</span>
+          <MessageSquare size={16} className="text-blue-400" />
+          <span className="text-[16px] font-medium text-slate-300">AI 채팅</span>
         </div>
         <div className="flex items-center gap-2">
           {resultData && (
@@ -108,8 +108,8 @@ export default function ChatPanel() {
       <div className={`flex-1 min-h-0 px-3 py-3 space-y-3 ${chatHistory.length === 0 ? "overflow-hidden" : "overflow-y-auto"}`}>
         {chatHistory.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            <Bot size={32} className="text-slate-600 mb-3" />
-            <p className="text-[14px] text-slate-500 leading-relaxed">
+            <Bot size={40} className="text-slate-600 mb-4" />
+            <p className="text-[15px] text-slate-500 leading-relaxed">
               {resultData
                 ? chatMode === "apply"
                   ? "적용 모드입니다\n명시적 수정 요청만 반영합니다"
@@ -140,7 +140,7 @@ export default function ChatPanel() {
             }
             rows={2}
             disabled={pipelineStatus === "running"}
-            className={`w-full px-3 py-2 pr-10 text-[15px] border rounded-lg resize-none focus:outline-none focus:border-blue-500 disabled:opacity-50 transition-colors ${
+            className={`w-full px-4 py-3 pr-12 text-[16px] border rounded-lg resize-none focus:outline-none focus:border-blue-500 disabled:opacity-50 transition-colors ${
               isDarkMode 
                 ? "bg-slate-800 border-slate-700 text-slate-300 placeholder-slate-600" 
                 : "bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400"
@@ -149,9 +149,9 @@ export default function ChatPanel() {
           <button
             onClick={handleSend}
             disabled={!chatInput.trim() || pipelineStatus === "running"}
-            className="absolute right-2 bottom-2 p-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="absolute right-3 bottom-3 p-2 rounded-md bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
-            <Send size={12} />
+            <Send size={16} />
           </button>
         </div>
       </div>
@@ -164,20 +164,20 @@ function ChatMessage({ message }) {
   const { isDarkMode } = useAppStore();
 
   return (
-    <div className={`flex gap-2 ${isUser ? "flex-row-reverse" : ""}`}>
+    <div className={`flex gap-3 mt-4 ${isUser ? "flex-row-reverse" : ""}`}>
       <div
-        className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
+        className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
           isUser ? "bg-blue-600" : (isDarkMode ? "bg-slate-700" : "bg-slate-200")
         }`}
       >
         {isUser ? (
-          <User size={12} className="text-white" />
+          <User size={16} className="text-white" />
         ) : (
-          <Bot size={12} className={isDarkMode ? "text-blue-300" : "text-blue-600"} />
+          <Bot size={16} className={isDarkMode ? "text-blue-300" : "text-blue-600"} />
         )}
       </div>
       <div
-        className={`max-w-[85%] px-3 py-2 rounded-lg text-[14px] leading-relaxed ${
+        className={`max-w-[85%] px-4 py-3 rounded-xl text-[16px] leading-relaxed ${
           isUser
             ? isDarkMode 
                 ? "bg-blue-600/20 text-blue-100 rounded-tr-sm" 

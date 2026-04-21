@@ -153,7 +153,7 @@ function startPythonBackend(port) {
  * Python 백엔드가 준비될 때까지 /health 엔드포인트를 폴링.
  * 최대 30초 대기 후 타임아웃.
  */
-function waitForBackend(port, maxRetries = 60, interval = 500) {
+function waitForBackend(port, maxRetries = 120, interval = 500) {
   return new Promise((resolve, reject) => {
     let attempts = 0;
 
@@ -245,7 +245,7 @@ function createWindow() {
     height: 1000,
     minWidth: 1200,
     minHeight: 700,
-    title: "PM Agent Pipeline v2",
+    title: "NAVIGATOR",
     backgroundColor: "#020617",
     titleBarStyle: "hidden",
     titleBarOverlay: {
