@@ -9,15 +9,14 @@ Electron + React(Vite) + FastAPI 사이드카 아키텍처로 동작하며, Goog
 
 ## 1. 주요 기능
 
-- 멀티 모드 분석: `CREATE`, `UPDATE`, `REVERSE_ENGINEER` (REST/WebSocket의 `action_type`은 이 셋으로 정규화)
-- SA/PM 단계에서 정보가 부족하면 `Needs_Clarification` 판정·명확화 질문 등 내부 분기
+- 멀티 모드 분석: `CREATE`, `UPDATE`, `REVERSE_ENGINEER` (REST/WebSocket의 `action_type` 정규화)
+- **Agentic Workflow 및 자가 치유(Self-Healing)**: 정보가 부족하거나 기술 스택 맵핑이 불완전하면, 스스로 크롤링하고 검증하는 조건부 루프(Conditional Edge) 동작
+- **도메인 주도 설계(DDD)**: PM, SA, RAG 도메인으로 파이프라인 노드와 스키마를 분리하여 응집도를 높임
+- **비용 최적화(Cost Management)**: 각 노드 실행 시 사용된 토큰 및 비용을 실시간으로 추적(`core/cost_manager.py`)하고, 통합 실패 시 불필요한 파이프라인 진행을 조기 차단
 - 실시간 파이프라인 스트리밍: WebSocket 상태/생각 로그/최종 결과
-- **실행 계층 분리**: REST·WebSocket 핸들러가 공통으로 사용하는 `PipelineExecutor` (`orchestration/executor.py`)
-- **파이프라인 정비**: LangGraph 그래프 빌더 캐시(`_PipelineRegistry`), 노드 공통 보일러플레이트 `@pipeline_node` (`pipeline/node_base.py`)
-- **상태·스키마**: `PipelineState`를 모드별 TypedDict 조각으로 조합, LLM 구조화 출력은 `pipeline/schemas/`(Pydantic)에서 관리
 - SA 시각화 아티팩트 자동 컴파일: 컨테이너 다이어그램(`result_shaping/container_config.py`로 레이어·매핑 조정 가능), Flowchart, UML 컴포넌트 뷰
 - **프론트 모듈화**: 결과 뷰를 `components/resultViewer/` 탭 단위로 분리, Zustand는 `store/slices/`(WebSocket·설정) + `useAppStore` 조합
-- 세션 저장/복원: 프로젝트별 분석 상태 및 UI 탭 상태 유지
+- 세션 저장/복원: 데이터베이스 기반의 영구 저장(로컬 SQLite / Vector 하이브리드) 및 상태 복원
 - 보안 기본 원칙: `.env` 분리, 결과 shaping 단계에서 민감 필드 제외
 
 ## 2. 기술 스택
@@ -128,17 +127,15 @@ navigator/
 │  │  ├─ pipeline_runner.py   # 파이프라인 선택·실행 진입
 │  │  └─ executor.py          # REST·WS 공통 실행·결과 shaping (PipelineExecutor)
 │  ├─ pipeline/
-│  │  ├─ graph.py             # LangGraph StateGraph 빌더, 파이프라인 레지스트리
-│  │  ├─ state.py             # PipelineState (TypedDict 조합)
-│  │  ├─ node_base.py         # @pipeline_node, NodeContext
-│  │  ├─ utils.py             # LLM 호출·구조화 출력 공통
-│  │  ├─ schemas/             # Pydantic 스키마 패키지 (core 등)
-│  │  └─ nodes/               # PM/SA/채팅 단계별 노드
-│  │     ├─ pm_phase1 … pm_phase5   # atomizer → … → context_spec
-│  │     ├─ sa_phase1 … sa_phase8
-│  │     ├─ sa_phase3_reverse.py, sa_reverse_module.py, sa_layer_heuristics.py, …
-│  │     ├─ chat_revision.py, idea_chat.py
-│  │     └─ sa_reverse_context.py
+│  │  ├─ core/                # 공통 상태(state), 비용 관리(cost_manager), 모델(gemini, embedding), 유틸리티
+│  │  ├─ domain/              # 도메인 주도 설계(DDD) 기반 로직 분리
+│  │  │  ├─ pm/               # 기획/요구사항 분석 (benchmark, nodes, schemas, test)
+│  │  │  ├─ sa/               # 소프트웨어 아키텍처 분석 (nodes, schemas)
+│  │  │  ├─ rag/              # 코드 스캔 및 시스템 컨텍스트
+│  │  │  └─ chat/             # 아이디어 발산 및 수정 대화
+│  │  └─ orchestration/       # LangGraph 파이프라인 조립 및 제어
+│  │     ├─ graph.py          # PM, SA, Scan 서브 그래프 조립 및 라우팅 (조건부 루프)
+│  │     └─ facade.py         # 통합 실행 인터페이스
 │  ├─ result_shaping/
 │  │  ├─ result_shaper.py
 │  │  ├─ sa_artifact_compiler.py
@@ -157,9 +154,10 @@ navigator/
 
 ### 6.2 백엔드 개발 시 참고
 
-- **파이프라인 그래프**: `pipeline/graph.py`에서 모드별 엣지·노드 조립. 캐시 초기화가 필요하면 `_PipelineRegistry.clear()` 사용.
-- **새 노드 추가**: 기존 노드와 동일하게 `(state: PipelineState) -> dict` 형태를 유지. 공통 패턴은 `@pipeline_node`로 `make_sget`, `thinking_log`, `current_step` 처리 가능. LangGraph는 래퍼 함수의 **첫 인자 타입 힌트**로 입력 스키마를 추론하므로, 데코레이터 적용 시 `PipelineState`가 노출되도록 유지할 것(`node_base.py` 참고).
-- **LLM 구조화 스키마**: `pipeline/schemas/core.py` 및 패키지 `__init__` 재노출 규칙을 따름.
+- **파이프라인 그래프**: `pipeline/orchestration/graph.py`에서 `pm_pipeline`, `sa_pipeline` 등의 서브 그래프를 조립합니다. `_route_stack_planning` 같은 조건부 라우팅을 통해 에이전트 루프와 조기 종료를 제어합니다.
+- **비용 모니터링**: 새로운 노드를 파이프라인에 추가할 때는 `_wrap_node_with_usage` 데코레이터를 적용하여 LLM 호출 시 발생하는 토큰 비용이 자동으로 `accumulated_cost`에 누적되도록 해야 합니다.
+- **새 노드 추가**: `pipeline/domain/` 내의 적절한 하위 도메인 폴더(`pm`, `sa` 등)에 작성하며, `(state: PipelineState) -> dict` 혹은 `(state: PipelineState) -> PipelineState` 형태의 시그니처를 유지합니다.
+- **LLM 구조화 스키마**: 각 도메인의 `schemas.py` (`domain/pm/schemas.py` 등)에서 Pydantic 모델로 각각 정의하여 사용합니다.
 - **API 키**: 단일 진입점에서 해석되도록 유지(`transport`, `pipeline_runner` 등과 정합).
 
 ### 6.3 프론트엔드 개발 시 참고
