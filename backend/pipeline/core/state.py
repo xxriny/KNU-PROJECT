@@ -83,11 +83,17 @@ class _AnalysisFields(TypedDict, total=False):
     sa_phase7: dict                  # 인터페이스/가드레일 설계 결과
     sa_phase8: dict                  # 위상 정렬 결과
     sa_output: dict                  # SA 최종 통합 산출물
+    sa_arch_bundle: dict             # SA 최종 임베딩 대상 번들
+    sa_merge_project_output: dict    # merge_project 노드 전용 출력
+    component_scheduler_output: dict # component_scheduler 노드 전용 출력
+    api_data_modeler_output: dict    # api_data_modeler 노드 전용 출력
+    sa_analysis_output: dict         # sa_analysis 노드 전용 출력
     merged_project: dict             # merge_project가 생성한 단일 결합 입력
     merge_report: dict               # merge_project 판정/병합 리포트
 
     # ── 기술 스택 (PM Loop) 필드 ────────────────
     loop_count: int                  # 회귀 루프 횟수 추적
+    sa_loop_count: int               # SA 설계 회귀 루프 횟수 추적
     stack_crawler_output: dict       # 크롤링 결과
     guardian_output: dict            # 검증 결과
     stack_embedding_output: dict     # 벡터화 결과

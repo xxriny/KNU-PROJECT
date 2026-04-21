@@ -34,8 +34,8 @@ export default function StatusBar() {
   return (
     <div className={`h-7 px-3 flex items-center justify-between border-t transition-colors duration-200 text-[12px] ${
       isDarkMode 
-        ? "bg-slate-950 border-slate-800 text-slate-500" 
-        : "bg-slate-50 border-slate-200 text-slate-500"
+        ? "bg-transparent border-[var(--border)] text-[var(--text-secondary)]" 
+        : "bg-white/50 border-[var(--border)] text-slate-600"
     }`}>
       {/* 좌측 */}
       <div className="flex items-center gap-4">

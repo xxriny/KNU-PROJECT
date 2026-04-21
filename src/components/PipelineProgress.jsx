@@ -26,14 +26,11 @@ const PM_PIPELINE_STEPS = [
 ];
 
 const SA_PIPELINE_STEPS = [
-  { key: "sa_merge_project", label: "분석 정보 병합", desc: "코드 분석과 PM 산출물 결합" },
-  { key: "sa_phase2", label: "SA-02 영향도 분석", desc: "요구사항 기준 영향 파일과 갭 리포트 도출" },
-  { key: "sa_phase3", label: "SA-03 기술 타당성", desc: "복잡도 및 구현 가능성 판정" },
-  { key: "sa_phase4", label: "SA-04 의존성 샌드박스", desc: "패키지/버전 충돌과 위험 검증" },
-  { key: "sa_phase5", label: "SA-05 아키텍처 매핑", desc: "레이어/패턴 기반 구조 매핑" },
-  { key: "sa_phase6", label: "SA-06 보안 경계", desc: "RBAC/권한/신뢰경계 정의" },
-  { key: "sa_phase7", label: "SA-07 인터페이스 계약", desc: "계약/가드레일/호환성 정의" },
-  { key: "sa_phase8", label: "SA-08 위상 정렬", desc: "의존 순서/병렬 배치 계산" },
+  { key: "sa_merge_project",    label: "프로젝트 병합",      desc: "PM 산출물과 코드 분석 결과 통합" },
+  { key: "component_scheduler", label: "컴포넌트 설계",      desc: "시스템 컴포넌트 구조 및 역할 정의" },
+  { key: "api_data_modeler",    label: "API & 데이터 모델링", desc: "엔드포인트 및 DB 스키마 설계" },
+  { key: "sa_analysis",         label: "아키텍처 검증 (QA)",  desc: "설계 정합성 분석 및 Gap 탐지" },
+  { key: "sa_embedding",        label: "SA 결과 저장",        desc: "아키텍처 산출물 임베딩 및 영구 저장" },
 ];
 
 const PIPELINE_STEPS_BY_TYPE = {
@@ -59,12 +56,15 @@ export default function PipelineProgress() {
   }, [thinkingLog]);
 
   return (
-    <div className={`h-full flex transition-colors duration-200 ${isDarkMode ? "bg-slate-950 text-sm" : "bg-white text-sm"}`}>
+    <div className="h-full w-full flex bg-transparent text-sm transition-colors duration-300 overflow-hidden">
       {/* ── 좌측: 파이프라인 스텝 ──────────── */}
-      <div className={`w-72 border-r p-4 space-y-2 ${isDarkMode ? "border-slate-700/50 bg-slate-900/10" : "border-slate-200 bg-slate-50/30"}`}>
-        <h3 className="text-sm font-medium text-slate-400 mb-3 uppercase tracking-wider">
-          Pipeline Progress
-        </h3>
+      <div className="w-72 shrink-0 border-r border-[var(--border)] bg-transparent flex flex-col min-h-0">
+        <div className="p-4 pb-2 shrink-0">
+          <h3 className="text-sm font-medium text-slate-400 uppercase tracking-wider">
+            Pipeline Progress
+          </h3>
+        </div>
+        <div className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-4 space-y-2 min-h-0">
         {steps.map((step) => {
           const status = pipelineNodes[step.key] || "pending";
           return (
@@ -79,7 +79,7 @@ export default function PipelineProgress() {
         })}
 
         {pipelineError && (
-          <div className="mt-4 p-3 bg-red-900/20 border border-red-800/50 rounded-lg">
+          <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
             <div className="flex items-center gap-1.5 text-sm text-red-400 mb-1">
               <AlertCircle size={12} />
               오류 발생
@@ -89,11 +89,12 @@ export default function PipelineProgress() {
             </p>
           </div>
         )}
+        </div>
       </div>
 
       {/* ── 우측: Thinking Log ─────────────── */}
-      <div className="flex-1 flex flex-col">
-        <div className={`flex items-center gap-2 px-4 py-3 border-b ${isDarkMode ? "border-slate-700/50 bg-slate-900/20" : "border-slate-200 bg-white"}`}>
+      <div className="flex-1 min-w-0 flex flex-col bg-transparent">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--border)] shrink-0">
           <Brain size={14} className="text-purple-400" />
           <span className={`text-sm font-medium ${isDarkMode ? "text-slate-400" : "text-slate-700"}`}>
             Thinking Log
@@ -103,7 +104,7 @@ export default function PipelineProgress() {
           </span>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3 custom-scrollbar">
           {thinkingLog.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full">
               <Loader2
@@ -118,11 +119,7 @@ export default function PipelineProgress() {
             thinkingLog.map((log, idx) => (
               <div
                 key={idx}
-                className={`rounded-lg p-3 border transition-all ${
-                  isDarkMode 
-                    ? "bg-slate-900/50 border-slate-700/50" 
-                    : "bg-slate-50 border-slate-200 shadow-sm"
-                }`}
+                className={`rounded-lg p-3 border transition-all glass-card border-[var(--border)]`}
               >
                 <div className="flex items-center gap-2 mb-2">
                   <span className={`px-1.5 py-0.5 rounded text-[12px] font-mono ${
@@ -157,12 +154,12 @@ function StepItem({ label, desc, status, isDarkMode }) {
 
   return (
     <div
-      className={`flex items-start gap-3 p-2.5 rounded-lg transition-colors ${
+      className={`flex items-start gap-3 p-2.5 rounded-lg transition-all border ${
         status === "running"
-          ? isDarkMode ? "bg-blue-600/10 border border-blue-500/30" : "bg-blue-50 border border-blue-200 shadow-sm"
+          ? "bg-[var(--accent)]/10 border-[var(--accent)]/30 shadow-[inset_0_0_12px_rgba(56,189,248,0.1)]"
           : status === "done"
-          ? isDarkMode ? "bg-green-600/5" : "bg-green-50/50"
-          : ""
+          ? "bg-[var(--green)]/10 border-[var(--green)]/20"
+          : "border-transparent opacity-60"
       }`}
     >
       <div className="mt-0.5">{icons[status] || icons.pending}</div>
@@ -170,15 +167,15 @@ function StepItem({ label, desc, status, isDarkMode }) {
         <div
           className={`text-sm font-medium ${
             status === "running"
-              ? isDarkMode ? "text-blue-300" : "text-blue-600"
+              ? "text-[var(--accent)]"
               : status === "done"
-              ? isDarkMode ? "text-green-300" : "text-green-600"
-              : isDarkMode ? "text-slate-500" : "text-slate-400"
+              ? "text-[var(--green)]"
+              : "text-[var(--text-secondary)]"
           }`}
         >
           {label}
         </div>
-        <div className={`text-[12px] mt-0.5 ${isDarkMode ? "text-slate-600" : "text-slate-500"}`}>{desc}</div>
+        <div className={`text-[12px] mt-0.5 text-[var(--text-muted)]`}>{desc}</div>
       </div>
     </div>
   );

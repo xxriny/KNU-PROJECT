@@ -8,28 +8,20 @@ import OverviewTab from "./resultViewer/OverviewTab";
 import RTMTab from "./resultViewer/RTMTab";
 import TopologyTab from "./resultViewer/TopologyTab";
 import ContextTab from "./resultViewer/ContextTab";
-import SAArchitectureTab from "./resultViewer/SAArchitectureTab";
-import SASecurityTab from "./resultViewer/SASecurityTab";
-import SATopologyTab from "./resultViewer/SATopologyTab";
-import SASystemDiagramTab from "./resultViewer/SASystemDiagramTab";
-import SAFlowchartTab from "./resultViewer/SAFlowchartTab";
-import SAUMLComponentTab from "./resultViewer/SAUMLComponentTab";
-import SAInterfacesTab from "./resultViewer/SAInterfacesTab";
-import SADecisionTableTab from "./resultViewer/SADecisionTableTab";
+import SAAnalysisTab from "./resultViewer/SAAnalysisTab";
+import SAComponentsTab from "./resultViewer/SAComponentsTab";
+import SAApiTab from "./resultViewer/SAApiTab";
+import SADatabaseTab from "./resultViewer/SADatabaseTab";
 
 const TAB_COMPONENTS = {
   overview: OverviewTab,
   rtm: RTMTab,
   topology: TopologyTab,
   context: ContextTab,
-  sa_architecture: SAArchitectureTab,
-  sa_security: SASecurityTab,
-  sa_topology: SATopologyTab,
-  sa_system: SASystemDiagramTab,
-  sa_flowchart: SAFlowchartTab,
-  sa_uml: SAUMLComponentTab,
-  sa_interfaces: SAInterfacesTab,
-  sa_decisions: SADecisionTableTab,
+  sa_overview: SAAnalysisTab,
+  sa_components: SAComponentsTab,
+  sa_api: SAApiTab,
+  sa_db: SADatabaseTab,
 };
 
 export default function ResultViewer({ tabId = "overview" }) {

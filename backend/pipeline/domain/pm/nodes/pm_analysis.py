@@ -28,6 +28,7 @@ PM_ANALYSIS_SYSTEM_PROMPT = """# 역할: 통합 분석가 (QA-PM)
 2. 누락 체크: 기능은 있으나 매핑된 스택이 없으면 `warnings`에 추가.
 3. 데이터 정제: 순수 JSON 정제. PENDING_CRAWL 상태 유지.
 4. 지표 계산: `coverage_rate` = APPROVED 개수 / 전체 기능 개수.
+5. 언어 규칙: 모든 분석 내용과 사고 과정(thinking)은 반드시 한국어로 상세히 작성하십시오.
 """
 
 

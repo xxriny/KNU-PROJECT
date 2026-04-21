@@ -18,6 +18,7 @@ Gemini 2.5 Flash 모델로서, 다음의 **표준 명칭 사전**을 1자도 틀
 1. **Zero-Null Policy**: 스키마 내부를 절대로 비워두지 마십시오.
 2. **명명 규칙**: 모든 필드명은 반드시 **snake_case**만 사용합니다.
 3. **타입 정합성**: 식별자는 UUID, 토큰은 String을 사용하십시오.
+4. **언어 규칙**: 모든 사고 과정(thinking)은 반드시 한국어로 작성하십시오. 영어를 사용하지 마십시오.
 
 출력 데이터 규격 (JSON):
 {
@@ -39,23 +40,45 @@ Gemini 2.5 Flash 모델로서, 다음의 **표준 명칭 사전**을 1자도 틀
 }
 """
 
-def _build_user_message(components: list, rtm: list) -> str:
-    """LLM 메시지 최적화 (토큰 절감)"""
-    pruned_components = [{"name": c.get("component_name"), "role": c.get("role")} for c in components]
-    pruned_rtm = [{"id": r.get("id"), "desc": r.get("desc")} for r in rtm]
+def _to_compact_text(items: list[dict]) -> str:
+    """토큰 최적화를 위한 간결 텍스트 변환기"""
+    if not items: return "없음"
+    return "\n".join("- " + ", ".join(f"{k}: {v}" for k, v in item.items() if v) for item in items)
+
+def _build_user_message(components: list, rtm: list, feedback_gaps: list[str] = None) -> str:
+    """LLM 메시지 최적화 (토큰 절감) 및 피드백 반영"""
+    pruned_components = _to_compact_text([{"name": c.get("component_name"), "role": c.get("role")} for c in components])
+    pruned_rtm = _to_compact_text([{"id": r.get("id"), "desc": r.get("desc")} for r in rtm])
     
-    return f"\n    [Component Design] {pruned_components}\n    [Requirements] {pruned_rtm}\n    "
+    feedback_section = ""
+    if feedback_gaps:
+        feedback_section = f"\n[IMPORTANT: FEEDBACK FROM PREVIOUS ANALYSIS]\n이전 설계 분석에서 다음과 같은 결함이 발견되었습니다. 이번 모델링에서 반드시 해결하십시오:\n" + "\n".join(f"- {gap}" for gap in feedback_gaps) + "\n"
+        
+    return f"\n[Component Design]\n{pruned_components}\n\n[Requirements]\n{pruned_rtm}\n{feedback_section}"
+
+from observability.logger import get_logger
+
+logger = get_logger()
 
 @pipeline_node("api_data_modeler")
 def api_data_modeler_node(ctx: NodeContext) -> dict:
     sget = ctx.sget
+    logger.info("=== [Node Entry] api_data_modeler_node ===")
     components = sget("component_scheduler_output", {}).get("components", [])
     rtm = sget("merged_project", {}).get("plan", {}).get("requirements_rtm", [])
+
+    # 1. Feedback & Looping check
+    sa_anal_out = sget("sa_analysis_output", {})
+    feedback_gaps = sa_anal_out.get("gaps", [])
+    sa_loop_count = sget("sa_loop_count", 0)
     
-    # 1. Prepare optimized user prompt
-    user_content = _build_user_message(components, rtm)
+    if feedback_gaps:
+        logger.info(f"Retrying data modeling (Loop:{sa_loop_count}) with {len(feedback_gaps)} gaps.")
+
+    # 2. Prepare optimized user prompt
+    user_content = _build_user_message(components, rtm, feedback_gaps)
     
-    # 2. Call LLM
+    # 3. Call LLM
     res = call_structured(
         api_key=ctx.api_key,
         model=ctx.model,
@@ -65,8 +88,10 @@ def api_data_modeler_node(ctx: NodeContext) -> dict:
     )
     
     output = res.parsed
+    thinking_msg = output.thinking or "API 및 데이터 모델링 완료"
     
     return {
         "api_data_modeler_output": output.model_dump(),
+        "thinking_log": (sget("thinking_log", []) or []) + [{"node": "api_data_modeler", "thinking": thinking_msg}],
         "current_step": "api_data_modeler_done"
     }

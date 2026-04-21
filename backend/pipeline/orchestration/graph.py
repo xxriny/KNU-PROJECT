@@ -100,6 +100,25 @@ def _route_pm_integration(state: PipelineState) -> str:
     return "continue"
 
 
+def _route_sa_analysis(state: PipelineState) -> str:
+    """SA Analysis 결과를 보고 설계 단계로 재시도 여부를 결정합니다."""
+    # 1. 에러 체크
+    if _check_status(state) == "error":
+        return "error"
+    
+    # 2. 루프 횟수 제한 (Max 3회 재시도)
+    sa_loop_count = state.get("sa_loop_count", 0)
+    if sa_loop_count >= 3:
+        return "finish"
+
+    # 3. 분석 결과 체크
+    sa_output = state.get("sa_analysis_output", {})
+    if sa_output.get("status") == "FAIL":
+        return "loop"
+        
+    return "finish"
+
+
 def _chain_to_next_nodes(chain: tuple[str, ...]) -> dict[str, list[str]]:
     return {node: ([chain[i + 1]] if i + 1 < len(chain) else []) for i, node in enumerate(chain)}
 
@@ -197,10 +216,23 @@ def _build_sa_pipeline():
     workflow.add_node("sa_analysis", _wrap_node_with_usage(sa_analysis_node))
     workflow.add_node("sa_embedding", _wrap_node_with_usage(sa_embedding_node))
 
-    workflow.add_edge(START, _SA_CHAIN[0])
-    for src, dst in zip(_SA_CHAIN[:-1], _SA_CHAIN[1:]):
-        workflow.add_conditional_edges(src, _check_status, {"continue": dst, "error": END})
-    workflow.add_edge(_SA_CHAIN[-1], END)
+    workflow.add_edge(START, "sa_merge_project")
+    workflow.add_edge("sa_merge_project", "component_scheduler")
+    workflow.add_edge("component_scheduler", "api_data_modeler")
+    workflow.add_edge("api_data_modeler", "sa_analysis")
+
+    # SA Analysis 이후 FAIL 시 설계 단계로 회귀 루프
+    workflow.add_conditional_edges(
+        "sa_analysis",
+        _route_sa_analysis,
+        {
+            "loop": "component_scheduler",
+            "finish": "sa_embedding",
+            "error": END
+        }
+    )
+    
+    workflow.add_edge("sa_embedding", END)
     return workflow.compile()
 
 
@@ -244,19 +276,19 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     """Compatibility shim: returns full chain for now."""
     workflow = StateGraph(PipelineState)
     # Scan
-    workflow.add_node("system_scan", system_scan_node)
+    workflow.add_node("system_scan", _wrap_node_with_usage(system_scan_node))
     # PM
-    workflow.add_node("requirement_analyzer", requirement_analyzer_node)
-    workflow.add_node("stack_retriever", stack_retriever_node)
-    workflow.add_node("stack_planner", stack_planner_node)
-    workflow.add_node("pm_analysis", pm_analysis_node)
-    workflow.add_node("pm_embedding", pm_embedding_node)
+    workflow.add_node("requirement_analyzer", _wrap_node_with_usage(requirement_analyzer_node))
+    workflow.add_node("stack_retriever", _wrap_node_with_usage(stack_retriever_node))
+    workflow.add_node("stack_planner", _wrap_node_with_usage(stack_planner_node))
+    workflow.add_node("pm_analysis", _wrap_node_with_usage(pm_analysis_node))
+    workflow.add_node("pm_embedding", _wrap_node_with_usage(pm_embedding_node))
     # SA
-    workflow.add_node("sa_merge_project", sa_merge_project_node)
-    workflow.add_node("component_scheduler", component_scheduler_node)
-    workflow.add_node("api_data_modeler", api_data_modeler_node)
-    workflow.add_node("sa_analysis", sa_analysis_node)
-    workflow.add_node("sa_embedding", sa_embedding_node)
+    workflow.add_node("sa_merge_project", _wrap_node_with_usage(sa_merge_project_node))
+    workflow.add_node("component_scheduler", _wrap_node_with_usage(component_scheduler_node))
+    workflow.add_node("api_data_modeler", _wrap_node_with_usage(api_data_modeler_node))
+    workflow.add_node("sa_analysis", _wrap_node_with_usage(sa_analysis_node))
+    workflow.add_node("sa_embedding", _wrap_node_with_usage(sa_embedding_node))
 
     full_chain = [
         "system_scan", "requirement_analyzer", "stack_retriever", "stack_planner",
@@ -264,10 +296,34 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
         "api_data_modeler", "sa_analysis", "sa_embedding"
     ]
     
-    workflow.add_edge(START, full_chain[0])
-    for src, dst in zip(full_chain[:-1], full_chain[1:]):
-        workflow.add_conditional_edges(src, _check_status, {"continue": dst, "error": END})
-    workflow.add_edge(full_chain[-1], END)
+    # Edges with Loops
+    workflow.add_edge(START, "system_scan")
+    workflow.add_edge("system_scan", "requirement_analyzer")
+    workflow.add_edge("requirement_analyzer", "stack_retriever")
+    workflow.add_edge("stack_retriever", "stack_planner")
+    
+    # PM Loop (Planner -> Crawling loop is handled in _build_pm_pipeline, 
+    # but for full_chain we keep it simple or mimic it if needed. 
+    # Here we focus on the SA Loop requested by user)
+    workflow.add_edge("stack_planner", "pm_analysis")
+    workflow.add_edge("pm_analysis", "pm_embedding")
+    workflow.add_edge("pm_embedding", "sa_merge_project")
+    workflow.add_edge("sa_merge_project", "component_scheduler")
+    workflow.add_edge("component_scheduler", "api_data_modeler")
+    workflow.add_edge("api_data_modeler", "sa_analysis")
+
+    # [SA Feedback Loop]
+    workflow.add_conditional_edges(
+        "sa_analysis",
+        _route_sa_analysis,
+        {
+            "loop": "component_scheduler",
+            "finish": "sa_embedding",
+            "error": END
+        }
+    )
+    workflow.add_edge("sa_embedding", END)
+    
     return workflow.compile()
 
 

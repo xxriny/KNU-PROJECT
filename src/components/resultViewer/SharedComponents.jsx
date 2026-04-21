@@ -5,7 +5,7 @@ export function StatCard({ label, value, color }) {
   const { isDarkMode } = useAppStore();
   return (
     <div className={`rounded-lg p-3 border text-center transition-all ${
-      isDarkMode ? "bg-slate-900/50 border-slate-700/50" : "bg-white border-slate-200 shadow-sm"
+      isDarkMode ? "glass-card border-[var(--border)]" : "bg-white/70 border-slate-200 shadow-sm"
     }`}>
       <div className={`text-xl font-bold ${color}`}>{value}</div>
       <div className="text-[12px] text-slate-500 mt-0.5">{label}</div>

@@ -36,7 +36,8 @@ def upsert_pm_artifact(
     feature_id: Optional[str] = None,
     artifact_type: str = "RTM_STACK_BUNDLE",
     version: str = "v1.0",
-    vector: Optional[List[float]] = None
+    vector: Optional[List[float]] = None,
+    phase: str = "PM"
 ) -> str:
     """
     PM 단계의 산출물(Table 04)을 RAG에 저장합니다.
@@ -50,7 +51,7 @@ def upsert_pm_artifact(
         "session_id": session_id,
         "chunk_id": cid,
         "version": version,
-        "phase": "PM",
+        "phase": phase,
         "artifact_type": artifact_type,
         "feature_id": feature_id or ""
     }
