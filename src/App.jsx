@@ -1,5 +1,5 @@
 /**
- * PM Agent Pipeline v2 — App (Root Layout)
+ * NAVIGATOR — App (Root Layout)
  *
  * 레이아웃:
  * ┌─────────────────────────────────────────────────────┐
@@ -29,20 +29,51 @@ import {
   MessageSquare, LayoutDashboard, Table2, FileText,
   ShieldCheck, Layers, Globe, Database,
   House, Activity, ChevronDown, Code2, X,
-  Clock3, Settings,
+  Clock3, Settings, PanelRightClose, PanelRightOpen,
+  ChevronRight, Library
 } from "lucide-react";
+
 
 // 우측 아이콘 패널 목록
 const ICON_PANELS = [
-  { id: "chat", label: "AI 채팅", Icon: MessageSquare, group: null },
-  { id: "overview", label: "Overview", Icon: LayoutDashboard, group: "pm" },
-  { id: "rtm", label: "RTM & Stack", Icon: Table2, group: "pm" },
-  { id: "context", label: "PM Report", Icon: FileText, group: "pm" },
-  { id: "sa_overview", label: "QA Report", Icon: ShieldCheck, group: "sa" },
-  { id: "sa_components", label: "Components", Icon: Layers, group: "sa" },
-  { id: "sa_api", label: "API Spec", Icon: Globe, group: "sa" },
-  { id: "sa_db", label: "Database", Icon: Database, group: "sa" },
+  { id: "home", label: "Home", Icon: House, group: null, color: "text-white", bg: "bg-slate-500/10" },
+  { id: "progress", label: "Progress", Icon: Activity, group: null, color: "text-yellow-400", bg: "bg-yellow-500/10" },
+  { id: "chat", label: "AI 채팅", Icon: MessageSquare, group: null, color: "text-purple-400", bg: "bg-purple-500/10" },
+  { id: "overview", label: "Overview", Icon: LayoutDashboard, group: "pm", color: "text-blue-400", bg: "bg-blue-500/10" },
+  { id: "rtm", label: "RTM & Stack", Icon: Table2, group: "pm", color: "text-cyan-400", bg: "bg-cyan-500/10" },
+  { id: "context", label: "PM Report", Icon: FileText, group: "pm", color: "text-green-400", bg: "bg-green-500/10" },
+  { id: "sa_overview", label: "QA Report", Icon: ShieldCheck, group: "sa", color: "text-amber-400", bg: "bg-amber-500/10" },
+  { id: "sa_components", label: "Components", Icon: Layers, group: "sa", color: "text-indigo-400", bg: "bg-indigo-500/10" },
+  { id: "sa_api", label: "API Spec", Icon: Globe, group: "sa", color: "text-teal-400", bg: "bg-teal-500/10" },
+  { id: "sa_db", label: "Database", Icon: Database, group: "sa", color: "text-rose-400", bg: "bg-rose-500/10" },
 ];
+
+function StudioCard({ id, label, Icon, color, bg, isActive, isDisabled, onClick, isDarkMode }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={isDisabled}
+      className={`relative group flex flex-col items-center justify-center p-4 rounded-2xl border transition-colors duration-200 ${isActive
+        ? "glass-card border-[var(--accent)] shadow-[0_0_20px_rgba(56,189,248,0.15)] bg-[var(--accent)]/5"
+        : isDisabled
+          ? "opacity-20 grayscale cursor-not-allowed border-transparent"
+          : `border-white/5 hover:border-white/10 ${isDarkMode ? "bg-white/5" : "bg-slate-50 border-slate-100 shadow-sm"}`
+        }`}
+    >
+      <div className={`w-10 h-10 rounded-xl ${bg} flex items-center justify-center mb-2`}>
+        <Icon size={20} className={color} />
+      </div>
+      <span className={`text-[11px] font-bold tracking-tight uppercase ${isActive ? "text-[var(--accent)]" : "text-slate-500"}`}>
+        {label}
+      </span>
+      {isActive && (
+        <div
+          className="absolute inset-0 rounded-2xl border border-[var(--accent)]/30 pointer-events-none"
+        />
+      )}
+    </button>
+  );
+}
 
 export default function App() {
   const {
@@ -66,6 +97,7 @@ export default function App() {
   const [activeIconPanel, setActiveIconPanel] = useState(null);
   const [showSessions, setShowSessions] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [isStudioOpen, setIsStudioOpen] = useState(true);
 
   const activeOutputId = activeViewportTab?.kind === "output" ? activeViewportTab.id : null;
   const isCodeView = activeViewportTab?.kind === "code";
@@ -106,6 +138,8 @@ export default function App() {
   const renderCenter = () => {
     // 우측 아이콘 패널이 열려 있으면 → 그걸 중앙에 표시
     if (activeIconPanel) {
+      if (activeIconPanel === "home") return <HomeScreen />;
+      if (activeIconPanel === "progress") return <PipelineProgress />;
       if (activeIconPanel === "chat") {
         return (
           <PanelWrapper title="AI 채팅" onClose={() => setActiveIconPanel(null)}>
@@ -192,8 +226,8 @@ export default function App() {
                       <div
                         key={file.id}
                         className={`group flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-t cursor-pointer transition-colors shrink-0 ${isActive
-                            ? "bg-[var(--accent)]/15 text-[var(--accent)] border-b-2 border-[var(--accent)]"
-                            : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/5"
+                          ? "bg-[var(--accent)]/15 text-[var(--accent)] border-b-2 border-[var(--accent)]"
+                          : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/5"
                           }`}
                         onClick={() => { activateCodeTab(file.id); setActiveIconPanel(null); }}
                       >
@@ -220,30 +254,89 @@ export default function App() {
             </div>
           </Panel>
 
-          {/* Right: 세로 아이콘 바 */}
-          <div className="flex flex-col items-center py-3 gap-1 border-l border-[var(--border)] bg-[rgba(255,255,255,0.02)] w-12 shrink-0">
-            {/* PM 그룹 구분선 */}
-            <div className="w-6 border-t border-[var(--border)] my-1" />
-            {ICON_PANELS.map(({ id, label, Icon, group }) => {
-              const isDisabled = (group === "pm" && !resultData) || (group === "sa" && !hasSaData);
-              const isActive = activeIconPanel === id;
-              return (
-                <button
-                  key={id}
-                  onClick={() => !isDisabled && handleIconPanel(id)}
-                  disabled={isDisabled}
-                  title={label}
-                  className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all ${isActive
-                      ? "bg-[var(--accent)]/20 text-[var(--accent)] shadow-[0_0_8px_rgba(56,189,248,0.3)]"
-                      : isDisabled
-                        ? "text-[var(--text-muted)] opacity-30 cursor-not-allowed"
-                        : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/10"
-                    }`}
-                >
-                  <Icon size={15} />
-                </button>
-              );
-            })}
+          {/* Right: Studio Sidebar (Collapsible) */}
+          <div
+            className={`relative h-full flex flex-col border-l border-[var(--border)] overflow-hidden transition-all duration-500 ${
+              isStudioOpen ? "w-[340px]" : "w-[72px]"
+            } ${isDarkMode ? "bg-[#13171F]" : "bg-transparent"}`}
+          >
+            {/* Studio Header */}
+            <div className={`h-14 flex items-center justify-center shrink-0 border-b ${
+              isDarkMode ? "border-white/5" : "border-[var(--border)]"
+            } ${isStudioOpen ? "px-6 !justify-between" : "w-full"}`}>
+              {isStudioOpen ? (
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">Workbench</span>
+                  <h3 className={`text-[15px] font-black tracking-tight ${isDarkMode ? "text-gradient" : "text-blue-600"}`}>STUDIO</h3>
+                </div>
+              ) : null}
+              <button
+                onClick={() => setIsStudioOpen(!isStudioOpen)}
+                className={`transition-all flex items-center justify-center rounded-xl ${
+                  isStudioOpen ? "w-10 h-10" : "w-full h-14"
+                } ${isDarkMode ? "hover:bg-white/5 text-slate-400 hover:text-white" : "hover:bg-black/5 text-slate-600"
+                  }`}
+              >
+                {isStudioOpen ? <PanelRightClose size={20} /> : <PanelRightOpen size={20} />}
+              </button>
+            </div>
+
+            {/* Studio Content */}
+            <div className={`flex-1 overflow-x-hidden ${isStudioOpen ? "overflow-y-auto custom-scrollbar" : "overflow-y-hidden"}`}>
+              {isStudioOpen ? (
+                <div className="p-5 space-y-6">
+                  <div className="grid grid-cols-2 gap-3">
+                    {ICON_PANELS.map((panel) => {
+                      const isDisabled = (panel.group === "pm" && !resultData) || (panel.group === "sa" && !hasSaData);
+                      const isActive = activeIconPanel === panel.id;
+                      return (
+                        <StudioCard
+                          key={panel.id}
+                          {...panel}
+                          isDarkMode={isDarkMode}
+                          isActive={isActive}
+                          isDisabled={isDisabled}
+                          onClick={() => !isDisabled && handleIconPanel(panel.id)}
+                        />
+                      );
+                    })}
+                  </div>
+
+                  {/* Placeholder for future bottom content */}
+                  <div className="mt-10 pt-10 border-t border-white/5 opacity-10">
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="w-12 h-1 bg-slate-700 rounded-full" />
+                      <div className="w-20 h-1 bg-slate-700 rounded-full" />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center py-4 gap-4 w-full">
+                  <div className="w-10 border-t border-white/5 my-1" />
+                  {ICON_PANELS.map((panel) => {
+                    const isDisabled = (panel.group === "pm" && !resultData) || (panel.group === "sa" && !hasSaData);
+                    const isActive = activeIconPanel === panel.id;
+                    return (
+                      <div key={panel.id} className="w-full flex justify-center">
+                        <button
+                          onClick={() => !isDisabled && handleIconPanel(panel.id)}
+                          disabled={isDisabled}
+                          title={panel.label}
+                          className={`w-12 h-12 flex items-center justify-center rounded-xl transition-all ${isActive
+                            ? "bg-[var(--accent)]/20 text-[var(--accent)] shadow-glow"
+                            : isDisabled
+                              ? "text-slate-700 opacity-20 cursor-not-allowed"
+                              : "text-slate-500 hover:text-white hover:bg-white/10"
+                            }`}
+                        >
+                          <panel.Icon size={20} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </PanelGroup>
       </div>
@@ -258,10 +351,14 @@ export default function App() {
 
 // ─── 중앙 패널 래퍼 (X 닫기 버튼 포함) ─────────────────
 function PanelWrapper({ title, onClose, children }) {
+  const { isDarkMode } = useAppStore();
   return (
     <div className="h-full flex flex-col min-h-0">
       <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border)] shrink-0 bg-[rgba(255,255,255,0.02)]">
-        <span className="text-sm font-medium text-[var(--text-secondary)]">{title}</span>
+        <div className="flex items-center gap-2">
+          <Library size={14} className="text-blue-400" />
+          <span className="text-sm font-medium text-[var(--text-secondary)]">{title}</span>
+        </div>
         <button
           onClick={onClose}
           className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-white/10 transition-colors"
@@ -283,156 +380,84 @@ function TopBar({
   showSessions, setShowSessions,
   showSettings, setShowSettings,
 }) {
-  const { isDarkMode } = useAppStore();
-  const [pmOpen, setPmOpen] = useState(false);
-  const [saOpen, setSaOpen] = useState(false);
-  const pmRef = useRef(null);
-  const saRef = useRef(null);
+  const { isDarkMode, currentSessionId, sessions, updateSessionName } = useAppStore();
+  const currentSession = sessions.find(s => s.id === currentSessionId);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState("");
 
-  const PM_TABS = [
-    { id: "overview", label: "Overview" },
-    { id: "rtm", label: "RTM & Stack" },
-    { id: "context", label: "PM Report" },
-  ];
-  const SA_TABS = [
-    { id: "sa_overview", label: "QA Report" },
-    { id: "sa_components", label: "Components" },
-    { id: "sa_api", label: "API Spec" },
-    { id: "sa_db", label: "Database" },
-  ];
-
-  const isPmActive = PM_TABS.some(t => t.id === activeOutputId);
-  const isSaActive = SA_TABS.some(t => t.id === activeOutputId);
-
-  // 외부 클릭 시 드롭다운 닫기
   useEffect(() => {
-    const handler = (e) => {
-      if (pmRef.current && !pmRef.current.contains(e.target)) setPmOpen(false);
-      if (saRef.current && !saRef.current.contains(e.target)) setSaOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
+    if (currentSession) setEditValue(currentSession.name);
+  }, [currentSession]);
 
-  const NavBtn = ({ id, label, active, onClick, disabled }) => (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`flex items-center gap-1 px-3 py-1 text-[13px] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${active
-          ? "bg-[var(--accent)]/15 text-[var(--accent)] font-semibold"
-          : `text-[var(--text-secondary)] hover:text-[var(--text-primary)] ${isDarkMode ? "hover:bg-white/8" : "hover:bg-black/5"}`
-        }`}
-    >
-      {label}
-    </button>
-  );
+  const handleRename = () => {
+    if (editValue.trim() && currentSession) {
+      updateSessionName(currentSessionId, editValue.trim());
+    }
+    setIsEditing(false);
+  };
 
   return (
-    <div className={`h-10 app-drag flex items-center px-3 gap-2 border-b border-[var(--border)] backdrop-blur-xl shrink-0 z-20 relative ${isDarkMode ? "bg-[rgba(14,21,33,0.8)]" : "bg-[rgba(255,255,255,0.85)]"
+    <div className={`h-14 app-drag flex items-center px-6 gap-4 border-b border-[var(--border)] backdrop-blur-xl shrink-0 z-20 relative ${isDarkMode ? "bg-[rgba(19,23,31,0.9)]" : "bg-[rgba(255,255,255,0.9)]"
       }`}>
-      {/* macOS 신호등 */}
-      <div className="flex items-center gap-1.5 app-no-drag shrink-0">
-        <div className="w-3 h-3 rounded-full bg-red-500/90" />
-        <div className="w-3 h-3 rounded-full bg-yellow-500/90" />
-        <div className="w-3 h-3 rounded-full bg-green-500/90" />
+      {/* 로고 영역 */}
+      <div className="flex items-center gap-3 shrink-0 app-no-drag">
+        <span className="text-sm font-display font-black text-gradient tracking-[0.25em] select-none ml-2">
+          NAVIGATOR
+        </span>
       </div>
 
-      {/* 앱 타이틀 */}
-      <span className="text-xs font-display font-semibold text-gradient tracking-wide shrink-0 select-none ml-1">
-        PM Agent Pipeline v2
-      </span>
+      <div className="w-px h-6 bg-[var(--border)] shrink-0 mx-2" />
 
-      <div className="w-px h-5 bg-[var(--border)] shrink-0 mx-1" />
-
-      {/* 네비게이션 탭들 — 중앙 */}
-      <div className="flex items-center gap-0.5 app-no-drag overflow-x-auto">
-        <NavBtn id="home" label="Home" icon={<House size={11} />}
-          active={activeOutputId === "home" && !showSessions && !showSettings}
-          onClick={() => activateOutputTab("home")} />
-        {hasProgress && (
-          <NavBtn id="progress" label="Progress"
-            active={activeOutputId === "progress"}
-            onClick={() => activateOutputTab("progress")} />
-        )}
-
-        {/* PM 드롭다운 */}
-        <div className="relative app-no-drag" ref={pmRef}>
-          <button
-            onClick={() => { setPmOpen(v => !v); setSaOpen(false); }}
-            disabled={!resultData}
-            className={`flex items-center gap-1 px-3 py-1 text-[13px] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${pmOpen || isPmActive
-                ? "bg-[var(--accent)]/15 text-[var(--accent)]"
-                : `text-[var(--text-secondary)] hover:text-[var(--text-primary)] ${isDarkMode ? "hover:bg-white/8" : "hover:bg-black/5"}`
-              }`}
+      {/* 세션 이름 (좌측 정렬) */}
+      <div className="flex-1 flex items-center app-no-drag overflow-hidden">
+        {isEditing ? (
+          <input
+            autoFocus
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={handleRename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleRename();
+              if (e.key === "Escape") setIsEditing(false);
+            }}
+            className={`px-2 py-1 text-xl font-bold bg-transparent border-b-2 border-blue-500 outline-none w-full max-w-[600px] ${isDarkMode ? "text-white" : "text-slate-900"}`}
+          />
+        ) : (
+          <div
+            onDoubleClick={() => setIsEditing(true)}
+            className={`group flex items-center gap-3 cursor-text px-3 py-1.5 rounded-xl transition-all hover:bg-white/5 truncate max-w-[800px]`}
+            title="더블 클릭하여 별칭 수정"
           >
-            PM <ChevronDown size={11} className={`transition-transform ${pmOpen ? "rotate-180" : ""}`} />
-          </button>
-          {pmOpen && (
-            <div className="absolute top-full left-0 mt-1 z-50 glass-card rounded-lg shadow-2xl overflow-hidden min-w-[140px] py-1">
-              {PM_TABS.map(t => (
-                <button key={t.id}
-                  onClick={() => { activateOutputTab(t.id); setPmOpen(false); }}
-                  className={`block w-full text-left px-4 py-2 text-xs transition-colors ${activeOutputId === t.id
-                      ? "bg-[var(--bg-hover)] text-[var(--accent)]"
-                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                    }`}
-                >{t.label}</button>
-              ))}
+            <span className={`text-xl font-bold tracking-tight truncate ${isDarkMode ? "text-slate-100" : "text-slate-800"}`}>
+              {currentSession?.name || "새 프로젝트 세션"}
+            </span>
+            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center">
+              <ChevronRight size={16} className="text-blue-500/50" />
             </div>
-          )}
-        </div>
-
-        {/* SA 드롭다운 */}
-        {hasSaData && (
-          <div className="relative app-no-drag" ref={saRef}>
-            <button
-              onClick={() => { setSaOpen(v => !v); setPmOpen(false); }}
-              className={`flex items-center gap-1 px-3 py-1 text-[13px] rounded-md transition-colors ${saOpen || isSaActive
-                  ? "bg-[var(--accent)]/15 text-[var(--accent)]"
-                  : `text-[var(--text-secondary)] hover:text-[var(--text-primary)] ${isDarkMode ? "hover:bg-white/8" : "hover:bg-black/5"}`
-                }`}
-            >
-              SA <ChevronDown size={11} className={`transition-transform ${saOpen ? "rotate-180" : ""}`} />
-            </button>
-            {saOpen && (
-              <div className="absolute top-full left-0 mt-1 z-50 glass-card rounded-lg shadow-2xl overflow-hidden min-w-[140px] py-1">
-                {SA_TABS.map(t => (
-                  <button key={t.id}
-                    onClick={() => { activateOutputTab(t.id); setSaOpen(false); }}
-                    className={`block w-full text-left px-4 py-2 text-xs transition-colors ${activeOutputId === t.id
-                        ? "bg-[var(--bg-hover)] text-[var(--accent)]"
-                        : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                      }`}
-                  >{t.label}</button>
-                ))}
-              </div>
-            )}
           </div>
         )}
       </div>
 
-      <div className="flex-1" />
-
       {/* 세션 & 설정 버튼 (우측 윈도우 컨트롤러 140px 여백 확보) */}
-      <div className="flex items-center gap-1 app-no-drag shrink-0 mr-[140px]">
+      <div className="flex items-center gap-2 app-no-drag shrink-0 mr-[140px]">
         <button
           onClick={() => setShowSessions(!showSessions)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-all ${showSessions
-              ? "bg-[var(--accent)]/15 border-[var(--accent)]/40 text-[var(--accent)]"
-              : `border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] ${isDarkMode ? "hover:bg-white/8" : "hover:bg-black/5"}`
+          className={`flex items-center gap-2 px-4 py-2 text-[13px] font-bold rounded-xl border transition-all ${showSessions
+            ? "bg-blue-500/10 border-blue-500/30 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.1)]"
+            : `border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] ${isDarkMode ? "hover:bg-white/10" : "hover:bg-black/5"}`
             }`}
         >
-          <Clock3 size={11} />
-          <span>세션</span>
+          <Library size={16} />
+          <span>라이브러리</span>
         </button>
         <button
           onClick={() => setShowSettings(!showSettings)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-all ${showSettings
-              ? "bg-[var(--accent)]/15 border-[var(--accent)]/40 text-[var(--accent)]"
-              : `border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] ${isDarkMode ? "hover:bg-white/8" : "hover:bg-black/5"}`
+          className={`flex items-center gap-2 px-4 py-2 text-[13px] font-bold rounded-xl border transition-all ${showSettings
+            ? "bg-blue-500/10 border-blue-500/30 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.1)]"
+            : `border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] ${isDarkMode ? "hover:bg-white/10" : "hover:bg-black/5"}`
             }`}
         >
-          <Settings size={11} />
+          <Settings size={16} />
           <span>설정</span>
         </button>
       </div>
