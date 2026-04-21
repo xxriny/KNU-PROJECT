@@ -24,13 +24,9 @@ from pipeline.domain.pm.nodes.stack_retriever import stack_retriever_node
 # SA nodes
 from pipeline.domain.rag.nodes.system_scanner import system_scan_node
 from pipeline.domain.sa.nodes.merge_project import sa_merge_project_node
-from pipeline.domain.sa.nodes.sa_phase2 import sa_phase2_node
-from pipeline.domain.sa.nodes.sa_phase3 import sa_phase3_node
-from pipeline.domain.sa.nodes.sa_phase4 import sa_phase4_node
-from pipeline.domain.sa.nodes.sa_phase5 import sa_phase5_node
-from pipeline.domain.sa.nodes.sa_phase6 import sa_phase6_node
-from pipeline.domain.sa.nodes.sa_phase7 import sa_phase7_node
-from pipeline.domain.sa.nodes.sa_phase8 import sa_phase8_node
+from pipeline.domain.sa.nodes.component_scheduler import component_scheduler_node
+from pipeline.domain.sa.nodes.api_data_modeler import api_data_modeler_node
+from pipeline.domain.sa.nodes.sa_analysis import sa_analysis_node
 from pipeline.domain.sa.nodes.sa_embedding import sa_embedding_node
 
 
@@ -48,13 +44,9 @@ _PM_CHAIN: tuple[str, ...] = (
 
 _SA_CHAIN: tuple[str, ...] = (
     "sa_merge_project",
-    "sa_phase2",
-    "sa_phase3",
-    "sa_phase4",
-    "sa_phase5",
-    "sa_phase6",
-    "sa_phase7",
-    "sa_phase8",
+    "component_scheduler",
+    "api_data_modeler",
+    "sa_analysis",
     "sa_embedding",
 )
 
@@ -200,13 +192,9 @@ def _build_pm_pipeline():
 def _build_sa_pipeline():
     workflow = StateGraph(PipelineState)
     workflow.add_node("sa_merge_project", _wrap_node_with_usage(sa_merge_project_node))
-    workflow.add_node("sa_phase2", _wrap_node_with_usage(sa_phase2_node))
-    workflow.add_node("sa_phase3", _wrap_node_with_usage(sa_phase3_node))
-    workflow.add_node("sa_phase4", _wrap_node_with_usage(sa_phase4_node))
-    workflow.add_node("sa_phase5", _wrap_node_with_usage(sa_phase5_node))
-    workflow.add_node("sa_phase6", _wrap_node_with_usage(sa_phase6_node))
-    workflow.add_node("sa_phase7", _wrap_node_with_usage(sa_phase7_node))
-    workflow.add_node("sa_phase8", _wrap_node_with_usage(sa_phase8_node))
+    workflow.add_node("component_scheduler", _wrap_node_with_usage(component_scheduler_node))
+    workflow.add_node("api_data_modeler", _wrap_node_with_usage(api_data_modeler_node))
+    workflow.add_node("sa_analysis", _wrap_node_with_usage(sa_analysis_node))
     workflow.add_node("sa_embedding", _wrap_node_with_usage(sa_embedding_node))
 
     workflow.add_edge(START, _SA_CHAIN[0])
@@ -259,21 +247,23 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     workflow.add_node("system_scan", system_scan_node)
     # PM
     workflow.add_node("requirement_analyzer", requirement_analyzer_node)
-    workflow.add_node("prioritizer", prioritizer_node)
-    workflow.add_node("rtm_builder", rtm_builder_node)
-    workflow.add_node("semantic_indexer", semantic_indexer_node)
-    workflow.add_node("context_spec", context_spec_node)
+    workflow.add_node("stack_retriever", stack_retriever_node)
+    workflow.add_node("stack_planner", stack_planner_node)
+    workflow.add_node("pm_analysis", pm_analysis_node)
+    workflow.add_node("pm_embedding", pm_embedding_node)
     # SA
     workflow.add_node("sa_merge_project", sa_merge_project_node)
-    workflow.add_node("sa_phase2", sa_phase2_node)
-    workflow.add_node("sa_phase3", sa_phase3_node)
-    workflow.add_node("sa_phase4", sa_phase4_node)
-    workflow.add_node("sa_phase5", sa_phase5_node)
-    workflow.add_node("sa_phase6", sa_phase6_node)
-    workflow.add_node("sa_phase7", sa_phase7_node)
-    workflow.add_node("sa_phase8", sa_phase8_node)
+    workflow.add_node("component_scheduler", component_scheduler_node)
+    workflow.add_node("api_data_modeler", api_data_modeler_node)
+    workflow.add_node("sa_analysis", sa_analysis_node)
+    workflow.add_node("sa_embedding", sa_embedding_node)
 
-    full_chain = _SCAN_CHAIN + _PM_CHAIN + _SA_CHAIN
+    full_chain = [
+        "system_scan", "requirement_analyzer", "stack_retriever", "stack_planner",
+        "pm_analysis", "pm_embedding", "sa_merge_project", "component_scheduler",
+        "api_data_modeler", "sa_analysis", "sa_embedding"
+    ]
+    
     workflow.add_edge(START, full_chain[0])
     for src, dst in zip(full_chain[:-1], full_chain[1:]):
         workflow.add_conditional_edges(src, _check_status, {"continue": dst, "error": END})
