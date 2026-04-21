@@ -6,8 +6,8 @@ export default function SessionPanel() {
   const { sessions, currentSessionId, loadSession, deleteSession, isDarkMode } = useAppStore();
 
   return (
-    <div className={`h-full min-h-0 flex flex-col transition-colors duration-200 ${isDarkMode ? "bg-slate-900" : "bg-slate-50"}`}>
-      <div className={`flex items-center gap-2 px-3 py-3 border-b ${isDarkMode ? "border-slate-700/50 bg-slate-800/30" : "border-slate-200 bg-white"}`}>
+    <div className={`h-full min-h-0 flex flex-col bg-transparent transition-colors duration-300`}>
+      <div className={`flex items-center gap-2 px-3 py-3 border-b border-[var(--border)] bg-transparent`}>
         <Clock3 size={14} className="text-blue-400" />
         <span className={`text-sm font-medium ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>세션</span>
         <span className="ml-auto text-[12px] text-slate-500">{sessions.length}</span>
@@ -27,10 +27,8 @@ export default function SessionPanel() {
                 onClick={() => loadSession(session.id)}
                 className={`group rounded-md px-2 py-2 border cursor-pointer transition-all ${
                   isActive
-                    ? "bg-blue-600/15 border-blue-500/50 text-blue-300"
-                    : isDarkMode
-                      ? "border-transparent text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
-                      : "border-transparent bg-white shadow-sm text-slate-600 hover:bg-slate-100"
+                    ? "bg-[var(--accent)]/15 border-[var(--accent)]/50 text-[var(--accent)]"
+                    : "border-transparent text-[var(--text-secondary)] hover:bg-white/5 hover:text-[var(--text-primary)]"
                 }`}
               >
                 <div className="flex items-start gap-2">

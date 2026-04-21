@@ -13,14 +13,22 @@ logger = get_logger()
 
 def sa_embedding_node(state: PipelineState) -> Dict[str, Any]:
     sget = make_sget(state)
-    logger.info("Starting sa_embedding_node")
+    logger.info("=== [Node Entry] sa_embedding_node ===")
     
     sa_bundle = sget("sa_arch_bundle")
     run_id = sget("run_id", "unknown")
     
     if not sa_bundle:
         logger.warning("No SA bundle found to embed.")
-        return {}
+        return {
+            "thinking_log": (sget("thinking_log", []) or []) + [{"node": "sa_embedding", "thinking": "저장할 SA 산출물이 없습니다."}]
+        }
+
+    data = sa_bundle.get("data", {})
+    comp_count = len(data.get("components", []))
+    api_count = len(data.get("apis", []))
+    table_count = len(data.get("tables", []))
+    logger.info(f"Embedding SA bundle [{run_id}]: Comp({comp_count}), API({api_count}), Table({table_count})")
 
     try:
         # PM과 동일한 라이프사이클로 명시적 임베딩 수행

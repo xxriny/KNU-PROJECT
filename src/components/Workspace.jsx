@@ -17,16 +17,12 @@ import { X, Code2, LayoutDashboard, ChevronDown, House, Activity } from "lucide-
 
 const PM_TABS = ["rtm", "context"];
 const PM_LABELS = { rtm: "RTM & Stack", context: "PM Report" };
-const SA_TABS = ["sa_architecture", "sa_security", "sa_topology", "sa_system", "sa_flowchart", "sa_uml", "sa_interfaces", "sa_decisions"];
+const SA_TABS = ["sa_overview", "sa_components", "sa_api", "sa_db"];
 const SA_LABELS = {
-  sa_architecture: "Architecture",
-  sa_security: "Security",
-  sa_topology: "Topology Queue",
-  sa_system: "System Diagram",
-  sa_flowchart: "Flowchart",
-  sa_uml: "UML Components",
-  sa_interfaces: "Interfaces",
-  sa_decisions: "Decision Table",
+  sa_overview: "QA Analysis",
+  sa_components: "Components",
+  sa_api: "API Spec",
+  sa_db: "Database",
 };
 
 export default function Workspace() {
@@ -85,18 +81,9 @@ export default function Workspace() {
         return <PipelineProgress />;
       case "overview":
       case "sa_overview":
-      case "sa_feasibility":
-        return <ResultViewer tabId="overview" />;
-      case "rtm":
-      case "context":
-      case "sa_architecture":
-      case "sa_security":
-      case "sa_topology":
-      case "sa_system":
-      case "sa_flowchart":
-      case "sa_uml":
-      case "sa_interfaces":
-      case "sa_decisions":
+      case "sa_components":
+      case "sa_api":
+      case "sa_db":
         return <ResultViewer tabId={activeOutputId} />;
       default:
         return <HomeScreen />;
@@ -106,8 +93,8 @@ export default function Workspace() {
   const isCodeViewport = activeViewportTab?.kind === "code";
 
   return (
-    <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[15px] transition-colors duration-200">
-      <div className={`flex items-center border-b border-[var(--border)] min-h-9 ${isDarkMode ? "bg-slate-900/50" : "bg-slate-50"}`}>
+    <div className="h-full flex flex-col bg-transparent text-[15px] transition-colors duration-300">
+      <div className={`flex items-center border-b border-[var(--border)] min-h-10 px-2`}>
         <div className="flex items-center gap-0.5 px-1 py-0.5 overflow-x-auto w-full">
           {openFiles.length === 0 ? (
             <div className="px-3 py-1.5 text-[15px] text-slate-600">열린 코드 탭이 없습니다</div>
@@ -119,8 +106,8 @@ export default function Workspace() {
                   key={file.id}
                   className={`group flex items-center gap-1.5 px-3 py-1.5 text-[15px] rounded-t cursor-pointer transition-colors ${
                     isActive
-                      ? "bg-slate-800 text-blue-300 border-t-2 border-blue-500"
-                      : "text-slate-500 hover:text-slate-300 hover:bg-slate-800/50"
+                      ? "bg-[var(--accent)]/20 text-[var(--accent)] border-b-2 border-[var(--accent)] font-semibold"
+                      : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
                   }`}
                   onClick={() => activateCodeTab(file.id)}
                 >
@@ -139,7 +126,7 @@ export default function Workspace() {
         </div>
       </div>
 
-      <div className={`flex items-center border-b border-[var(--border)] px-1 min-h-9 ${isDarkMode ? "bg-slate-900/60" : "bg-white"}`}>
+      <div className={`flex items-center border-b border-[var(--border)] px-2 min-h-10 bg-transparent`}>
         <button
           onClick={() => activateOutputTab("home")}
           className={`flex items-center gap-1 px-3 py-1.5 text-[15px] transition-colors ${
@@ -195,20 +182,20 @@ export default function Workspace() {
           </button>
 
           {pmOpen && (
-            <div className="absolute top-full left-0 z-50 mt-0.5 bg-slate-800 border border-slate-700 rounded-md shadow-xl overflow-hidden">
-              {PM_TABS.map((id) => (
+            <div className="absolute top-full left-0 z-50 mt-1 glass-card rounded-lg shadow-2xl overflow-hidden min-w-[200px]">
+              <div className="py-1">{PM_TABS.map((id) => (
                 <button
                   key={id}
                   onClick={() => { activateOutputTab(id); setPmOpen(false); }}
                   className={`block w-full text-left px-4 py-2 text-[15px] transition-colors ${
                     activeOutputId === id
-                      ? "bg-slate-700 text-blue-300"
-                      : "text-slate-300 hover:bg-slate-700/60"
+                      ? "bg-[var(--bg-hover)] text-[var(--accent)]"
+                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                   }`}
                 >
                   {PM_LABELS[id]}
                 </button>
-              ))}
+              ))}</div>
             </div>
           )}
         </div>
@@ -231,20 +218,21 @@ export default function Workspace() {
             </button>
 
             {saOpen && (
-              <div className="absolute top-full left-0 z-50 mt-0.5 bg-slate-800 border border-slate-700 rounded-md shadow-xl overflow-hidden min-w-[168px]">
-                {SA_TABS.map((id) => (
+              <div className="absolute top-full left-0 z-50 mt-1 glass-card rounded-lg shadow-2xl overflow-hidden min-w-[200px]">
+                <div className="py-1">{SA_TABS.map((id) => (
                   <button
                     key={id}
                     onClick={() => { activateOutputTab(id); setSaOpen(false); }}
                     className={`block w-full text-left px-4 py-2 text-[15px] transition-colors ${
                       activeOutputId === id
-                        ? "bg-slate-700 text-blue-300"
-                        : "text-slate-300 hover:bg-slate-700/60"
+                        ? "bg-[var(--bg-hover)] text-[var(--accent)]"
+                        : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     }`}
                   >
                     {SA_LABELS[id]}
                   </button>
                 ))}
+                </div>
               </div>
             )}
           </div>
@@ -255,10 +243,8 @@ export default function Workspace() {
         {isCodeViewport ? (
           renderViewport()
         ) : (
-          <div className="h-full overflow-auto">
-            <div className="min-w-[1080px] h-full">
-              {renderViewport()}
-            </div>
+          <div className="h-full w-full overflow-auto">
+            {renderViewport()}
           </div>
         )}
       </div>

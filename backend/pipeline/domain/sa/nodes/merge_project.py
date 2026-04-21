@@ -18,6 +18,7 @@ SYSTEM_PROMPT = """
    - **에러 핸들링 전략**: 외부 API 호출 실패, 네트워크 타임아웃, 유효하지 않은 토큰 수신 시의 구체적인 에러 처리 및 사용자 응답 로직을 기술합니다.
    - 트랜잭션/안전성: 복합적인 엔티티 생성 시 원자성을 보장하기 위한 전략을 기술합니다.
 4. 다운스트림 전달: 수립된 전략은 후속 노드가 구체적인 구현체로 변환할 수 있도록 명확하고 구체적인 문장으로 작성합니다.
+5. 언어 규칙: 모든 사고 과정(thinking)과 병합 전략은 반드시 한국어로 상세히 작성하십시오. 영어를 사용하지 마십시오.
 
 출력 데이터 규격 (JSON):
 {
@@ -38,14 +39,25 @@ def _build_user_message(input_idea: str, system_scan: dict, rtm: list) -> str:
     }
     return f"\n    [Input Idea] {input_idea}\n    [System Scan Summary] {scan_summary}\n    [PM Requirements] {pruned_rtm}\n    "
 
+from observability.logger import get_logger
+
+logger = get_logger()
+
 @pipeline_node("sa_merge_project")
 def sa_merge_project_node(ctx: NodeContext) -> dict:
     state = ctx.state
     sget = ctx.sget
+    logger.info("=== [Node Entry] sa_merge_project_node ===")
     
     input_idea = sget("input_idea", "")
     system_scan = sget("system_scan", {}) or {}
-    requirements_rtm = sget("requirements_rtm", [])
+    
+    # PM 번들에서 최종 정제된 RTM 가져오기
+    pm_bundle = sget("pm_bundle", {})
+    requirements_rtm = pm_bundle.get("data", {}).get("rtm", []) or sget("features", [])
+    
+    if not requirements_rtm:
+        logger.warning("No RTM/Features found in state for SA merge.")
     
     # 1. Prepare optimized user prompt
     user_content = _build_user_message(input_idea, system_scan, requirements_rtm)
@@ -72,9 +84,12 @@ def sa_merge_project_node(ctx: NodeContext) -> dict:
         }
     }
     
+    thinking_msg = output.thinking or "프로젝트 병합 전략 수립 완료"
+    
     return {
         "sa_merge_project_output": output.model_dump(),
         "merged_project": merged_project,
         "action_type": output.mode,
+        "thinking_log": (sget("thinking_log", []) or []) + [{"node": "sa_merge_project", "thinking": thinking_msg}],
         "current_step": "sa_merge_project_done"
     }

@@ -18,17 +18,27 @@ try:
     def _ensure_configured() -> None:
         """프로세스 내 최초 1회 structlog 설정."""
         env = os.environ.get("ENV", "dev").lower()
+        
+        try:
+            from rich.traceback import install
+            # 에러 발생 시 방대한 상태(state) 출력을 방지하기 위해 show_locals=False 설정
+            install(show_locals=False, width=120)
+        except ImportError:
+            pass
+
         renderer = (
-            structlog.dev.ConsoleRenderer()
+            structlog.dev.ConsoleRenderer(colors=True, force_colors=True)
             if env == "dev"
             else structlog.processors.JSONRenderer()
         )
+        
         structlog.configure(
             processors=[
                 structlog.contextvars.merge_contextvars,
                 structlog.stdlib.add_log_level,
-                structlog.processors.TimeStamper(fmt="iso"),
+                structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False),
                 structlog.processors.StackInfoRenderer(),
+                structlog.dev.set_exc_info,
                 renderer,
             ],
             wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),

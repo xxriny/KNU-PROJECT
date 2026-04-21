@@ -60,7 +60,7 @@ export default function ChatPanel() {
   };
 
   return (
-    <div className={`h-full min-h-0 flex flex-col min-w-0 overflow-hidden text-[15px] transition-colors duration-200 ${isDarkMode ? "bg-slate-900" : "bg-white"}`}>
+    <div className={`h-full min-h-0 flex flex-col min-w-0 overflow-hidden text-[15px] bg-transparent transition-colors duration-300`}>
       {/* ── 헤더 ──────────────────────────── */}
       <div className={`flex items-center justify-between px-4 py-3 border-b ${isDarkMode ? "border-slate-700/50" : "border-slate-200 bg-slate-50"}`}>
         <div className="flex items-center gap-2">

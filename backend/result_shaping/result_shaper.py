@@ -24,7 +24,7 @@ class PMOverview(BaseModel):
 
 class SAOverview(BaseModel):
     feasibility: dict = Field(default_factory=dict)
-    critical_gaps: list[dict] = Field(default_factory=list)
+    critical_gaps: list[str] = Field(default_factory=list)
     skipped_phases: list[str] = Field(default_factory=list)
 
 
@@ -46,6 +46,7 @@ class ProjectOverview(BaseModel):
     container_summary: dict[str, int] = Field(default_factory=dict)
     data_flags: dict[str, bool] = Field(default_factory=dict)
     next_actions: list[str] = Field(default_factory=list)
+    usage_summary: dict[str, Any] = Field(default_factory=dict) # New field for cost/token
 
 
 # ─── 제외 키 ──────────────────────────────────────────────
@@ -155,6 +156,7 @@ def _build_project_overview(
     container_summary: dict,
     data_flags: dict[str, bool],
     next_actions: list[str],
+    usage_summary: dict[str, Any],
 ) -> dict:
     return ProjectOverview(
         status=metadata.get("status"),
@@ -178,6 +180,7 @@ def _build_project_overview(
         },
         data_flags=data_flags,
         next_actions=next_actions[:3],
+        usage_summary=usage_summary,
     ).model_dump()
 
 def shape_result(raw_result: dict) -> dict:
@@ -195,10 +198,49 @@ def shape_result(raw_result: dict) -> dict:
     requirements_rtm: list = sanitized.get("requirements_rtm") or []
     context_spec: dict = sanitized.get("context_spec") or {}
     metadata: dict = sanitized.get("metadata") or {}
-    sa_phase2: dict = sanitized.get("sa_phase2") or {}
-    sa_phase3: dict = sanitized.get("sa_phase3") or {}
-    sa_phase5: dict = sanitized.get("sa_phase5") or {}
-    sa_output: dict = sanitized.get("sa_output") or {}
+    # --- Compatibility Bridge: Map new modular SA nodes to existing phase-based logic ---
+    sa_merge = sanitized.get("sa_merge_project_output") or {}
+    sa_sched = sanitized.get("component_scheduler_output") or {}
+    sa_model = sanitized.get("api_data_modeler_output") or {}
+    sa_anal = sanitized.get("sa_analysis_output") or {}
+
+    # Map sa_analysis to phase2 (Gaps) and phase3 (Feasibility)
+    sa_phase2: dict = {
+        "status": sa_anal.get("status"),
+        "gap_report": sa_anal.get("gaps", [])
+    }
+    sa_phase3: dict = {
+        "status": sa_anal.get("status", "Pass"),
+        "reasons": [sa_anal.get("thinking", "")] if sa_anal.get("thinking") else []
+    }
+    # Map scheduler to phase5 (Components)
+    sa_phase5: dict = {
+        "components": sa_sched.get("components", []),
+        "mapped_requirements": [
+            {"REQ_ID": "REQ-101", "layer": c.get("domain"), "description": c.get("role")} # Dummy mapping for now
+            for c in sa_sched.get("components", [])
+        ]
+    }
+    # Map modeler to phase7 (Interfaces)
+    sa_phase7: dict = {
+        "interface_contracts": [
+            {"contract_id": f"IF-{i}", "interface_name": a.get("endpoint"), "input_spec": str(a.get("request_schema")), "output_spec": str(a.get("response_schema"))}
+            for i, a in enumerate(sa_model.get("apis", []))
+        ]
+    }
+    
+    sa_phase6: dict = {}
+    sa_phase8: dict = {}
+    sa_output: dict = sa_anal
+
+    # Store in sanitized for compiler and UI compatibility
+    sanitized["sa_phase2"] = sa_phase2
+    sanitized["sa_phase3"] = sa_phase3
+    sanitized["sa_phase5"] = sa_phase5
+    sanitized["sa_phase6"] = sa_phase6
+    sanitized["sa_phase7"] = sa_phase7
+    sanitized["sa_phase8"] = sa_phase8
+    sanitized["sa_output"] = sa_output
 
     skipped_phases = _collect_skipped_phases(sanitized)
 
@@ -221,6 +263,13 @@ def shape_result(raw_result: dict) -> dict:
     data_flags = _build_data_flags(requirements_rtm, sanitized)
     next_actions = _compute_next_actions(data_flags, sa_phase3, container_summary)
 
+    usage_summary = {
+        "total_tokens": sum(log.get("total", 0) for log in (raw_result.get("accumulated_usage") or [])),
+        "total_cost": raw_result.get("accumulated_cost", 0.0),
+        "input_tokens": sum(log.get("input", 0) for log in (raw_result.get("accumulated_usage") or [])),
+        "output_tokens": sum(log.get("output", 0) for log in (raw_result.get("accumulated_usage") or [])),
+    }
+
     sanitized["project_overview"] = _build_project_overview(
         metadata=metadata,
         summary_text=summary_text,
@@ -237,6 +286,7 @@ def shape_result(raw_result: dict) -> dict:
         container_summary=container_summary,
         data_flags=data_flags,
         next_actions=next_actions,
+        usage_summary=usage_summary,
     )
 
     return sanitized
