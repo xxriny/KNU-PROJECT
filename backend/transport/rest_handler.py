@@ -280,6 +280,66 @@ async def delete_session(run_id: str, req: Optional[DeleteSessionRequest] = None
         }
 
 
+@rest_router.get("/api/session/{run_id}/restore")
+async def restore_session(run_id: str):
+    """RAG DB에서 특정 세션의 모든 아티팩트를 수집하여 복원합니다."""
+    try:
+        from pipeline.domain.pm.nodes.pm_db import _get_collection
+        coll = _get_collection()
+        
+        # 해당 세션의 모든 데이터 조회
+        results = coll.get(where={"session_id": run_id})
+        
+        if not results["ids"]:
+            return {"status": "error", "error": "해당 세션의 데이터를 찾을 수 없습니다."}
+            
+        # 데이터를 UI가 이해할 수 있는 resultData 구조로 재조립
+        restored_data = {
+            "run_id": run_id,
+            "metadata": {"session_id": run_id}
+        }
+        
+        for i in range(len(results["ids"])):
+            artifact_type = results["metadatas"][i].get("artifact_type")
+            doc_str = results["documents"][i]
+            
+            # 데이터 복원 로직 (JSON 우선, Python literal 폴백)
+            try:
+                import json
+                parsed_content = json.loads(doc_str)
+            except:
+                try:
+                    import ast
+                    parsed_content = ast.literal_eval(doc_str)
+                except:
+                    parsed_content = doc_str
+                
+            if artifact_type == "PM_BUNDLE":
+                restored_data["pm_bundle"] = parsed_content
+            elif artifact_type == "SA_ARCH_BUNDLE":
+                restored_data["sa_output"] = parsed_content
+                restored_data["sa_arch_bundle"] = parsed_content
+                if isinstance(parsed_content, dict) and "data" in parsed_content:
+                    for key, val in parsed_content["data"].items():
+                        restored_data[key] = val
+                        
+            elif "API" in artifact_type.upper():
+                restored_data["apis"] = parsed_content.get("apis", parsed_content) if isinstance(parsed_content, dict) else parsed_content
+            elif "TABLE" in artifact_type.upper() or "DB" in artifact_type.upper():
+                restored_data["tables"] = parsed_content.get("tables", parsed_content) if isinstance(parsed_content, dict) else parsed_content
+                
+            elif artifact_type == "RTM_STACK_BUNDLE":
+                restored_data["requirements_rtm"] = parsed_content
+            elif "STACK" in artifact_type.upper():
+                restored_data["tech_stacks"] = parsed_content
+        
+        return {"status": "ok", "data": restored_data}
+        
+    except Exception as e:
+        get_logger().error(f"Restore failed: {e}")
+        return {"status": "error", "error": str(e)}
+
+
 @rest_router.get("/api/memos")
 async def get_memos_endpoint(session_id: Optional[str] = None):
     from pipeline.domain.pm.nodes.memo_db import get_memos

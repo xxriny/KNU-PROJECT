@@ -78,7 +78,8 @@ def requirement_analyzer_node(state: PipelineState) -> Dict[str, Any]:
             system_prompt=system_prompt,
             user_msg=user_content,
             max_retries=3,
-            temperature=0.1
+            temperature=0.1,
+            compress_prompt=True # Phase 3: Prompt Compression enabled
         )
         out = res.parsed
         usage = res.usage

@@ -94,6 +94,8 @@ export const EMPTY_RESULT_FIELDS = {
   pm_bundle: null,
   pm_coverage_rate: 0,
   pm_warnings: [],
+  tables: null,
+  apis: null,
   metadata: null,
 };
 
@@ -154,6 +156,9 @@ export function spreadResultData(data) {
     sa_phase6: data?.sa_phase6 || null,
     sa_phase7: data?.sa_phase7 || null,
     sa_phase8: data?.sa_phase8 || null,
+    // [Knowledge Restore] RAG에서 복원된 개별 필드들
+    tables: data?.tables || data?.sa_output?.data?.tables || [],
+    apis: data?.apis || data?.sa_output?.data?.apis || [],
     thinking_log: thinkingLog,
   };
 }

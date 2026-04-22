@@ -4,8 +4,8 @@ import { Section, EmptyState } from "./SharedComponents";
 import { Database, Table as TableIcon, Key } from "lucide-react";
 
 function SADatabaseTab() {
-  const { sa_output } = useAppStore();
-  const tables = sa_output?.tables || sa_output?.data?.tables || [];
+  const { sa_output, tables: storeTables } = useAppStore();
+  const tables = storeTables?.length > 0 ? storeTables : (sa_output?.tables || sa_output?.data?.tables || []);
 
   if (tables.length === 0) {
     return <EmptyState text="설계된 DB 테이블이 없습니다." />;

@@ -79,6 +79,7 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
             schema=StackPlannerOutput,
             system_prompt=STACK_PLANNER_SYSTEM_PROMPT,
             user_msg=user_msg,
+            compress_prompt=True, # Phase 3: Prompt Compression enabled
         )
         out = res.parsed
         total_retries = res.retry_count
@@ -104,6 +105,7 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
                 schema=StackPlannerOutput,
                 system_prompt=STACK_PLANNER_SYSTEM_PROMPT,
                 user_msg=healing_user_msg,
+                compress_prompt=True, # Phase 3 enabled
             )
             out_heal = res_heal.parsed
             total_retries += res_heal.retry_count

@@ -101,6 +101,7 @@ def pm_analysis_node(state: PipelineState) -> Dict[str, Any]:
             system_prompt=PM_ANALYSIS_SYSTEM_PROMPT,
             user_msg=user_msg,
             temperature=0.05,
+            compress_prompt=True, # Phase 3: Prompt Compression enabled
         )
         out = res.parsed
         retry_count = res.retry_count

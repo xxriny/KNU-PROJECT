@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import useAppStore from "../store/useAppStore";
-import { Clock3, X as XIcon, Edit3 } from "lucide-react";
+import { Clock3, X as XIcon, Edit3, RefreshCw } from "lucide-react";
 
 export default function SessionPanel() {
   const { sessions, currentSessionId, loadSession, deleteSession, updateSessionName, isDarkMode } = useAppStore();
@@ -81,16 +81,28 @@ export default function SessionPanel() {
                     </p>
                   </div>
                   {!isEditing && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteSession(session.id);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-500/10 hover:text-red-400 transition-all"
-                      title="세션 삭제"
-                    >
-                      <XIcon size={12} />
-                    </button>
+                    <div className="flex flex-col gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          useAppStore.getState().restoreSessionFromRag(session.id);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-blue-500/10 hover:text-blue-400 transition-all"
+                        title="RAG에서 데이터 동기화"
+                      >
+                        <RefreshCw size={12} className={isActive ? "animate-spin-slow" : ""} />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteSession(session.id);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-500/10 hover:text-red-400 transition-all"
+                        title="세션 삭제"
+                      >
+                        <XIcon size={12} />
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

@@ -85,13 +85,14 @@ def sa_analysis_node(ctx: NodeContext) -> dict:
     user_content = _build_user_message(rtm, components, apis, tables)
     logger.info(f"Calling SA Analysis LLM (RTM:{len(rtm)}, Comp:{len(components)}, API:{len(apis)}, Table:{len(tables)})")
     
-    # 3. Call LLM
+    # 3. Call LLM (최종 검증은 모든 스키마를 상세히 봐야 하므로 압축 제외)
     res = call_structured(
         api_key=ctx.api_key,
         model=ctx.model,
         schema=SAAnalysisOutput,
         system_prompt=SYSTEM_PROMPT.replace("session_id", run_id),
-        user_msg=user_content
+        user_msg=user_content,
+        compress_prompt=False
     )
     
     output = res.parsed
@@ -110,6 +111,18 @@ def sa_analysis_node(ctx: NodeContext) -> dict:
     
     final_sa_output = output.model_dump()
     thinking_msg = output.thinking or "SA 아키텍처 최종 검증 완료"
+    
+    # [Knowledge Persistence] Phase 3: 분석 결과를 RAG에 영구 저장
+    from pipeline.domain.sa.nodes.sa_db import upsert_sa_artifact
+    try:
+        upsert_sa_artifact(
+            session_id=run_id,
+            artifact_data=final_sa_output,
+            artifact_type="SA_ARCH_BUNDLE"
+        )
+        logger.info(f"SA Analysis Result persisted to RAG for session: {run_id}")
+    except Exception as e:
+        logger.error(f"Failed to persist SA result to RAG: {e}")
     
     # 루프 횟수 관리
     current_sa_loop = sget("sa_loop_count", 0)

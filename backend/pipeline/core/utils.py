@@ -17,7 +17,11 @@ from pipeline.core.models.gemini_model import get_gemini_client, get_raw_genai_c
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from pipeline.core.cost_manager import calculate_cost
+from pipeline.core.compressor import prompt_compressor
 from version import DEFAULT_MODEL, DEFAULT_TEMPERATURE, MAX_LLM_RETRIES
+from observability.logger import get_logger
+
+logger = get_logger()
 
 T = TypeVar("T", bound=BaseModel)
 _CACHE_LIMIT = 32
@@ -25,6 +29,7 @@ _CACHE_LIMIT = 32
 # ── 비용 및 토큰 추적용 전역 컨텍스트 (Phase 0) ──────
 # 각 노드 실행 중 발생하는 모든 LLM 호출의 사용량을 임시 저장합니다.
 active_usage_log: ContextVar[list] = ContextVar("active_usage_log", default=[])
+active_session_id: ContextVar[str] = ContextVar("active_session_id", default="")
 
 
 @dataclass
@@ -120,8 +125,16 @@ def call_structured(
     user_msg: str,
     max_retries: int = MAX_LLM_RETRIES,
     temperature: float = DEFAULT_TEMPERATURE,
+    compress_prompt: bool = False,
+    compression_rate: float = 0.5,
 ) -> LLMResult[T]:
     """Unified structured output: parsed result, usage metadata, and thinking."""
+    # Phase 3: Prompt Compression
+    if compress_prompt:
+        # LLMLingua-2 기반 압축 실행 (가변 압축률 지원)
+        user_msg = prompt_compressor.compress_with_preservation(user_msg, target_token_rate=compression_rate)
+        logger.info(f"[PromptCompressor] Compressed with rate {compression_rate}")
+
     llm = get_llm(api_key, model, temperature)
     messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_msg)]
 
@@ -163,12 +176,28 @@ def call_structured(
 
     # 중앙 집중형 추적을 위해 컨텍스트에 기록 (Phase 0)
     current_log = active_usage_log.get().copy()
-    current_log.append({
+    
+    # 캐싱 통계 계산 (Phase 1)
+    from pipeline.core.cache_manager import cache_manager
+    session_id = active_session_id.get()
+    cache_stats = {"cache_hit": False, "savings_usd": 0.0}
+    
+    if session_id:
+        # 시스템 프롬프트를 정적 컨텍스트로 간주하여 캐시 (첫 호출 시)
+        if session_id not in cache_manager.session_pool:
+            cache_manager.cache_static_context(session_id, system_prompt)
+        
+        cache_stats = cache_manager.get_cache_stats(session_id, model, usage)
+
+    log_entry = {
         "model": model,
         "input": usage["input_tokens"],
         "output": usage["output_tokens"],
-        "cost": cost
-    })
+        "cost": cost,
+        "cache_hit": cache_stats["cache_hit"],
+        "savings": cache_stats["savings_usd"]
+    }
+    current_log.append(log_entry)
     active_usage_log.set(current_log)
 
     return LLMResult(
