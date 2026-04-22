@@ -84,6 +84,7 @@ class IdeaChatRequest(BaseModel):
 
 class ScanRequest(BaseModel):
     path: str
+    max_depth: int = 3
 
 
 class ReadFileRequest(BaseModel):
@@ -92,6 +93,13 @@ class ReadFileRequest(BaseModel):
 
 class DeleteSessionRequest(BaseModel):
     pass
+
+
+class MemoRequest(BaseModel):
+    session_id: str
+    text: str
+    selected_text: str = ""
+    section: str = "Global"
 
 
 class HealthResponse(BaseModel):
@@ -130,7 +138,7 @@ async def scan_folder_endpoint(req: ScanRequest):
 
     try:
         register_project_root(normalized_root)
-        result = scan_folder(normalized_root)
+        result = scan_folder(normalized_root, max_depth=req.max_depth)
         return {"status": "ok", **result}
     except Exception as e:
         return {"status": "error", "error": str(e)}
@@ -270,3 +278,33 @@ async def delete_session(run_id: str, req: Optional[DeleteSessionRequest] = None
             "error": str(e),
             "message": f"Partial deletion for {run_id}",
         }
+
+
+@rest_router.get("/api/memos")
+async def get_memos_endpoint(session_id: Optional[str] = None):
+    from pipeline.domain.pm.nodes.memo_db import get_memos
+    try:
+        memos = get_memos(session_id)
+        return {"status": "ok", "memos": memos}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/memos")
+async def add_memo_endpoint(req: MemoRequest):
+    from pipeline.domain.pm.nodes.memo_db import add_memo
+    try:
+        memo_id = add_memo(req.session_id, req.text, req.selected_text, req.section)
+        return {"status": "ok", "memo_id": memo_id}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.delete("/api/memos/{memo_id}")
+async def delete_memo_endpoint(memo_id: str):
+    from pipeline.domain.pm.nodes.memo_db import delete_memo
+    try:
+        delete_memo(memo_id)
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}

@@ -10,16 +10,27 @@ from pipeline.core.utils import get_llm, parse_json_safe
 from observability.logger import get_logger
 from version import DEFAULT_MODEL
 
+# RAG Imports
+try:
+    from pipeline.domain.pm.nodes.pm_db import query_pm_artifacts
+    from pipeline.domain.pm.nodes.stack_db import search_tech_stacks
+    from pipeline.domain.pm.nodes.memo_db import query_memos
+except ImportError:
+    query_pm_artifacts = None
+    search_tech_stacks = None
+    query_memos = None
+
 
 SYSTEM_PROMPT = """당신은 PM(프로젝트 매니저) AI 어시스턴트입니다.
 사용자가 아이디어를 구체화하거나, 이미 만들어진 분석 결과를 이해하고 다음 액션을 결정하도록 도와주세요.
 
 ## 역할
 1. 사용자의 막연한 아이디어를 구체적인 프로젝트 기획으로 발전시키세요.
-2. 적절한 질문을 통해 요구사항을 명확히 하세요.
-3. 기술 스택, 대상 사용자, 핵심 기능 등을 파악하세요.
-4. 아이디어가 충분히 구체화되면 분석을 시작할 수 있다고 안내하세요.
-5. 이전 분석 결과가 주어지면, 그 결과를 설명하거나 개선 방향을 제안하되 사용자가 명시적으로 요청하기 전에는 수정이 적용된 것처럼 말하지 마세요.
+2. 사용자가 프로젝트의 맥락, 기술 스택, 혹은 지적사항(메모)에 대해 물으면 RAG 검색 결과를 바탕으로 정확하게 답변하세요.
+3. 적절한 질문을 통해 요구사항을 명확히 하세요.
+4. 기술 스택, 대상 사용자, 핵심 기능 등을 파악하세요.
+5. 아이디어가 충분히 구체화되면 분석을 시작할 수 있다고 안내하세요.
+6. 이전 분석 결과가 주어지면, 그 결과를 설명하거나 개선 방향을 제안하세요. (더 이상 직접적인 '적용' 모드는 없으므로, 대화를 통해 설계를 다듬는 데 집중하세요.)
 
 ## 응답 형식
 반드시 아래 JSON 형식으로 응답하세요:
@@ -58,10 +69,44 @@ def idea_chat_node(state: PipelineState) -> dict:
         if not user_request:
             return {"error": "메시지가 비어있습니다.", "current_step": "idea_chat"}
 
+        # ── RAG 검색 수행 ──
+        rag_context = []
+        try:
+            # 1. 산출물 지식 검색 (PM/SA)
+            if query_pm_artifacts:
+                pm_sa_results = query_pm_artifacts(user_request, n_results=3)
+                if pm_sa_results and pm_sa_results.get("documents"):
+                    rag_context.append("### 관련 산출물 지식 (RTM/Components/API/DB)")
+                    for doc in pm_sa_results["documents"][0]:
+                        rag_context.append(f"- {doc[:1000]}")
+
+            # 2. 기술 스택 지식 검색
+            if search_tech_stacks:
+                stack_results = search_tech_stacks(user_request, top_k=2)
+                if stack_results:
+                    rag_context.append("### 관련 기술 스택 정보")
+                    for s in stack_results:
+                        rag_context.append(f"- {s['package_name']} ({s['version_req']}): {s['content'][:500]}")
+
+            # 3. 사용자 메모/지적사항 검색
+            if query_memos:
+                memo_results = query_memos(user_request, n_results=3)
+                if memo_results and memo_results.get("documents"):
+                    rag_context.append("### 사용자 지적사항 및 메모")
+                    for doc in memo_results["documents"][0]:
+                        rag_context.append(f"- {doc}")
+        except Exception as rag_err:
+            get_logger().warning(f"RAG search failed or timed out: {rag_err}")
+
+        rag_text = "\n".join(rag_context)
+
         # 메시지 구성
         from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
         messages = [SystemMessage(content=SYSTEM_PROMPT)]
+
+        if rag_text:
+            messages.append(SystemMessage(content=f"## 관련 지식 베이스 (RAG)\n{rag_text}"))
 
         if previous_result:
             result_context = {

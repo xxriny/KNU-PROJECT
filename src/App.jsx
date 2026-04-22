@@ -30,7 +30,7 @@ import {
   ShieldCheck, Layers, Globe, Database,
   House, Activity, ChevronDown, Code2, X,
   Clock3, Settings, PanelRightClose, PanelRightOpen,
-  ChevronRight, Library
+  ChevronRight, Library, StickyNote, Bot, Trash2
 } from "lucide-react";
 
 
@@ -38,38 +38,82 @@ import {
 const ICON_PANELS = [
   { id: "home", label: "Home", Icon: House, group: null, color: "text-white", bg: "bg-slate-500/10" },
   { id: "progress", label: "Progress", Icon: Activity, group: null, color: "text-yellow-400", bg: "bg-yellow-500/10" },
-  { id: "chat", label: "AI 채팅", Icon: MessageSquare, group: null, color: "text-purple-400", bg: "bg-purple-500/10" },
   { id: "overview", label: "Overview", Icon: LayoutDashboard, group: "pm", color: "text-blue-400", bg: "bg-blue-500/10" },
-  { id: "rtm", label: "RTM & Stack", Icon: Table2, group: "pm", color: "text-cyan-400", bg: "bg-cyan-500/10" },
+  { id: "rtm", label: "RTM", Icon: Table2, group: "pm", color: "text-cyan-400", bg: "bg-cyan-500/10" },
   { id: "context", label: "PM Report", Icon: FileText, group: "pm", color: "text-green-400", bg: "bg-green-500/10" },
   { id: "sa_overview", label: "QA Report", Icon: ShieldCheck, group: "sa", color: "text-amber-400", bg: "bg-amber-500/10" },
   { id: "sa_components", label: "Components", Icon: Layers, group: "sa", color: "text-indigo-400", bg: "bg-indigo-500/10" },
   { id: "sa_api", label: "API Spec", Icon: Globe, group: "sa", color: "text-teal-400", bg: "bg-teal-500/10" },
   { id: "sa_db", label: "Database", Icon: Database, group: "sa", color: "text-rose-400", bg: "bg-rose-500/10" },
+  { id: "memo", label: "Memos", Icon: StickyNote, group: null, color: "text-amber-300", bg: "bg-amber-500/10" },
 ];
 
+const THEME_MAP = {
+  slate: { bg: "bg-slate-50/50", activeBg: "bg-slate-100", text: "text-slate-700", activeText: "text-slate-900", border: "border-slate-100", iconBg: "bg-slate-500/10" },
+  blue: { bg: "bg-blue-50/50", activeBg: "bg-blue-100/60", text: "text-blue-700", activeText: "text-blue-800", border: "border-blue-100", iconBg: "bg-blue-500/10" },
+  sky: { bg: "bg-sky-50/50", activeBg: "bg-sky-100/60", text: "text-sky-600", activeText: "text-sky-800", border: "border-sky-100", iconBg: "bg-sky-500/10" },
+  yellow: { bg: "bg-yellow-50/50", activeBg: "bg-yellow-100/60", text: "text-yellow-700", activeText: "text-yellow-800", border: "border-yellow-100", iconBg: "bg-yellow-500/10" },
+  cyan: { bg: "bg-cyan-50/50", activeBg: "bg-cyan-100/60", text: "text-cyan-700", activeText: "text-cyan-800", border: "border-cyan-100", iconBg: "bg-cyan-500/10" },
+  green: { bg: "bg-green-50/50", activeBg: "bg-green-100/60", text: "text-green-700", activeText: "text-green-800", border: "border-green-100", iconBg: "bg-green-500/10" },
+  amber: { bg: "bg-amber-50/50", activeBg: "bg-amber-100/60", text: "text-amber-700", activeText: "text-amber-800", border: "border-amber-100", iconBg: "bg-amber-500/10" },
+  indigo: { bg: "bg-indigo-50/50", activeBg: "bg-indigo-100/60", text: "text-indigo-700", activeText: "text-indigo-800", border: "border-indigo-100", iconBg: "bg-indigo-500/10" },
+  teal: { bg: "bg-teal-50/50", activeBg: "bg-teal-100/60", text: "text-teal-700", activeText: "text-teal-800", border: "border-teal-100", iconBg: "bg-teal-500/10" },
+  rose: { bg: "bg-rose-50/50", activeBg: "bg-rose-100/60", text: "text-rose-700", activeText: "text-rose-800", border: "border-rose-100", iconBg: "bg-rose-500/10" },
+};
+
 function StudioCard({ id, label, Icon, color, bg, isActive, isDisabled, onClick, isDarkMode }) {
+  // 아이콘 색상 추출 및 보정
+  let colorName = color.split("-")[1] || "slate";
+  
+  // Home(white)이나 특정 예외 처리
+  if (id === "home") colorName = "slate";
+  else if (id === "memo") colorName = "yellow";
+  else if (id === "rtm") colorName = "sky";
+  else if (id === "overview") colorName = "indigo";
+  else if (id === "sa_overview") colorName = "amber";
+  else if (colorName === "white") colorName = "slate";
+
+  const theme = THEME_MAP[colorName] || THEME_MAP.slate;
+  const themeColor = isDarkMode ? color : theme.text;
+
   return (
     <button
       onClick={onClick}
       disabled={isDisabled}
-      className={`relative group flex flex-col items-center justify-center p-4 rounded-2xl border transition-colors duration-200 ${isActive
-        ? "glass-card border-[var(--accent)] shadow-[0_0_20px_rgba(56,189,248,0.15)] bg-[var(--accent)]/5"
+      className={`relative group flex flex-col items-start p-3.5 h-[90px] rounded-2xl border transition-all duration-300 ${isActive
+        ? (isDarkMode 
+            ? "bg-blue-600/15 border-blue-500/50 shadow-[0_0_20px_rgba(56,189,248,0.1)]" 
+            : `${theme.activeBg} ${theme.border.replace("100", "300")} shadow-sm`)
         : isDisabled
-          ? "opacity-20 grayscale cursor-not-allowed border-transparent"
-          : `border-white/5 hover:border-white/10 ${isDarkMode ? "bg-white/5" : "bg-slate-50 border-slate-100 shadow-sm"}`
+          ? "opacity-10 grayscale cursor-not-allowed border-transparent"
+          : isDarkMode 
+            ? `bg-white/5 border-white/5 hover:bg-white/10` 
+            : `${theme.bg} ${theme.border} hover:${theme.activeBg} hover:shadow-md`
         }`}
     >
-      <div className={`w-10 h-10 rounded-xl ${bg} flex items-center justify-center mb-2`}>
-        <Icon size={20} className={color} />
+      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mb-auto transition-transform group-hover:scale-110 ${
+        isDarkMode ? bg : theme.iconBg.replace("500/10", "500/30")
+      }`}>
+        <Icon size={16} className={themeColor} />
       </div>
-      <span className={`text-[11px] font-bold tracking-tight uppercase ${isActive ? "text-[var(--accent)]" : "text-slate-500"}`}>
-        {label}
-      </span>
+
+      <div className="w-full flex items-center justify-between gap-2 mt-2">
+        <span className={`text-[13px] font-bold tracking-tight text-left leading-snug break-keep transition-colors ${
+          isActive 
+            ? (isDarkMode ? "text-blue-400" : theme.activeText) 
+            : (isDarkMode ? "text-slate-200 group-hover:text-white" : theme.text)
+        }`}>
+          {label}
+        </span>
+        <ChevronRight size={14} className={`shrink-0 transition-transform group-hover:translate-x-1 ${
+          isActive 
+            ? (isDarkMode ? "text-blue-400" : theme.activeText) 
+            : (isDarkMode ? "text-slate-600" : theme.text.replace("700", "400"))
+        }`} />
+      </div>
+
       {isActive && (
-        <div
-          className="absolute inset-0 rounded-2xl border border-[var(--accent)]/30 pointer-events-none"
-        />
+        <div className="absolute inset-0 rounded-2xl border border-blue-500/20 pointer-events-none" />
       )}
     </button>
   );
@@ -91,6 +135,12 @@ export default function App() {
     thinkingLog,
     resultData,
     sa_artifacts,
+    userComments,
+    addComment,
+    syncMemos,
+    projectFolder,
+    selectedMode,
+    selectAndScanFolder,
   } = useAppStore();
 
 
@@ -98,6 +148,7 @@ export default function App() {
   const [showSessions, setShowSessions] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [isStudioOpen, setIsStudioOpen] = useState(true);
+  const [showSidebarChat, setShowSidebarChat] = useState(false);
 
   const activeOutputId = activeViewportTab?.kind === "output" ? activeViewportTab.id : null;
   const isCodeView = activeViewportTab?.kind === "code";
@@ -136,31 +187,7 @@ export default function App() {
 
   // 중앙 콘텐츠 렌더러
   const renderCenter = () => {
-    // 우측 아이콘 패널이 열려 있으면 → 그걸 중앙에 표시
-    if (activeIconPanel) {
-      if (activeIconPanel === "home") return <HomeScreen />;
-      if (activeIconPanel === "progress") return <PipelineProgress />;
-      if (activeIconPanel === "chat") {
-        return (
-          <PanelWrapper title="AI 채팅" onClose={() => setActiveIconPanel(null)}>
-            <ChatPanel />
-          </PanelWrapper>
-        );
-      }
-      if (showSessions) {
-        return (
-          <PanelWrapper title="세션" onClose={() => setShowSessions(false)}>
-            <SessionPanel />
-          </PanelWrapper>
-        );
-      }
-      return (
-        <PanelWrapper title={ICON_PANELS.find(p => p.id === activeIconPanel)?.label || ""} onClose={() => setActiveIconPanel(null)}>
-          <ResultViewer tabId={activeIconPanel} />
-        </PanelWrapper>
-      );
-    }
-    // 세션 패널
+    // 세션 패널 우선 렌더링
     if (showSessions) {
       return (
         <PanelWrapper title="세션" onClose={() => setShowSessions(false)}>
@@ -168,11 +195,22 @@ export default function App() {
         </PanelWrapper>
       );
     }
-    // 설정 패널
+    // 설정 패널 우선 렌더링
     if (showSettingsModal) {
       return (
         <PanelWrapper title="설정" onClose={() => setShowSettingsModal(false)}>
           <SettingsPanel />
+        </PanelWrapper>
+      );
+    }
+
+    // 우측 아이콘 패널이 열려 있으면 → 그걸 중앙에 표시
+    if (activeIconPanel) {
+      if (activeIconPanel === "home") return <HomeScreen />;
+      if (activeIconPanel === "progress") return <PipelineProgress />;
+      return (
+        <PanelWrapper title={ICON_PANELS.find(p => p.id === activeIconPanel)?.label || ""} onClose={() => setActiveIconPanel(null)}>
+          <ResultViewer tabId={activeIconPanel} />
         </PanelWrapper>
       );
     }
@@ -197,9 +235,9 @@ export default function App() {
         hasSaData={hasSaData}
         resultData={resultData}
         showSessions={showSessions}
-        setShowSessions={(v) => { setShowSessions(v); setActiveIconPanel(null); setShowSettingsModal(false); }}
+        setShowSessions={(v) => { setShowSessions(v); setShowSettingsModal(false); }}
         showSettings={showSettingsModal}
-        setShowSettings={(v) => { setShowSettingsModal(v); setActiveIconPanel(null); setShowSessions(false); }}
+        setShowSettings={(v) => { setShowSettingsModal(v); setShowSessions(false); }}
       />
 
       {/* 메인 영역 */}
@@ -253,92 +291,128 @@ export default function App() {
               </GlobalErrorBoundary>
             </div>
           </Panel>
+        </PanelGroup>
 
-          {/* Right: Studio Sidebar (Collapsible) */}
-          <div
-            className={`relative h-full flex flex-col border-l border-[var(--border)] overflow-hidden transition-all duration-500 ${
-              isStudioOpen ? "w-[340px]" : "w-[72px]"
-            } ${isDarkMode ? "bg-[#13171F]" : "bg-transparent"}`}
-          >
-            {/* Studio Header */}
-            <div className={`h-14 flex items-center justify-center shrink-0 border-b ${
-              isDarkMode ? "border-white/5" : "border-[var(--border)]"
+        {/* Right: Studio Sidebar (Collapsible) */}
+        <div
+          className={`relative h-full flex flex-col border-l border-[var(--border)] overflow-hidden transition-all duration-250 ease-out ${isStudioOpen ? "w-[360px]" : "w-[72px]"
+            } ${isDarkMode ? "bg-[#0F1219]" : "bg-transparent"}`}
+        >
+          {/* Studio Header */}
+          <div className={`h-14 flex items-center justify-center shrink-0 border-b ${isDarkMode ? "border-white/5" : "border-[var(--border)]"
             } ${isStudioOpen ? "px-6 !justify-between" : "w-full"}`}>
-              {isStudioOpen ? (
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">Workbench</span>
-                  <h3 className={`text-[15px] font-black tracking-tight ${isDarkMode ? "text-gradient" : "text-blue-600"}`}>STUDIO</h3>
-                </div>
-              ) : null}
-              <button
-                onClick={() => setIsStudioOpen(!isStudioOpen)}
-                className={`transition-all flex items-center justify-center rounded-xl ${
-                  isStudioOpen ? "w-10 h-10" : "w-full h-14"
+            {isStudioOpen ? (
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">Workbench</span>
+                <h3 className={`text-[15px] font-black tracking-tight ${isDarkMode ? "text-gradient" : "text-blue-600"}`}>스튜디오</h3>
+              </div>
+            ) : null}
+            <button
+              onClick={() => {
+                if (showSidebarChat) {
+                  setShowSidebarChat(false);
+                } else {
+                  const newState = !isStudioOpen;
+                  setIsStudioOpen(newState);
+                  if (!newState) setShowSidebarChat(false);
+                }
+              }}
+              className={`transition-all flex items-center justify-center rounded-xl ${isStudioOpen ? "w-10 h-10" : "w-full h-14"
                 } ${isDarkMode ? "hover:bg-white/5 text-slate-400 hover:text-white" : "hover:bg-black/5 text-slate-600"
-                  }`}
-              >
-                {isStudioOpen ? <PanelRightClose size={20} /> : <PanelRightOpen size={20} />}
-              </button>
-            </div>
+                }`}
+            >
+              {showSidebarChat ? (
+                <X size={18} />
+              ) : isStudioOpen ? (
+                <PanelRightClose size={20} />
+              ) : (
+                <PanelRightOpen size={20} />
+              )}
+            </button>
+          </div>
 
-            {/* Studio Content */}
-            <div className={`flex-1 overflow-x-hidden ${isStudioOpen ? "overflow-y-auto custom-scrollbar" : "overflow-y-hidden"}`}>
-              {isStudioOpen ? (
-                <div className="p-5 space-y-6">
-                  <div className="grid grid-cols-2 gap-3">
-                    {ICON_PANELS.map((panel) => {
-                      const isDisabled = (panel.group === "pm" && !resultData) || (panel.group === "sa" && !hasSaData);
-                      const isActive = activeIconPanel === panel.id;
-                      return (
-                        <StudioCard
-                          key={panel.id}
-                          {...panel}
-                          isDarkMode={isDarkMode}
-                          isActive={isActive}
-                          isDisabled={isDisabled}
-                          onClick={() => !isDisabled && handleIconPanel(panel.id)}
-                        />
-                      );
-                    })}
-                  </div>
-
-                  {/* Placeholder for future bottom content */}
-                  <div className="mt-10 pt-10 border-t border-white/5 opacity-10">
-                    <div className="flex flex-col items-center gap-3">
-                      <div className="w-12 h-1 bg-slate-700 rounded-full" />
-                      <div className="w-20 h-1 bg-slate-700 rounded-full" />
+          {/* Studio Content */}
+          <div className="flex-1 flex flex-col overflow-hidden relative">
+            {isStudioOpen ? (
+              <>
+                {showSidebarChat ? (
+                  /* Chat UI inside Sidebar */
+                  <div className="flex-1 flex flex-col h-full bg-[#0F1219] absolute inset-0 z-10 shadow-[-10px_0_30px_rgba(0,0,0,0.3)]">
+                    <div className="flex-1 min-h-0 relative">
+                      <ChatPanel />
                     </div>
                   </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center py-4 gap-4 w-full">
-                  <div className="w-10 border-t border-white/5 my-1" />
-                  {ICON_PANELS.map((panel) => {
-                    const isDisabled = (panel.group === "pm" && !resultData) || (panel.group === "sa" && !hasSaData);
-                    const isActive = activeIconPanel === panel.id;
-                    return (
-                      <div key={panel.id} className="w-full flex justify-center">
-                        <button
-                          onClick={() => !isDisabled && handleIconPanel(panel.id)}
-                          disabled={isDisabled}
-                          title={panel.label}
-                          className={`w-12 h-12 flex items-center justify-center rounded-xl transition-all ${isActive
-                            ? "bg-[var(--accent)]/20 text-[var(--accent)] shadow-glow"
-                            : isDisabled
-                              ? "text-slate-700 opacity-20 cursor-not-allowed"
-                              : "text-slate-500 hover:text-white hover:bg-white/10"
-                            }`}
-                        >
-                          <panel.Icon size={20} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+                ) : (
+                  <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar pb-24">
+                    {/* Workbench Grid */}
+                    <div className="p-4 grid grid-cols-2 gap-3 shrink-0">
+                      {ICON_PANELS.map((panel) => {
+                        const isDisabled = (panel.group === "pm" && !resultData) || (panel.group === "sa" && !hasSaData);
+                        const isActive = activeIconPanel === panel.id;
+                        return (
+                          <StudioCard
+                            key={panel.id}
+                            {...panel}
+                            isDarkMode={isDarkMode}
+                            isActive={isActive}
+                            isDisabled={isDisabled}
+                            onClick={() => !isDisabled && handleIconPanel(panel.id)}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="flex-1 flex flex-col items-center py-4 gap-4 w-full overflow-y-auto custom-scrollbar pb-24">
+                <div className="w-10 border-t border-white/5 my-1" />
+                {ICON_PANELS.map((panel) => {
+                  const isDisabled = (panel.group === "pm" && !resultData) || (panel.group === "sa" && !hasSaData);
+                  const isActive = activeIconPanel === panel.id;
+                  return (
+                    <div key={panel.id} className="w-full flex justify-center">
+                      <button
+                        onClick={() => !isDisabled && handleIconPanel(panel.id)}
+                        disabled={isDisabled}
+                        title={panel.label}
+                        className={`w-12 h-12 flex items-center justify-center rounded-xl transition-all ${isActive
+                          ? "bg-[var(--accent)]/20 text-[var(--accent)] shadow-glow"
+                          : isDisabled
+                            ? "text-slate-700 opacity-20 cursor-not-allowed"
+                            : "text-slate-500 hover:text-white hover:bg-white/10"
+                          }`}
+                      >
+                        <panel.Icon size={20} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Floating Bot FAB - Only visible when chat is closed */}
+            {!showSidebarChat && (
+              <div className="absolute bottom-10 left-0 right-0 flex justify-center pointer-events-none z-50 animate-in fade-in duration-300">
+                <button
+                  onClick={() => {
+                    if (!isStudioOpen) {
+                      setIsStudioOpen(true);
+                      setShowSidebarChat(true);
+                    } else {
+                      setShowSidebarChat(true);
+                    }
+                  }}
+                  className="pointer-events-auto flex items-center justify-center w-12 h-12 rounded-full transition-all hover:scale-110 shadow-[0_10px_30_rgba(0,0,0,0.5)] bg-gradient-to-tr from-blue-600 to-indigo-500 text-white"
+                  title="AI 어시스턴트"
+                >
+                  <Bot size={24} className="drop-shadow-md" />
+                </button>
+              </div>
+            )}
           </div>
-        </PanelGroup>
+        </div>
+
       </div>
 
       {/* StatusBar */}

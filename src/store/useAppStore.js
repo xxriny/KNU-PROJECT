@@ -283,6 +283,77 @@ const useAppStore = create((set, get) => {
     },
 
     // ═══════════════════════════════════════
+    //  사용자 피드백 (댓글 및 메모)
+    // ═══════════════════════════════════════
+    userComments: [],
+
+    syncMemos: async () => {
+      const { backendPort, currentSessionId } = get();
+      if (!backendPort) return;
+      try {
+        const url = currentSessionId
+          ? `http://127.0.0.1:${backendPort}/api/memos?session_id=${currentSessionId}`
+          : `http://127.0.0.1:${backendPort}/api/memos`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.status === "ok") {
+          const formatted = data.memos.map(m => ({
+            id: m.id,
+            text: m.text,
+            selectedText: m.metadata.selected_text,
+            section: m.metadata.section,
+            createdAt: Date.now(), // dummy for now
+          }));
+          set({ userComments: formatted });
+        }
+      } catch (e) {
+        console.error("[MemoSync] Failed:", e);
+      }
+    },
+
+    addComment: async (comment) => {
+      const { backendPort, currentSessionId } = get();
+      set((state) => ({
+        userComments: [...state.userComments, { id: "temp_" + Date.now(), ...comment, createdAt: Date.now() }]
+      }));
+      debouncedSave();
+
+      if (backendPort && currentSessionId) {
+        try {
+          await fetch(`http://127.0.0.1:${backendPort}/api/memos`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session_id: currentSessionId,
+              text: comment.text,
+              selected_text: comment.selectedText || "",
+              section: comment.section || "Global"
+            }),
+          });
+          get().syncMemos();
+        } catch (e) {
+          console.error("[MemoAdd] Backend failed:", e);
+        }
+      }
+    },
+
+    removeComment: async (id) => {
+      const { backendPort } = get();
+      set((state) => ({
+        userComments: state.userComments.filter(c => c.id !== id)
+      }));
+      debouncedSave();
+
+      if (backendPort && !id.startsWith("temp_")) {
+        try {
+          await fetch(`http://127.0.0.1:${backendPort}/api/memos/${id}`, { method: "DELETE" });
+        } catch (e) {
+          console.error("[MemoDelete] Backend failed:", e);
+        }
+      }
+    },
+
+    // ═══════════════════════════════════════
     //  채팅
     // ═══════════════════════════════════════
     chatHistory: [],
@@ -321,7 +392,7 @@ const useAppStore = create((set, get) => {
         const res = await fetch(`http://127.0.0.1:${backendPort}/api/scan-folder`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: folderPath }),
+          body: JSON.stringify({ path: folderPath, max_depth: 3 }),
         });
         const data = await res.json();
         if (data.status === "ok") {
@@ -347,7 +418,7 @@ const useAppStore = create((set, get) => {
         const res = await fetch(`http://127.0.0.1:${backendPort}/api/scan-folder`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: folderPath }),
+          body: JSON.stringify({ path: folderPath, max_depth: 3 }),
         });
         const data = await res.json();
         if (data.status === "ok") {
@@ -454,6 +525,7 @@ const useAppStore = create((set, get) => {
         thinkingLog: [],
         selectedMode: state.selectedMode,
         model: state.model,
+        userComments: [],
       };
 
       set((current) => {
@@ -488,6 +560,7 @@ const useAppStore = create((set, get) => {
             thinkingLog: state.thinkingLog,
             selectedMode: state.selectedMode,
             model: state.model,
+            userComments: state.userComments,
           }
           : session
       ));
@@ -525,6 +598,7 @@ const useAppStore = create((set, get) => {
         thinkingLog: session.thinkingLog || [],
         selectedMode: normalizeMode(session.selectedMode),
         model: session.model || get().model,
+        userComments: session.userComments || [],
       });
 
       if (session.projectFolder) {
@@ -615,6 +689,7 @@ const useAppStore = create((set, get) => {
       selectedFile: state.selectedFile,
       fileTree: state.fileTree,
       projectFolder: state.projectFolder,
+      userComments: [],
     })),
   };
 });

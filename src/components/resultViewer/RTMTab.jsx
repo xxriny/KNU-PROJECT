@@ -46,10 +46,10 @@ export default function RTMTab() {
                     : "border-slate-100 hover:bg-white"
                 }`}
               >
-                <td className="py-2 px-2 text-blue-500 font-mono text-[13px]">
+                <td className={`py-2 px-2 font-mono text-[13px] font-bold ${isDarkMode ? "text-blue-400" : "text-blue-700"}`}>
                   {fid}
                 </td>
-                <td className={`py-2 px-2 max-w-xs leading-relaxed ${isDarkMode ? "text-slate-300" : "text-slate-600"}`}>
+                <td className={`py-2 px-2 max-w-xs leading-relaxed ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
                   {req.description}
                 </td>
                 <td className="py-2 px-2">
@@ -59,28 +59,32 @@ export default function RTMTab() {
                         <span key={sIdx} className={`px-1.5 py-0.5 rounded text-[12px] border ${
                           isDarkMode 
                             ? "bg-slate-800 text-blue-300 border-slate-700" 
-                            : "bg-blue-50 text-blue-600 border-blue-100"
+                            : "bg-blue-50 text-blue-700 border-blue-200"
                         }`}>
                           {s.package}
                         </span>
                       ))
                     ) : (
-                      <span className="text-slate-600 text-[12px]">-</span>
+                      <span className={`${isDarkMode ? "text-slate-600" : "text-slate-400"} text-[12px]`}>-</span>
                     )}
                   </div>
                 </td>
                 <td className="py-2 px-2">
                   {assignedStacks.length > 0 ? (
-                    <StatusBadge status={assignedStacks[0].status} />
+                    <StatusBadge status={assignedStacks[0].status} isDarkMode={isDarkMode} />
                   ) : (
-                    <span className="text-slate-600 text-[12px]">-</span>
+                    <span className={`${isDarkMode ? "text-slate-600" : "text-slate-400"} text-[12px]`}>-</span>
                   )}
                 </td>
                 <td className="py-2 px-2">
                   <PriorityBadge priority={req.priority} />
                 </td>
                 <td className="py-2 px-2">
-                  <span className="px-1.5 py-0.5 rounded bg-slate-800/50 text-slate-500 text-[12px]">
+                  <span className={`px-1.5 py-0.5 rounded text-[12px] font-medium ${
+                    isDarkMode 
+                      ? "bg-slate-800 text-slate-400" 
+                      : "bg-slate-100 text-slate-600 border border-slate-200"
+                  }`}>
                     {req.category}
                   </span>
                 </td>
@@ -93,14 +97,22 @@ export default function RTMTab() {
   );
 }
 
-function StatusBadge({ status }) {
-  const styles = {
+function StatusBadge({ status, isDarkMode }) {
+  const darkStyles = {
     APPROVED: "bg-green-600/20 text-green-400 border-green-500/30",
     PENDING_CRAWL: "bg-yellow-600/20 text-yellow-400 border-yellow-500/30",
     REJECTED: "bg-red-600/20 text-red-400 border-red-500/30",
   };
+  const lightStyles = {
+    APPROVED: "bg-green-50 text-green-700 border-green-200",
+    PENDING_CRAWL: "bg-yellow-50 text-yellow-700 border-yellow-200",
+    REJECTED: "bg-red-50 text-red-700 border-red-200",
+  };
+
+  const currentStyles = isDarkMode ? darkStyles : lightStyles;
+  
   return (
-    <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium border ${styles[status] || "bg-slate-800 text-slate-500 border-slate-700"}`}>
+    <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold border ${currentStyles[status] || (isDarkMode ? "bg-slate-800 text-slate-500 border-slate-700" : "bg-slate-100 text-slate-500 border-slate-200")}`}>
       {status}
     </span>
   );
