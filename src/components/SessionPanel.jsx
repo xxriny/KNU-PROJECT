@@ -71,7 +71,7 @@ export default function SessionPanel() {
                         <Edit3 size={10} className="opacity-0 group-hover:opacity-40 text-blue-400" />
                       </div>
                     )}
-                    <p className="mt-1 text-[11px] font-medium text-slate-500 opacity-60">
+                    <p className={`mt-1 text-[11px] font-medium ${isDarkMode ? "text-slate-500" : "text-slate-500/80"}`}>
                       {new Date(session.createdAt).toLocaleString("ko", {
                         month: "2-digit",
                         day: "2-digit",

@@ -32,7 +32,11 @@ export default function SettingsPanel() {
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
           placeholder={backendHasKey ? ".env에서 자동 로드됨" : "API 키를 입력하세요..."}
-          className="w-full px-3 py-2 text-sm bg-black/20 border border-[var(--border)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] transition-colors"
+          className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:border-[var(--accent)] transition-colors ${
+            isDarkMode 
+              ? "bg-black/20 border-[var(--border)] text-[var(--text-primary)]" 
+              : "bg-slate-100/50 border-slate-200 text-slate-900"
+          } placeholder-[var(--text-muted)]`}
         />
         {backendHasKey && !apiKey && (
           <p className="text-[11px] text-[var(--text-muted)]">직접 입력 시 .env보다 우선 적용됩니다</p>
@@ -48,7 +52,11 @@ export default function SettingsPanel() {
         <select
           value={model}
           onChange={(e) => setModel(e.target.value)}
-          className="w-full px-3 py-2 text-sm bg-black/20 border border-[var(--border)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] transition-colors"
+          className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:border-[var(--accent)] transition-colors ${
+            isDarkMode 
+              ? "bg-black/20 border-[var(--border)] text-[var(--text-primary)]" 
+              : "bg-slate-100/50 border-slate-200 text-slate-900"
+          }`}
         >
           {availableModels.map((m) => (
             <option key={m} value={m}>{m}</option>

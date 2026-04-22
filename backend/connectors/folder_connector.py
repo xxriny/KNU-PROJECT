@@ -14,12 +14,13 @@ IGNORE = {
 }
 
 
-def scan_folder(root_path: str) -> dict:
+def scan_folder(root_path: str, max_depth: int = 3) -> dict:
     """
     폴더를 재귀 탐색하여 파일 트리를 반환.
 
     Args:
         root_path: 탐색 시작 절대 경로
+        max_depth: 탐색 최대 깊이 (기본 3)
 
     Returns:
         {
@@ -31,8 +32,11 @@ def scan_folder(root_path: str) -> dict:
     if not os.path.isdir(root_path):
         raise ValueError(f"유효하지 않은 경로: {root_path}")
 
-    def walk(path: str) -> list:
+    def walk(path: str, current_depth: int = 1) -> list:
         entries = []
+        if current_depth > max_depth:
+            return entries
+
         try:
             items = sorted(os.listdir(path), key=lambda x: (not os.path.isdir(os.path.join(path, x)), x.lower()))
         except PermissionError:
@@ -43,9 +47,10 @@ def scan_folder(root_path: str) -> dict:
                 continue
             full = os.path.join(path, name)
             if os.path.isdir(full):
-                children = walk(full)
+                children = walk(full, current_depth + 1)
                 entries.append({
                     "name": name,
+                    "kind": "directory", # 일관성을 위해 kind로 통일 (기존 로직 고려)
                     "type": "folder",
                     "path": full,
                     "children": children,
@@ -53,6 +58,7 @@ def scan_folder(root_path: str) -> dict:
             elif os.path.isfile(full):
                 entries.append({
                     "name": name,
+                    "kind": "file",
                     "type": "file",
                     "path": full,
                 })

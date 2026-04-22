@@ -195,15 +195,16 @@ def _build_pm_pipeline():
     workflow.add_edge("stack_embedding", "stack_planner")
     
     # PM Analysis 이후 Integration Fail 체크 후 Embedding 거쳐 종료
+    # PM Analysis 이후 Embedding을 거쳐 Integration Fail 체크 후 종료
+    workflow.add_edge("pm_analysis", "pm_embedding")
     workflow.add_conditional_edges(
-        "pm_analysis",
+        "pm_embedding",
         _route_pm_integration,
         {
-            "continue": "pm_embedding",
+            "continue": END,
             "error": END
         }
     )
-    workflow.add_edge("pm_embedding", END)
     
     return workflow.compile()
 
@@ -220,19 +221,18 @@ def _build_sa_pipeline():
     workflow.add_edge("sa_merge_project", "component_scheduler")
     workflow.add_edge("component_scheduler", "api_data_modeler")
     workflow.add_edge("api_data_modeler", "sa_analysis")
+    workflow.add_edge("sa_analysis", "sa_embedding")
 
-    # SA Analysis 이후 FAIL 시 설계 단계로 회귀 루프
+    # SA Embedding 이후 FAIL 시 설계 단계로 회귀 루프
     workflow.add_conditional_edges(
-        "sa_analysis",
+        "sa_embedding",
         _route_sa_analysis,
         {
             "loop": "component_scheduler",
-            "finish": "sa_embedding",
+            "finish": END,
             "error": END
         }
     )
-    
-    workflow.add_edge("sa_embedding", END)
     return workflow.compile()
 
 
@@ -311,18 +311,18 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     workflow.add_edge("sa_merge_project", "component_scheduler")
     workflow.add_edge("component_scheduler", "api_data_modeler")
     workflow.add_edge("api_data_modeler", "sa_analysis")
+    workflow.add_edge("sa_analysis", "sa_embedding")
 
     # [SA Feedback Loop]
     workflow.add_conditional_edges(
-        "sa_analysis",
+        "sa_embedding",
         _route_sa_analysis,
         {
             "loop": "component_scheduler",
-            "finish": "sa_embedding",
+            "finish": END,
             "error": END
         }
     )
-    workflow.add_edge("sa_embedding", END)
     
     return workflow.compile()
 

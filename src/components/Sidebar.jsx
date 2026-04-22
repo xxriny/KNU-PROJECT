@@ -52,24 +52,13 @@ export default function Sidebar() {
                 ? projectFolder.split(/[/\\]/).pop()
                 : "프로젝트"}
             </span>
-            <button
-              onClick={selectAndScanFolder}
-              title="폴더 선택"
-              className="p-0.5 hover:text-blue-400 transition-colors rounded"
-            >
-              <FolderOpen size={12} />
-            </button>
           </div>
 
           {fileTree.length === 0 ? (
             <div className="px-3 py-6 text-center">
-              <button
-                onClick={selectAndScanFolder}
-                className="flex flex-col items-center gap-2 mx-auto text-slate-600 hover:text-slate-400 transition-colors"
-              >
-                <FolderOpen size={28} />
-                <p className="text-[15px]">폴더를 선택하세요</p>
-              </button>
+              <div className="flex flex-col items-center gap-2 mx-auto text-slate-600">
+                <p className="text-[15px]">프로젝트 폴더가 없습니다</p>
+              </div>
             </div>
           ) : (
             <FileTreeNode nodes={fileTree} depth={0} />

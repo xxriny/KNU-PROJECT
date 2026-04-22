@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import useAppStore from "../../store/useAppStore";
 import {
   ReportHeader,
@@ -8,7 +8,7 @@ import {
   StatusBadge,
   AnimatedCounter
 } from "./SharedComponents";
-import { Tag, CheckCircle2, AlertTriangle, Info } from "lucide-react";
+import { Tag, CheckCircle2, AlertTriangle, Info, MessageSquarePlus, Play, X } from "lucide-react";
 
 export default function OverviewTab() {
   const {
@@ -25,12 +25,24 @@ export default function OverviewTab() {
     metadata,
     sa_output,
     currentSessionId,
-    sessions
+    sessions,
+    userComments,
+    addComment,
+    removeComment,
+    startRevision
   } = useAppStore();
 
   const currentSession = sessions.find(s => s.id === currentSessionId);
   const projectOverview = resultData?.project_overview || null;
   const pmOverview = resultData?.pm_overview || null;
+
+  const [commentInput, setCommentInput] = useState("");
+  const contentRef = useRef(null);
+
+  const handleVerify = (comment) => {
+    const userRequest = `사용자 지적사항 반영 및 재검증 요망: 기존 내용 "${comment.selectedText}" 에 대하여 "${comment.text}" 조치. 완료 후 애자일 파이프라인(PM/SA) 업데이트를 수행하세요.`;
+    startRevision(userRequest);
+  };
 
   const hasRenderableData = Boolean(
     projectOverview ||
@@ -55,7 +67,6 @@ export default function OverviewTab() {
   const inferredProjectName =
     (resultData?.source_dir || "").replace(/\\/g, "/").split("/").filter(Boolean).pop() || "미지정 프로젝트";
 
-  // 세션 별칭(Alias)이 최우선이고, 없으면 기존 메타데이터나 폴더명 사용
   const projectName = currentSession?.name || projectOverview?.project_name || metadata?.project_name || inferredProjectName;
   const actionType = projectOverview?.action_type || metadata?.action_type || resultData?.action_type || "ANALYSIS";
 
@@ -69,7 +80,6 @@ export default function OverviewTab() {
   const nextActionsUnsafe = projectOverview?.next_actions;
   const nextActionsList = Array.isArray(nextActionsUnsafe) ? nextActionsUnsafe : (typeof nextActionsUnsafe === "string" ? [nextActionsUnsafe] : []);
 
-  // 리소스 지표 표 데이터
   const usage = projectOverview?.usage_summary || {};
   const usageRows = [
     ["Total Tokens", usage.total_tokens?.toLocaleString() || "0", "전체 사용량"],
@@ -79,10 +89,10 @@ export default function OverviewTab() {
   ];
 
   return (
-    <div className={`h-full overflow-y-auto transition-colors duration-300 ${isDarkMode ? "bg-transparent text-slate-300" : "bg-white text-slate-800"}`}>
-      <div className="max-w-4xl mx-auto px-8 py-16 pb-32">
+    <div className={`relative h-full overflow-y-auto transition-colors duration-300 ${isDarkMode ? "bg-transparent text-slate-300" : "bg-white text-slate-800"}`}>
 
-        {/* 헤더 */}
+      <div ref={contentRef} className="max-w-4xl mx-auto px-8 py-16 pb-32 relative selectable">
+
         <ReportHeader
           title={`${projectName} 종합 분석 보고서`}
           subtitle={`소스 분석 및 ${actionType} 파이프라인 기반의 정밀 진단 결과`}
@@ -94,7 +104,6 @@ export default function OverviewTab() {
           }}
         />
 
-        {/* 1. 전략적 개요 */}
         <ReportSection number={1} title="전략적 개요 (Strategic Overview)">
           <p className="indent-4 mb-6">
             본 보고서는 {projectName} 시스템의 소스 코드와 요구사항 명세(RTM)를 바탕으로 수행된 자동화 분석 결과를 담고 있습니다.
@@ -110,7 +119,6 @@ export default function OverviewTab() {
           </div>
         </ReportSection>
 
-        {/* 2. 비즈니스 분석 인사이트 */}
         <ReportSection number={2} title="비즈니스 및 요구사항 분석 (PM Insights)">
           <p className="indent-4 mb-4">
             PM(Product Management) 분석 모듈은 시스템이 비즈니스 요구사항을 얼마나 충실히 반영하고 있는지, 그리고 구현된 기능들이 논리적으로 타당한지를 검증합니다.
@@ -151,7 +159,6 @@ export default function OverviewTab() {
           </div>
         </ReportSection>
 
-        {/* 3. QA 및 아키텍처 정합성 검증 */}
         <ReportSection number={3} title="품질 보증 및 아키텍처 정합성 (QA/SA)">
           <p className="indent-4 mb-6">
             SA(Software Architecture) 분석 모듈은 소스 코드로부터 추출된 실제 구조와 설계 의도 간의 정합성을 검증합니다.
@@ -177,7 +184,7 @@ export default function OverviewTab() {
           <div className={`p-8 rounded-2xl border-2 ${isDarkMode ? "bg-red-500/5 border-red-500/20 shadow-[0_0_30px_rgba(239,68,68,0.05)]" : "bg-red-50 border-red-200"}`}>
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
-                <AlertTriangle size={24} className="text-red-500" />
+                <AlertTriangle size={24} className={saStatus === "FAIL" ? "text-red-500" : "text-orange-500"} />
                 <h4 className={`text-xl font-black tracking-tight ${isDarkMode ? "text-white" : "text-slate-900"}`}>
                   Architecture Consistency Status
                 </h4>
@@ -188,7 +195,7 @@ export default function OverviewTab() {
             <div className="flex items-center justify-between mb-8 px-1">
               <span className={`text-[15px] font-medium ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>검증 결과 상태</span>
               <div className={`px-3 py-1 rounded-md text-[11px] font-black uppercase tracking-widest ${saStatus === "FAIL" ? "bg-red-500 text-white" : "bg-orange-500 text-white"}`}>
-                Critical Findings Detected
+                {saStatus === "FAIL" ? "Critical Findings Detected" : (saStatus === "WARNING" ? "Warnings Detected" : "Passed")}
               </div>
             </div>
 
@@ -196,7 +203,7 @@ export default function OverviewTab() {
               <div className={`pt-6 border-t ${isDarkMode ? "border-red-500/10" : "border-red-200"}`}>
                 <div className="text-[14px] font-black text-red-500 uppercase mb-5 tracking-tighter flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                  중요 설계 결함 상세 발췌
+                  설계 결함/지적사항 발췌 (드래그하여 댓글 달기 가능)
                 </div>
                 <ul className="space-y-4">
                   {saCriticalGaps.map((gap, i) => (
@@ -211,7 +218,6 @@ export default function OverviewTab() {
           </div>
         </ReportSection>
 
-        {/* 4. 권장 조치 사항 */}
         {nextActionsList.length > 0 && (
           <ReportSection number={4} title="향후 권장 조치 사항 (Recommendations)">
             <p className="mb-6">
@@ -232,9 +238,49 @@ export default function OverviewTab() {
           </ReportSection>
         )}
 
-        {/* 5. 비고: 리소스 최적화 지표 (표 형식) */}
+        {/* ===================== 피드백 및 검증 리스트 ===================== */}
+        {userComments.length > 0 && (
+          <ReportSection number={5} title="사용자 피드백 및 검증 (Feedback & Verification)">
+            <p className="text-sm opacity-60 mb-6">
+              지적사항에 대해 사용자가 드래그하여 작성한 피드백 목록입니다. '검증' 버튼을 눌러 Update 파이프라인을 실행하고 애자일하게 설계를 수정하세요.
+            </p>
+            <div className="space-y-4">
+              {userComments.map(comment => (
+                <div key={comment.id} className={`p-5 rounded-2xl border ${isDarkMode ? "bg-blue-900/10 border-blue-500/20" : "bg-blue-50 border-blue-200"} flex flex-col gap-3`}>
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <div className={`text-xs italic mb-2 px-3 py-2 border-l-2 ${isDarkMode ? "border-slate-600 bg-slate-800/50 text-slate-400" : "border-slate-300 bg-white/50 text-slate-500"}`}>
+                        원본: "{comment.selectedText}"
+                      </div>
+                      <p className={`font-medium ${isDarkMode ? "text-white" : "text-slate-800"}`}>
+                        <MessageSquarePlus size={14} className="inline mr-2 text-blue-500" />
+                        {comment.text}
+                      </p>
+                    </div>
+                    <button 
+                      onClick={() => removeComment(comment.id)}
+                      className="text-slate-400 hover:text-red-500 p-1"
+                      title="삭제"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <div className="flex justify-end mt-2">
+                    <button 
+                      onClick={() => handleVerify(comment)}
+                      className="flex items-center gap-2 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white text-sm font-bold py-2 px-4 rounded-lg shadow-md transition-all hover:scale-105"
+                    >
+                      <Play size={14} /> 검증 및 업데이트 반영
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </ReportSection>
+        )}
+
         <div className="mt-24 pt-12 border-t-2 border-dashed border-white/10">
-          <ReportSection number={5} title="비고: 리소스 최적화 및 비용 산출 지표">
+          <ReportSection number={userComments.length > 0 ? 6 : 5} title="비고: 리소스 최적화 및 비용 산출 지표">
             <p className="text-sm opacity-60 mb-6">
               본 분석 파이프라인 수행 과정에서 소모된 계산 자원 및 AI 모델 비용 산출 내역입니다. 이는 리소스 최적화 및 예산 관리의 근거 자료로 활용될 수 있습니다.
             </p>
@@ -246,7 +292,6 @@ export default function OverviewTab() {
           </ReportSection>
         </div>
 
-        {/* 꼬리말 */}
         <div className="mt-32 text-center">
           <div className="inline-block w-12 h-1 bg-blue-500/30 rounded-full mb-8" />
           <p className="text-[11px] font-black text-slate-500 uppercase tracking-[0.5em] select-none opacity-50">
