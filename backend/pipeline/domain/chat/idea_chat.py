@@ -10,15 +10,8 @@ from pipeline.core.utils import get_llm, parse_json_safe
 from observability.logger import get_logger
 from version import DEFAULT_MODEL
 
-# RAG Imports
-try:
-    from pipeline.domain.pm.nodes.pm_db import query_pm_artifacts
-    from pipeline.domain.pm.nodes.stack_db import search_tech_stacks
-    from pipeline.domain.pm.nodes.memo_db import query_memos
-except ImportError:
-    query_pm_artifacts = None
-    search_tech_stacks = None
-    query_memos = None
+# RAG Manager (Phase 2)
+from pipeline.core.rag_manager import rag_manager
 
 
 SYSTEM_PROMPT = """당신은 PM(프로젝트 매니저) AI 어시스턴트입니다.
@@ -69,34 +62,31 @@ def idea_chat_node(state: PipelineState) -> dict:
         if not user_request:
             return {"error": "메시지가 비어있습니다.", "current_step": "idea_chat"}
 
-        # ── RAG 검색 수행 ──
+        # ── RAG Manager 통합 검색 (Phase 2) ──
         rag_context = []
         try:
             # 1. 산출물 지식 검색 (PM/SA)
-            if query_pm_artifacts:
-                pm_sa_results = query_pm_artifacts(user_request, n_results=3)
-                if pm_sa_results and pm_sa_results.get("documents"):
-                    rag_context.append("### 관련 산출물 지식 (RTM/Components/API/DB)")
-                    for doc in pm_sa_results["documents"][0]:
-                        rag_context.append(f"- {doc[:1000]}")
+            pm_sa_results = rag_manager.adaptive_search(user_request, context_type="pm", n_results=3)
+            if pm_sa_results:
+                rag_context.append("### 관련 산출물 지식 (RTM/Components/API/DB)")
+                for res in pm_sa_results:
+                    rag_context.append(f"- {res['content'][:1000]}")
 
             # 2. 기술 스택 지식 검색
-            if search_tech_stacks:
-                stack_results = search_tech_stacks(user_request, top_k=2)
-                if stack_results:
-                    rag_context.append("### 관련 기술 스택 정보")
-                    for s in stack_results:
-                        rag_context.append(f"- {s['package_name']} ({s['version_req']}): {s['content'][:500]}")
+            stack_results = rag_manager.adaptive_search(user_request, context_type="stack", n_results=2)
+            if stack_results:
+                rag_context.append("### 관련 기술 스택 정보")
+                for s in stack_results:
+                    rag_context.append(f"- {s['package_name']} ({s['version_req']}): {s['content'][:500]}")
 
             # 3. 사용자 메모/지적사항 검색
-            if query_memos:
-                memo_results = query_memos(user_request, n_results=3)
-                if memo_results and memo_results.get("documents"):
-                    rag_context.append("### 사용자 지적사항 및 메모")
-                    for doc in memo_results["documents"][0]:
-                        rag_context.append(f"- {doc}")
+            memo_results = rag_manager.adaptive_search(user_request, context_type="memo", n_results=3)
+            if memo_results:
+                rag_context.append("### 사용자 지적사항 및 메모")
+                for res in memo_results:
+                    rag_context.append(f"- {res['content']}")
         except Exception as rag_err:
-            get_logger().warning(f"RAG search failed or timed out: {rag_err}")
+            get_logger().warning(f"RAG search via RAGManager failed: {rag_err}")
 
         rag_text = "\n".join(rag_context)
 
@@ -132,6 +122,7 @@ def idea_chat_node(state: PipelineState) -> dict:
         # LLM 호출
         llm = get_llm(api_key=api_key, model=model)
         response = llm.invoke(messages)
+            
         raw = response.content if hasattr(response, "content") else str(response)
 
         result = parse_json_safe(raw)

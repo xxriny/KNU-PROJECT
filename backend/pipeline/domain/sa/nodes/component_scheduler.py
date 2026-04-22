@@ -76,7 +76,8 @@ def component_scheduler_node(ctx: NodeContext) -> dict:
         model=ctx.model,
         schema=ComponentSchedulerOutput,
         system_prompt=SYSTEM_PROMPT,
-        user_msg=user_content
+        user_msg=user_content,
+        compress_prompt=True # Phase 3 enabled
     )
     
     output = res.parsed

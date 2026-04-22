@@ -45,7 +45,12 @@ def upsert_pm_artifact(
     collection = _get_collection()
     
     cid = chunk_id or f"pm_{session_id}_{artifact_type}"
-    content_text = artifact_data if isinstance(artifact_data, str) else str(artifact_data)
+    
+    import json
+    if isinstance(artifact_data, (dict, list)):
+        content_text = json.dumps(artifact_data, ensure_ascii=False)
+    else:
+        content_text = str(artifact_data)
     
     metadata = {
         "session_id": session_id,

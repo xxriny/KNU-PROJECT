@@ -126,10 +126,12 @@ def _chain_to_next_nodes(chain: tuple[str, ...]) -> dict[str, list[str]]:
 def _wrap_node_with_usage(node_fn):
     """노드 실행 후 발생한 토큰 사용량을 상태에 자동으로 누적하는 래퍼"""
     def wrapped(state: PipelineState):
-        # 1. 이전 기록 초기화
+        # 1. 이전 기록 초기화 및 세션 설정
         active_usage_log.set([])
         
-        # 2. 실제 노드 실행
+        from pipeline.core.utils import active_session_id
+        session_id = state.get("run_id", "")
+        active_session_id.set(session_id)
         result = node_fn(state)
         
         # 3. 발생한 사용량 수집
@@ -145,8 +147,9 @@ def _wrap_node_with_usage(node_fn):
             result["accumulated_usage"] = existing_usage + new_logs
             
             existing_cost = state.get("accumulated_cost", 0.0) or 0.0
-            new_cost = sum(log["cost"] for log in new_logs)
-            result["accumulated_cost"] = existing_cost + new_cost
+            # 캐시 절감액을 차감한 실제 지출 비용 합산
+            new_cost = sum(log["cost"] - log.get("savings", 0.0) for log in new_logs)
+            result["accumulated_cost"] = max(0.0, existing_cost + new_cost)
             
         return result
     return wrapped

@@ -84,7 +84,9 @@ def api_data_modeler_node(ctx: NodeContext) -> dict:
         model=ctx.model,
         schema=ApiDataModelerOutput,
         system_prompt=SYSTEM_PROMPT,
-        user_msg=user_content
+        user_msg=user_content,
+        compress_prompt=True,
+        compression_rate=0.7 # 스키마 설계를 위해 압축률 완화 (70% 유지)
     )
     
     output = res.parsed

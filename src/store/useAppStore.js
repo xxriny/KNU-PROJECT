@@ -600,11 +600,38 @@ const useAppStore = create((set, get) => {
         model: session.model || get().model,
         userComments: session.userComments || [],
       });
+      
+      // [Knowledge Restore] Phase 3: 세션 로드 시 자동으로 RAG 복구 시도
+      get().restoreSessionFromRag(id);
 
       if (session.projectFolder) {
         setTimeout(() => {
           get().ensureProjectFolderAccess(session.projectFolder);
         }, 0);
+      }
+    },
+
+    restoreSessionFromRag: async (id) => {
+      const { sessions, backendPort, _processResult } = get();
+      const session = sessions.find(s => s.id === id);
+      const runId = session?.resultData?.run_id || extractRunId(id);
+      
+      if (!runId || !backendPort) return;
+      
+      try {
+        console.log(`[RAG Restore] Syncing session ${runId}...`);
+        const res = await fetch(`http://127.0.0.1:${backendPort}/api/session/${runId}/restore`);
+        const resData = await res.json();
+        
+        if (resData.status === "ok") {
+          console.log(`[RAG Restore] Success for ${runId}:`, resData.data);
+          _processResult(resData.data);
+          return true;
+        }
+        return false;
+      } catch (err) {
+        console.error("[RAG Restore] Failed:", err);
+        return false;
       }
     },
 

@@ -4,8 +4,8 @@ import { Section, EmptyState } from "./SharedComponents";
 import { Globe, ArrowRight, Code } from "lucide-react";
 
 function SAApiTab() {
-  const { sa_output } = useAppStore();
-  const apis = sa_output?.apis || sa_output?.data?.apis || [];
+  const { sa_output, apis: storeApis } = useAppStore();
+  const apis = storeApis?.length > 0 ? storeApis : (sa_output?.apis || sa_output?.data?.apis || []);
 
   if (apis.length === 0) {
     return <EmptyState text="설계된 API가 없습니다." />;
