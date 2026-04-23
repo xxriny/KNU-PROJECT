@@ -93,5 +93,11 @@ class PromptCompressor:
             print(f"[PromptCompressor] Compression failed, returning original text: {e}")
             return text
 
-# 싱글톤 인스턴스 생성
-prompt_compressor = PromptCompressor()
+# 싱글톤 인스턴스 지연 생성 함수
+_compressor_instance = None
+
+def get_compressor():
+    global _compressor_instance
+    if _compressor_instance is None:
+        _compressor_instance = PromptCompressor()
+    return _compressor_instance

@@ -13,18 +13,17 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Generic, Type, TypeVar
 from pydantic import BaseModel, ValidationError
+from observability.logger import get_logger
 from pipeline.core.models.gemini_model import get_gemini_client, get_raw_genai_client
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from pipeline.core.cost_manager import calculate_cost
-from pipeline.core.compressor import prompt_compressor
+from pipeline.core.compressor import get_compressor
 from version import DEFAULT_MODEL, DEFAULT_TEMPERATURE, MAX_LLM_RETRIES
-from observability.logger import get_logger
-
-logger = get_logger()
 
 T = TypeVar("T", bound=BaseModel)
 _CACHE_LIMIT = 32
+logger = get_logger()
 
 # ── 비용 및 토큰 추적용 전역 컨텍스트 (Phase 0) ──────
 # 각 노드 실행 중 발생하는 모든 LLM 호출의 사용량을 임시 저장합니다.
@@ -132,7 +131,7 @@ def call_structured(
     # Phase 3: Prompt Compression
     if compress_prompt:
         # LLMLingua-2 기반 압축 실행 (가변 압축률 지원)
-        user_msg = prompt_compressor.compress_with_preservation(user_msg, target_token_rate=compression_rate)
+        user_msg = get_compressor().compress_with_preservation(user_msg, target_token_rate=compression_rate)
         logger.info(f"[PromptCompressor] Compressed with rate {compression_rate}")
 
     llm = get_llm(api_key, model, temperature)

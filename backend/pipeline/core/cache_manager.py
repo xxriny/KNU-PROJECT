@@ -8,7 +8,7 @@ logger = get_logger(__name__)
 
 class TokenCacheManager:
     """
-    LLM 토큰 캐싱 및 세션 관리자 (Phase 1)
+    LLM 토큰 캐싱 및 세션 관리자
     Gemini, OpenAI, Anthropic 모델 지원 및 비용 절감 추적.
     """
     def __init__(self, backend_type="gemini"):

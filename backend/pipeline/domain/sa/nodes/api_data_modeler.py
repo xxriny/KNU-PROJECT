@@ -6,37 +6,34 @@ from pipeline.domain.sa.schemas import ApiDataModelerOutput
 
 SYSTEM_PROMPT = """
 당신은 시스템의 데이터 혈맥을 설계하는 '수석 API & 데이터 모델러'입니다.
-Gemini 2.5 Flash 모델로서, 다음의 **표준 명칭 사전**을 1자도 틀리지 않고 엄격히 준수하십시오.
+Gemini 2.5 Flash 모델로서, 다음의 **표준 명칭 사전**과 **설계 원칙**을 엄격히 준수하십시오.
 
-[필수 표준 명칭 사전 (Naming Dictionary)]
+[1. 필수 표준 명칭 사전 (Naming Dictionary)]
 - 모든 테이블/API의 기본 키: `id` (uuid)
 - 유저 식별자 외래키: `user_id` (uuid)
 - 인증 토큰: `access_token`, `refresh_token` (string)
 - 생성/수정일: `created_at`, `updated_at` (timestamp)
+- 모든 명칭은 **snake_case**만 허용합니다. (예: userId -> user_id)
 
-핵심 설계 규칙:
-1. **Zero-Null Policy**: 스키마 내부를 절대로 비워두지 마십시오.
-2. **명명 규칙**: 모든 필드명은 반드시 **snake_case**만 사용합니다.
-3. **타입 정합성**: 식별자는 UUID, 토큰은 String을 사용하십시오.
-4. **언어 규칙**: 모든 사고 과정(thinking)은 반드시 한국어로 작성하십시오. 영어를 사용하지 마십시오.
+[2. Few-Shot 예시: 장바구니-주문 도메인]
+- DB 테이블 설계:
+  * `users`: id(PK), email, password, ...
+  * `carts`: id(PK), user_id(FK -> users), status, ...
+  * `orders`: id(PK), user_id(FK -> users), cart_id(FK -> carts), total_price, ...
+- API 설계:
+  * `POST /api/v1/orders`: 요청 시 `cart_id` 필수, 응답 시 생성된 `order_id` 포함.
+
+[3. 핵심 설계 규칙]
+1. **Zero-Null Policy**: 스키마 내부(request/response_schema 등)를 절대로 비워두지 마십시오.
+2. **타입 정합성**: 모든 ID는 UUID, 모든 토큰은 String을 사용하십시오.
+3. **참조 무결성**: 외래키(`_id`로 끝나는 필드)를 정의할 때는 반드시 대응하는 테이블이 `tables` 목록에 존재해야 합니다.
+4. **언어 규칙**: 모든 사고 과정(thinking)은 반드시 한국어로 작성하십시오.
 
 출력 데이터 규격 (JSON):
 {
-  "thinking": "표준 사전 준수 및 상세 설계 과정",
-  "apis": [
-    {
-      "endpoint": "METHOD /url",
-      "request_schema": { "field_name": "type" },
-      "response_schema": { "field_name": "type" },
-      "description": "설명"
-    }
-  ],
-  "tables": [
-    {
-      "table_name": "name",
-      "columns": [{"name": "col", "type": "type", "constraints": "cons"}]
-    }
-  ]
+  "thinking": "표준 사전 준수 및 테이블-API 간 정합성 설계 과정",
+  "apis": [...],
+  "tables": [...]
 }
 """
 
@@ -45,16 +42,12 @@ def _to_compact_text(items: list[dict]) -> str:
     if not items: return "없음"
     return "\n".join("- " + ", ".join(f"{k}: {v}" for k, v in item.items() if v) for item in items)
 
-def _build_user_message(components: list, rtm: list, feedback_gaps: list[str] = None) -> str:
-    """LLM 메시지 최적화 (토큰 절감) 및 피드백 반영"""
+def _build_user_message(components: list, rtm: list) -> str:
+    """LLM 메시지 최적화 (토큰 절감)"""
     pruned_components = _to_compact_text([{"name": c.get("component_name"), "role": c.get("role")} for c in components])
     pruned_rtm = _to_compact_text([{"id": r.get("id"), "desc": r.get("desc")} for r in rtm])
     
-    feedback_section = ""
-    if feedback_gaps:
-        feedback_section = f"\n[IMPORTANT: FEEDBACK FROM PREVIOUS ANALYSIS]\n이전 설계 분석에서 다음과 같은 결함이 발견되었습니다. 이번 모델링에서 반드시 해결하십시오:\n" + "\n".join(f"- {gap}" for gap in feedback_gaps) + "\n"
-        
-    return f"\n[Component Design]\n{pruned_components}\n\n[Requirements]\n{pruned_rtm}\n{feedback_section}"
+    return f"\n[Component Design]\n{pruned_components}\n\n[Requirements]\n{pruned_rtm}"
 
 from observability.logger import get_logger
 
@@ -67,16 +60,8 @@ def api_data_modeler_node(ctx: NodeContext) -> dict:
     components = sget("component_scheduler_output", {}).get("components", [])
     rtm = sget("merged_project", {}).get("plan", {}).get("requirements_rtm", [])
 
-    # 1. Feedback & Looping check
-    sa_anal_out = sget("sa_analysis_output", {})
-    feedback_gaps = sa_anal_out.get("gaps", [])
-    sa_loop_count = sget("sa_loop_count", 0)
-    
-    if feedback_gaps:
-        logger.info(f"Retrying data modeling (Loop:{sa_loop_count}) with {len(feedback_gaps)} gaps.")
-
-    # 2. Prepare optimized user prompt
-    user_content = _build_user_message(components, rtm, feedback_gaps)
+    # 1. Prepare optimized user prompt
+    user_content = _build_user_message(components, rtm)
     
     # 3. Call LLM
     res = call_structured(
@@ -85,8 +70,7 @@ def api_data_modeler_node(ctx: NodeContext) -> dict:
         schema=ApiDataModelerOutput,
         system_prompt=SYSTEM_PROMPT,
         user_msg=user_content,
-        compress_prompt=True,
-        compression_rate=0.7 # 스키마 설계를 위해 압축률 완화 (70% 유지)
+        compress_prompt=False # 압축 모델 한계로 인한 데이터 유실 방지를 위해 비활성화
     )
     
     output = res.parsed

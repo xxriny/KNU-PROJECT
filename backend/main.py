@@ -34,6 +34,8 @@ try:
 except ImportError:
     pass
 
+print(">>> [Python] Loading backend subsystems...", flush=True)
+
 # ── 계층 임포트 ──────────────────────────────────────────
 from transport.rest_handler import rest_router
 from transport.ws_handler import websocket_pipeline
