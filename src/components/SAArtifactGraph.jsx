@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import ReactFlow, {
+import {
+  ReactFlow,
   Background,
   Handle,
   MarkerType,
   Position,
   useEdgesState,
   useNodesState,
-} from "reactflow";
-import "reactflow/dist/style.css";
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 
 const FIT_VIEW_OPTIONS = { padding: 0.1, minZoom: 0.05, maxZoom: 1.5 };
 

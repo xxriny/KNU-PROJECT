@@ -38,14 +38,13 @@ import {
 const ICON_PANELS = [
   { id: "home", label: "Home", Icon: House, group: null, color: "text-white", bg: "bg-slate-500/10" },
   { id: "progress", label: "Progress", Icon: Activity, group: null, color: "text-yellow-400", bg: "bg-yellow-500/10" },
-  { id: "overview", label: "Overview", Icon: LayoutDashboard, group: "pm", color: "text-blue-400", bg: "bg-blue-500/10" },
   { id: "rtm", label: "RTM", Icon: Table2, group: "pm", color: "text-cyan-400", bg: "bg-cyan-500/10" },
-  { id: "context", label: "PM Report", Icon: FileText, group: "pm", color: "text-green-400", bg: "bg-green-500/10" },
-  { id: "sa_overview", label: "QA Report", Icon: ShieldCheck, group: "sa", color: "text-amber-400", bg: "bg-amber-500/10" },
-  { id: "sa_components", label: "Components", Icon: Layers, group: "sa", color: "text-indigo-400", bg: "bg-indigo-500/10" },
-  { id: "sa_api", label: "API Spec", Icon: Globe, group: "sa", color: "text-teal-400", bg: "bg-teal-500/10" },
+  { id: "stack", label: "Stack", Icon: Layers, group: "pm", color: "text-indigo-400", bg: "bg-indigo-500/10" },
+  { id: "sa_components", label: "Components", Icon: Layers, group: "sa", color: "text-teal-400", bg: "bg-teal-500/10" },
+  { id: "sa_api", label: "API Spec", Icon: Globe, group: "sa", color: "text-blue-400", bg: "bg-blue-500/10" },
   { id: "sa_db", label: "Database", Icon: Database, group: "sa", color: "text-rose-400", bg: "bg-rose-500/10" },
   { id: "memo", label: "Memos", Icon: StickyNote, group: null, color: "text-amber-300", bg: "bg-amber-500/10" },
+  { id: "overview", label: "Report", Icon: FileText, group: null, color: "text-green-400", bg: "bg-green-500/10" },
 ];
 
 const THEME_MAP = {

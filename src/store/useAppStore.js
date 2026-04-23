@@ -184,6 +184,8 @@ const useAppStore = create((set, get) => {
     sa_phase6: null,
     sa_phase7: null,
     sa_phase8: null,
+    sa_advisor_output: null,
+    tech_stacks: [],
     metadata: null,
     selectedMode: "create",
 
@@ -206,14 +208,38 @@ const useAppStore = create((set, get) => {
         return;
       }
 
-      set({
+      const nextResultData = {
         pipelineStatus: "done",
         pipelineType: inferPipelineTypeFromResult(data),
         ...spreadResultData(data),
         chatHistory: data.chat_history || get().chatHistory,
-        activeViewportTab: { kind: "output", id: "overview" },
-        lastOutputTab: "overview",
-      });
+        activeViewportTab: { kind: "output", id: "rtm" },
+        lastOutputTab: "rtm",
+      };
+
+      // [Auto-Memo] Advisor 추천 사항을 자동으로 메모에 추가
+      const advisor = data.sa_advisor_output || data.sa_output || {};
+      const recommendations = advisor.recommendations || [];
+      if (recommendations.length > 0) {
+        const existingTexts = new Set(get().userComments.map(c => c.text));
+        const newMemos = recommendations
+          .filter(r => !existingTexts.has(r.action))
+          .map(r => ({
+            id: `auto_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            text: r.action,
+            selectedText: r.target,
+            section: `Advisor (${r.priority})`,
+            createdAt: Date.now(),
+          }));
+        
+        if (newMemos.length > 0) {
+          set((state) => ({
+            userComments: [...state.userComments, ...newMemos]
+          }));
+        }
+      }
+
+      set(nextResultData);
       debouncedSave();
     },
 
