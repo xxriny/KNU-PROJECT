@@ -86,8 +86,12 @@ class _AnalysisFields(TypedDict, total=False):
     sa_arch_bundle: dict             # SA 최종 임베딩 대상 번들
     sa_merge_project_output: dict    # merge_project 노드 전용 출력
     component_scheduler_output: dict # component_scheduler 노드 전용 출력
-    api_data_modeler_output: dict    # api_data_modeler 노드 전용 출력
+    api_data_modeler_output: dict    # [DEPRECATED] api_modeler_output, db_schema_architect_output 사용 권장
+    api_modeler_output: dict         # api_modeler 노드 전용 출력 (APIs)
+    db_schema_architect_output: dict # db_schema_architect 노드 전용 출력 (Tables)
     sa_analysis_output: dict         # sa_analysis 노드 전용 출력
+    sa_advisor_output: dict          # sa_advisor 노드 수정 조언 출력
+    sa_unified_modeler_output: dict  # sa_unified_modeler 노드 전용 출력
     merged_project: dict             # merge_project가 생성한 단일 결합 입력
     merge_report: dict               # merge_project 판정/병합 리포트
 

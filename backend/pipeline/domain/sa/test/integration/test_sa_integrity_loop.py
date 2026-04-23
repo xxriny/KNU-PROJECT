@@ -10,7 +10,8 @@ if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
 from pipeline.domain.sa.nodes.component_scheduler import component_scheduler_node
-from pipeline.domain.sa.nodes.api_data_modeler import api_data_modeler_node
+from pipeline.domain.sa.nodes.api_modeler import api_modeler_node
+from pipeline.domain.sa.nodes.db_schema_architect import db_schema_architect_node
 from pipeline.domain.sa.nodes.sa_analysis import sa_analysis_node
 from pipeline.core.node_base import NodeContext
 from sa_integration_judge import judge_integration
@@ -52,11 +53,14 @@ def test_integrity_loop():
     state.update(component_scheduler_node(get_ctx(state)))
     
     # 2. API & Data Modeler
-    print(" - [2/3] Modeling API & Data (Phase 1 Optimized)...")
-    state.update(api_data_modeler_node(get_ctx(state)))
+    print(" - [2/4] Modeling API Interfaces...")
+    state.update(api_modeler_node(get_ctx(state)))
+    
+    print(" - [3/4] Architecting DB Schemas...")
+    state.update(db_schema_architect_node(get_ctx(state)))
     
     # 3. SA Analysis (Judge)
-    print(" - [3/3] Analyzing Architecture Quality (Pinpoint Feedback)...")
+    print(" - [4/4] Analyzing Architecture Quality (Pinpoint Feedback)...")
     state.update(sa_analysis_node(get_ctx(state)))
     
     final_bundle = state["sa_analysis_output"]

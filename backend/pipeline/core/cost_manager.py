@@ -9,11 +9,11 @@ from typing import Dict, Any
 # Vertex AI / AI Studio 표준 단가 데이터 (128k 컨텍스트 이하 기준)
 PRICING_MAP = {
     "gemini-2.5-flash": {
-        "input": 0.075,
+        "input": 0.1,
         "output": 0.30
     },
     "gemini-2.1-flash": {
-        "input": 0.075,
+        "input": 0.1,
         "output": 0.30
     },
     "gemini-3.1-pro-preview": {
@@ -21,7 +21,7 @@ PRICING_MAP = {
         "output": 5.00
     },
     "gemini-1.5-flash": {
-        "input": 0.075,
+        "input": 0.1,
         "output": 0.30
     },
     "gemini-1.5-pro": {
@@ -30,7 +30,7 @@ PRICING_MAP = {
     }
 }
 
-DEFAULT_PRICING = {"input": 0.075, "output": 0.30} # Flash 기준 폴백
+DEFAULT_PRICING = {"input": 0.1, "output": 0.30} # Flash 기준 폴백
 
 
 def calculate_cost(model_name: str, input_tokens: int, output_tokens: int) -> float:

@@ -76,15 +76,18 @@ export function StatusBadge({ status }) {
   );
 }
 
-export function Section({ title, icon, children }) {
+export function Section({ title, icon, children, rightElement }) {
   const { isDarkMode } = useAppStore();
   return (
     <div className={`rounded-lg p-4 border transition-all ${isDarkMode ? "bg-slate-900/50 border-slate-700/50" : "bg-white border-slate-200 shadow-sm"
       }`}>
-      <h4 className={`flex items-center gap-1.5 text-sm font-medium mb-3 ${isDarkMode ? "text-slate-400" : "text-slate-700"}`}>
-        {icon}
-        {title}
-      </h4>
+      <div className="flex items-center justify-between mb-3">
+        <h4 className={`flex items-center gap-1.5 text-sm font-medium ${isDarkMode ? "text-slate-400" : "text-slate-700"}`}>
+          {icon}
+          {title}
+        </h4>
+        {rightElement}
+      </div>
       {children}
     </div>
   );

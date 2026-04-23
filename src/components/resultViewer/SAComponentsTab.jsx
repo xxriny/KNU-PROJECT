@@ -11,8 +11,8 @@ function SAComponentsTab() {
     return <EmptyState text="설계된 컴포넌트가 없습니다." />;
   }
 
-  const frontend = components.filter(c => c.domain === "Frontend");
-  const backend = components.filter(c => c.domain === "Backend");
+  const frontend = components.filter(c => c.domain === "Frontend" || c.domain === "F");
+  const backend = components.filter(c => c.domain === "Backend" || c.domain === "B");
 
   const ComponentCard = ({ comp }) => (
     <div className="bg-slate-900/40 border border-slate-700/50 rounded-lg p-4 hover:border-blue-500/50 transition-colors">

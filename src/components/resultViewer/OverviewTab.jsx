@@ -8,7 +8,7 @@ import {
   StatusBadge,
   AnimatedCounter
 } from "./SharedComponents";
-import { Tag, CheckCircle2, AlertTriangle, Info, MessageSquarePlus, Play, X } from "lucide-react";
+import { Tag, CheckCircle2, AlertTriangle, Info, MessageSquarePlus, Play, X, ShieldCheck } from "lucide-react";
 
 export default function OverviewTab() {
   const {
@@ -24,6 +24,7 @@ export default function OverviewTab() {
     isDarkMode,
     metadata,
     sa_output,
+    sa_advisor_output,
     currentSessionId,
     sessions,
     userComments,
@@ -181,10 +182,10 @@ export default function OverviewTab() {
             ))}
           </div>
 
-          <div className={`p-8 rounded-2xl border-2 ${isDarkMode ? "bg-red-500/5 border-red-500/20 shadow-[0_0_30px_rgba(239,68,68,0.05)]" : "bg-red-50 border-red-200"}`}>
+          <div className={`p-8 rounded-2xl border ${isDarkMode ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200"}`}>
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
-                <AlertTriangle size={24} className={saStatus === "FAIL" ? "text-red-500" : "text-orange-500"} />
+                <ShieldCheck size={24} className={saStatus === "FAIL" ? "text-blue-500" : "text-amber-500"} />
                 <h4 className={`text-xl font-black tracking-tight ${isDarkMode ? "text-white" : "text-slate-900"}`}>
                   Architecture Consistency Status
                 </h4>
@@ -194,21 +195,21 @@ export default function OverviewTab() {
 
             <div className="flex items-center justify-between mb-8 px-1">
               <span className={`text-[15px] font-medium ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>검증 결과 상태</span>
-              <div className={`px-3 py-1 rounded-md text-[11px] font-black uppercase tracking-widest ${saStatus === "FAIL" ? "bg-red-500 text-white" : "bg-orange-500 text-white"}`}>
-                {saStatus === "FAIL" ? "Critical Findings Detected" : (saStatus === "WARNING" ? "Warnings Detected" : "Passed")}
+              <div className={`px-3 py-1 rounded-md text-[11px] font-black uppercase tracking-widest ${saStatus === "FAIL" ? "bg-blue-600/20 text-blue-400 border border-blue-500/30" : "bg-amber-600/20 text-amber-400 border border-amber-500/30"}`}>
+                {saStatus === "FAIL" ? "Validation Insights Detected" : (saStatus === "WARNING" ? "Observations Noted" : "Passed")}
               </div>
             </div>
 
             {saCriticalGaps.length > 0 && (
-              <div className={`pt-6 border-t ${isDarkMode ? "border-red-500/10" : "border-red-200"}`}>
-                <div className="text-[14px] font-black text-red-500 uppercase mb-5 tracking-tighter flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                  설계 결함/지적사항 발췌 (드래그하여 댓글 달기 가능)
+              <div className={`pt-6 border-t ${isDarkMode ? "border-white/5" : "border-slate-200"}`}>
+                <div className="text-[14px] font-black text-slate-500 uppercase mb-5 tracking-tighter flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-blue-500" />
+                  주요 아키텍처 체크포인트
                 </div>
                 <ul className="space-y-4">
                   {saCriticalGaps.map((gap, i) => (
-                    <li key={i} className={`flex gap-4 p-4 rounded-xl ${isDarkMode ? "bg-white/5" : "bg-white border border-red-100 shadow-sm"}`}>
-                      <span className="text-red-500 font-black text-lg select-none">!</span>
+                    <li key={i} className={`flex gap-4 p-4 rounded-xl ${isDarkMode ? "bg-white/5" : "bg-white border border-slate-100 shadow-sm"}`}>
+                      <span className="text-blue-500 font-black text-lg select-none">i</span>
                       <span className={`text-[17px] font-medium leading-relaxed ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>{gap}</span>
                     </li>
                   ))}
@@ -218,29 +219,72 @@ export default function OverviewTab() {
           </div>
         </ReportSection>
 
-        {nextActionsList.length > 0 && (
-          <ReportSection number={4} title="향후 권장 조치 사항 (Recommendations)">
-            <p className="mb-6">
-              분석 결과를 바탕으로 최적의 시스템 품질을 유지하기 위해 다음의 조치 사항을 권고합니다.
-            </p>
-            <div className="space-y-3 px-2">
-              {nextActionsList.map((action, idx) => (
-                <div key={idx} className={`group flex gap-4 p-4 rounded-2xl transition-all ${isDarkMode ? "hover:bg-white/5" : "hover:bg-slate-50 border border-transparent hover:border-slate-200"}`}>
-                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-500/10 text-blue-500 font-mono font-black text-xs shrink-0">
-                    {idx + 1}
-                  </div>
-                  <div className="flex-1 text-[15px] self-center">
-                    {typeof action === "string" ? action : String(action)}
-                  </div>
-                </div>
-              ))}
+        <ReportSection number={4} title="검증 및 품질 개선 조치 (QA & Improvement)">
+          <p className="mb-6">
+            품질 보증(QA) 관점에서 식별된 결함 및 보완 사항입니다. 시스템의 안정성을 위해 즉각적인 검토를 권장합니다.
+          </p>
+          
+          <div className="space-y-6">
+            {/* 4-1: QA 보완 사항 */}
+            <div className="space-y-3">
+              <h5 className="text-[13px] font-black uppercase text-blue-500/80 tracking-wider mb-2 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                4-1. QA 검증 기반 보완 사항
+              </h5>
+              {(sa_advisor_output?.qa_recommendations || []).length > 0 ? (
+                sa_advisor_output.qa_recommendations.map((rec, idx) => (
+                  <RecommendationCard key={idx} rec={rec} isDarkMode={isDarkMode} />
+                ))
+              ) : (
+                <p className="text-sm italic opacity-50 px-4">식별된 심각한 결함이 없습니다.</p>
+              )}
             </div>
-          </ReportSection>
-        )}
+
+            {/* 기타 권장 사항 (기존 nextActions) */}
+            {nextActionsList.length > 0 && (
+              <div className="space-y-3 pt-4 border-t border-dashed border-white/10">
+                <h5 className="text-[13px] font-black uppercase text-slate-500 tracking-wider mb-2">기타 개선 권고</h5>
+                {nextActionsList.map((action, idx) => (
+                  <div key={idx} className={`group flex gap-4 p-4 rounded-2xl transition-all ${isDarkMode ? "hover:bg-white/5" : "hover:bg-slate-50 border border-transparent hover:border-slate-200"}`}>
+                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-slate-500/10 text-slate-500 font-mono font-black text-xs shrink-0">
+                      {idx + 1}
+                    </div>
+                    <div className="flex-1 text-[15px] self-center">
+                      {typeof action === "string" ? action : String(action)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </ReportSection>
+
+        {/* 5: 아키텍처 설계 최적화 가이드 */}
+        <ReportSection number={5} title="아키텍처 설계 최적화 가이드 (Architect Advice)">
+          <p className="mb-6">
+            시니어 아키텍트가 제안하는 시스템 구조 최적화 및 확장성 고려 사항입니다.
+          </p>
+          {sa_advisor_output?.summary && (
+            <div className={`p-4 rounded-xl mb-6 ${isDarkMode ? "bg-indigo-500/5 border border-indigo-500/20" : "bg-indigo-50 border border-indigo-200"}`}>
+              <p className={`text-sm ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
+                {sa_advisor_output.summary}
+              </p>
+            </div>
+          )}
+          <div className="space-y-3">
+            {(sa_advisor_output?.arch_recommendations || []).length > 0 ? (
+              sa_advisor_output.arch_recommendations.map((rec, idx) => (
+                <RecommendationCard key={idx} rec={rec} isDarkMode={isDarkMode} />
+              ))
+            ) : (
+              <p className="text-sm italic opacity-50">추가적인 최적화 제안이 없습니다.</p>
+            )}
+          </div>
+        </ReportSection>
 
         {/* ===================== 피드백 및 검증 리스트 ===================== */}
         {userComments.length > 0 && (
-          <ReportSection number={5} title="사용자 피드백 및 검증 (Feedback & Verification)">
+          <ReportSection number={6} title="사용자 피드백 및 검증 (Feedback & Verification)">
             <p className="text-sm opacity-60 mb-6">
               지적사항에 대해 사용자가 드래그하여 작성한 피드백 목록입니다. '검증' 버튼을 눌러 Update 파이프라인을 실행하고 애자일하게 설계를 수정하세요.
             </p>
@@ -280,7 +324,7 @@ export default function OverviewTab() {
         )}
 
         <div className="mt-24 pt-12 border-t-2 border-dashed border-white/10">
-          <ReportSection number={userComments.length > 0 ? 6 : 5} title="비고: 리소스 최적화 및 비용 산출 지표">
+          <ReportSection number={7} title="비고: 리소스 최적화 및 비용 산출 지표">
             <p className="text-sm opacity-60 mb-6">
               본 분석 파이프라인 수행 과정에서 소모된 계산 자원 및 AI 모델 비용 산출 내역입니다. 이는 리소스 최적화 및 예산 관리의 근거 자료로 활용될 수 있습니다.
             </p>
@@ -299,6 +343,39 @@ export default function OverviewTab() {
           </p>
         </div>
 
+      </div>
+    </div>
+  );
+}
+
+function RecommendationCard({ rec, isDarkMode }) {
+  const priorityStyles = {
+    Critical: isDarkMode ? "border-blue-500/30 bg-blue-500/5 shadow-[0_0_15px_rgba(59,130,246,0.05)]" : "border-blue-200 bg-blue-50",
+    Warning: isDarkMode ? "border-amber-500/30 bg-amber-500/5" : "border-amber-200 bg-amber-50",
+    Info: isDarkMode ? "border-slate-500/30 bg-slate-500/5" : "border-slate-200 bg-slate-50",
+  };
+  const badgeStyles = {
+    Critical: "bg-blue-500 text-white",
+    Warning: "bg-amber-500 text-white",
+    Info: "bg-slate-500 text-white",
+  };
+  const style = priorityStyles[rec.priority] || priorityStyles.Info;
+  const badge = badgeStyles[rec.priority] || badgeStyles.Info;
+
+  return (
+    <div className={`p-4 rounded-xl border ${style} transition-all hover:shadow-md`}>
+      <div className="flex items-start gap-3">
+        <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider shrink-0 mt-0.5 ${badge}`}>
+          {rec.priority}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className={`text-sm font-bold mb-1 ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>
+            {rec.target}
+          </div>
+          <div className={`text-[13px] ${isDarkMode ? "text-slate-400" : "text-slate-600"} leading-relaxed`}>
+            {rec.action}
+          </div>
+        </div>
       </div>
     </div>
   );

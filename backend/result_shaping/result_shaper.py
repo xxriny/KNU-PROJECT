@@ -201,37 +201,72 @@ def shape_result(raw_result: dict) -> dict:
     # --- Compatibility Bridge: Map new modular SA nodes to existing phase-based logic ---
     sa_merge = sanitized.get("sa_merge_project_output") or {}
     sa_sched = sanitized.get("component_scheduler_output") or {}
-    sa_model = sanitized.get("api_data_modeler_output") or {}
-    sa_anal = sanitized.get("sa_analysis_output") or {}
+    sa_api_model = sanitized.get("api_modeler_output") or {}
+    sa_db_model = sanitized.get("db_schema_architect_output") or {}
+    sa_anal = sanitized.get("sa_advisor_output") or sanitized.get("sa_analysis_output") or {}
 
-    # Map sa_analysis to phase2 (Gaps) and phase3 (Feasibility)
+    # Map sa_advisor to phase2 (Gaps) and phase3 (Feasibility)
     sa_phase2: dict = {
         "status": sa_anal.get("status"),
         "gap_report": sa_anal.get("gaps", [])
     }
     sa_phase3: dict = {
         "status": sa_anal.get("status", "Pass"),
-        "reasons": [sa_anal.get("thinking", "")] if sa_anal.get("thinking") else []
+        "reasons": [sa_anal.get("summary", "")] if sa_anal.get("summary") else []
     }
     # Map scheduler to phase5 (Components)
     sa_phase5: dict = {
         "components": sa_sched.get("components", []),
         "mapped_requirements": [
-            {"REQ_ID": "REQ-101", "layer": c.get("domain"), "description": c.get("role")} # Dummy mapping for now
+            {"REQ_ID": "REQ-101", "layer": c.get("domain"), "description": c.get("role")}
             for c in sa_sched.get("components", [])
         ]
     }
     # Map modeler to phase7 (Interfaces)
+    sa_unified = sanitized.get("sa_unified_modeler_output") or {}
+    all_apis = sa_unified.get("apis", []) or sa_api_model.get("apis", [])
+    all_tables = sa_unified.get("tables", []) or sa_db_model.get("tables", [])
     sa_phase7: dict = {
         "interface_contracts": [
-            {"contract_id": f"IF-{i}", "interface_name": a.get("endpoint"), "input_spec": str(a.get("request_schema")), "output_spec": str(a.get("response_schema"))}
-            for i, a in enumerate(sa_model.get("apis", []))
+            {"contract_id": f"IF-{i}", "interface_name": a.get("endpoint", a.get("ep")), "input_spec": str(a.get("request_schema", a.get("rq"))), "output_spec": str(a.get("response_schema", a.get("rs")))}
+            for i, a in enumerate(all_apis)
         ]
     }
     
+    # ── Legacy Bridge for UI: 결합된 api_data_modeler_output 생성 ──
+    combined_model = {
+        "thinking": f"{sa_api_model.get('thinking', '')}\n{sa_db_model.get('thinking', '')}",
+        "apis": all_apis,
+        "tables": all_tables
+    }
+    sanitized["api_data_modeler_output"] = combined_model
+    
     sa_phase6: dict = {}
     sa_phase8: dict = {}
-    sa_output: dict = sa_anal
+    
+    # sa_output: advisor 결과 + expanded data (프론트엔드 탭용)
+    sa_output_data = sanitized.get("sa_output") or {}
+    if not sa_output_data.get("data"):
+        # sa_arch_bundle에서 expanded data를 가져옴
+        sa_bundle = sanitized.get("sa_arch_bundle") or {}
+        bundle_data = sa_bundle.get("data", {})
+        sa_output_data = {
+            **sa_anal,
+            "data": {
+                "components": bundle_data.get("components", sa_sched.get("components", [])),
+                "apis": bundle_data.get("apis", all_apis),
+                "tables": bundle_data.get("tables", all_tables),
+            }
+        }
+    sa_output = sa_output_data
+
+    # 프론트엔드 직접 접근용 키 추가
+    if not sanitized.get("components"):
+        sanitized["components"] = sa_output.get("data", {}).get("components", [])
+    if not sanitized.get("apis"):
+        sanitized["apis"] = sa_output.get("data", {}).get("apis", [])
+    if not sanitized.get("tables"):
+        sanitized["tables"] = sa_output.get("data", {}).get("tables", [])
 
     # Store in sanitized for compiler and UI compatibility
     sanitized["sa_phase2"] = sa_phase2

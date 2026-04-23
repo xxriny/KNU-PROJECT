@@ -14,13 +14,16 @@
     "backend": "cd backend && python main.py --port 8765"
   },
   "dependencies": {
+    "@dbml/core": "^7.1.1",
     "@monaco-editor/react": "^4.6.0",
+    "@tisoap/react-flow-smart-edge": "^4.0.1",
+    "@xyflow/react": "^12.10.2",
+    "elkjs": "^0.11.1",
     "framer-motion": "^12.38.0",
     "lucide-react": "^0.400.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-resizable-panels": "^2.1.0",
-    "reactflow": "^11.11.4",
     "zustand": "^4.5.0"
   },
   "devDependencies": {

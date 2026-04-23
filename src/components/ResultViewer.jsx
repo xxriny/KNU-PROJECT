@@ -8,8 +8,7 @@ import useAppStore from "../store/useAppStore";
 import { MessageSquarePlus, Bot, X } from "lucide-react";
 import OverviewTab from "./resultViewer/OverviewTab";
 import RTMTab from "./resultViewer/RTMTab";
-import TopologyTab from "./resultViewer/TopologyTab";
-import ContextTab from "./resultViewer/ContextTab";
+import StackTab from "./resultViewer/StackTab";
 import SAAnalysisTab from "./resultViewer/SAAnalysisTab";
 import SAComponentsTab from "./resultViewer/SAComponentsTab";
 import SAApiTab from "./resultViewer/SAApiTab";
@@ -19,8 +18,7 @@ import MemoManager from "./resultViewer/MemoManager";
 const TAB_COMPONENTS = {
   overview: OverviewTab,
   rtm: RTMTab,
-  topology: TopologyTab,
-  context: ContextTab,
+  stack: StackTab,
   sa_overview: SAAnalysisTab,
   sa_components: SAComponentsTab,
   sa_api: SAApiTab,

@@ -96,6 +96,8 @@ export const EMPTY_RESULT_FIELDS = {
   pm_warnings: [],
   tables: null,
   apis: null,
+  tech_stacks: [],
+  sa_advisor_output: null,
   metadata: null,
 };
 
@@ -131,7 +133,7 @@ export function spreadResultData(data) {
   
   // 검증 유틸リティ를 통한 안전한 데이터 추출
   const rtm = validateArray("requirements_rtm", pmBundle?.data?.rtm || data?.requirements_rtm || data?.raw_requirements);
-  const techStacks = validateArray("tech_stacks", pmBundle?.data?.tech_stacks || data?.stack_planner_output?.stack_mapping);
+  const techStacks = validateArray("tech_stacks", pmBundle?.data?.tech_stacks || data?.stack_planner_output?.stack_mapping || data?.stack_planner_output?.m);
   const pmWarnings = validateArray("pm_warnings", data?.pm_warnings);
   const thinkingLog = validateArray("thinking_log", data?.thinking_log);
 
@@ -159,6 +161,7 @@ export function spreadResultData(data) {
     // [Knowledge Restore] RAG에서 복원된 개별 필드들
     tables: data?.tables || data?.sa_output?.data?.tables || [],
     apis: data?.apis || data?.sa_output?.data?.apis || [],
+    sa_advisor_output: data?.sa_advisor_output || (data?.sa_output?.recommendations ? data.sa_output : null),
     thinking_log: thinkingLog,
   };
 }

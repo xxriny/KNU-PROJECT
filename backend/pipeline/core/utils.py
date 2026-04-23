@@ -25,6 +25,26 @@ T = TypeVar("T", bound=BaseModel)
 _CACHE_LIMIT = 32
 logger = get_logger()
 
+def create_context_cache(api_key: str, model: str, system_instruction: str, contents: list, ttl_seconds: int = 3600) -> str:
+    """Vertex AI Context Cache 리소스 생성 후 cache_name 반환"""
+    client = get_raw_genai_client(api_key)
+    try:
+        from google.genai import types
+        # 32k 토큰 미만이면 생성이 실패할 수 있음 (Flash 기준)
+        cache = client.caches.create(
+            model=model,
+            config=types.CreateCachedContentConfig(
+                system_instruction=system_instruction,
+                contents=contents,
+                ttl=f"{ttl_seconds}s",
+            )
+        )
+        logger.info(f"[ContextCache] Resource created: {cache.name}")
+        return cache.name
+    except Exception as e:
+        logger.warning(f"[ContextCache] Creation failed: {e}")
+        return ""
+
 # ── 비용 및 토큰 추적용 전역 컨텍스트 (Phase 0) ──────
 # 각 노드 실행 중 발생하는 모든 LLM 호출의 사용량을 임시 저장합니다.
 active_usage_log: ContextVar[list] = ContextVar("active_usage_log", default=[])
@@ -126,13 +146,43 @@ def call_structured(
     temperature: float = DEFAULT_TEMPERATURE,
     compress_prompt: bool = False,
     compression_rate: float = 0.5,
+    context_cache: str = None # 추가
 ) -> LLMResult[T]:
     """Unified structured output: parsed result, usage metadata, and thinking."""
-    # Phase 3: Prompt Compression
     if compress_prompt:
-        # LLMLingua-2 기반 압축 실행 (가변 압축률 지원)
         user_msg = get_compressor().compress_with_preservation(user_msg, target_token_rate=compression_rate)
         logger.info(f"[PromptCompressor] Compressed with rate {compression_rate}")
+
+    # 캐시가 있는 경우 원시 SDK 호출 (캐싱 지원)
+    if context_cache:
+        try:
+            from google.genai import types
+            client = get_raw_genai_client(api_key)
+            # 구조적 출력을 위해 response_mime_type 및 response_schema 설정
+            res = client.models.generate_content(
+                model=model,
+                contents=user_msg,
+                config=types.GenerateContentConfig(
+                    cached_content=context_cache,
+                    temperature=temperature,
+                    response_mime_type="application/json",
+                    response_schema=schema.model_json_schema() if hasattr(schema, "model_json_schema") else None,
+                )
+            )
+            parsed_dict = json.loads(res.text)
+            parsed = schema.model_validate(parsed_dict)
+            
+            usage_meta = res.usage_metadata
+            usage = {
+                "input_tokens": usage_meta.prompt_token_count or 0,
+                "output_tokens": usage_meta.candidates_token_count or 0,
+                "total_tokens": usage_meta.total_token_count or 0,
+                "cached_tokens": usage_meta.cached_content_token_count or 0
+            }
+            cost = calculate_cost(model, usage["input_tokens"], usage["output_tokens"])
+            return LLMResult(parsed=parsed, usage=usage, cost=cost, thinking=getattr(parsed, "thinking", ""), retry_count=0)
+        except Exception as e:
+            logger.error(f"[ContextCache] Call failed, falling back to normal: {e}")
 
     llm = get_llm(api_key, model, temperature)
     messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_msg)]
@@ -173,19 +223,15 @@ def call_structured(
     
     cost = calculate_cost(model, usage["input_tokens"], usage["output_tokens"])
 
-    # 중앙 집중형 추적을 위해 컨텍스트에 기록 (Phase 0)
+    # 중앙 집중형 추적을 위해 컨텍스트에 기록
     current_log = active_usage_log.get().copy()
     
-    # 캐싱 통계 계산 (Phase 1)
+    # 캐싱 통계 계산
     from pipeline.core.cache_manager import cache_manager
     session_id = active_session_id.get()
     cache_stats = {"cache_hit": False, "savings_usd": 0.0}
     
-    if session_id:
-        # 시스템 프롬프트를 정적 컨텍스트로 간주하여 캐시 (첫 호출 시)
-        if session_id not in cache_manager.session_pool:
-            cache_manager.cache_static_context(session_id, system_prompt)
-        
+    if session_id and session_id in cache_manager.session_pool:
         cache_stats = cache_manager.get_cache_stats(session_id, model, usage)
 
     log_entry = {
@@ -198,6 +244,7 @@ def call_structured(
     }
     current_log.append(log_entry)
     active_usage_log.set(current_log)
+
 
     return LLMResult(
         parsed=parsed,

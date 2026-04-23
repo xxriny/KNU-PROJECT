@@ -25,8 +25,10 @@ def run_experiment(use_judge=True):
                 {"component_name": "AuthService", "role": "인증 서비스"}
             ]
         },
-        "api_data_modeler_output": {
-            "apis": [{"endpoint": "POST /api/v1/auth/login", "description": "로그인 API"}],
+        "api_modeler_output": {
+            "apis": [{"endpoint": "POST /api/v1/auth/login", "description": "로그인 API"}]
+        },
+        "db_schema_architect_output": {
             "tables": [{"table_name": "users", "columns": []}]
         },
         "merged_project": {

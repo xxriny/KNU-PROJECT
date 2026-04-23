@@ -17,7 +17,6 @@ from pipeline.domain.pm.nodes.stack_crawling import stack_crawling_node
 from pipeline.domain.pm.nodes.guardian import guardian_node
 from pipeline.domain.pm.nodes.stack_embedding import stack_embedding_node
 from pipeline.domain.pm.nodes.stack_planner import stack_planner_node
-from pipeline.domain.pm.nodes.pm_analysis import pm_analysis_node
 from pipeline.domain.pm.nodes.pm_embedding import pm_embedding_node
 from pipeline.domain.pm.nodes.stack_retriever import stack_retriever_node
 
@@ -25,9 +24,9 @@ from pipeline.domain.pm.nodes.stack_retriever import stack_retriever_node
 from pipeline.domain.rag.nodes.system_scanner import system_scan_node
 from pipeline.domain.sa.nodes.merge_project import sa_merge_project_node
 from pipeline.domain.sa.nodes.component_scheduler import component_scheduler_node
-from pipeline.domain.sa.nodes.api_data_modeler import api_data_modeler_node
-from pipeline.domain.sa.nodes.sa_analysis import sa_analysis_node
+from pipeline.domain.sa.nodes.sa_unified_modeler import sa_unified_modeler_node
 from pipeline.domain.sa.nodes.sa_embedding import sa_embedding_node
+from pipeline.domain.sa.nodes.sa_advisor import sa_advisor_node
 
 
 _SCAN_CHAIN: tuple[str, ...] = (
@@ -37,17 +36,16 @@ _SCAN_CHAIN: tuple[str, ...] = (
 _PM_CHAIN: tuple[str, ...] = (
     "requirement_analyzer",
     "stack_planner",      # 기술 스택 매핑 및 검증 루프 시작점
-    "pm_analysis",        # QA-PM: RTM + 스택 통합 검증 및 PM_BUNDLE 생성
-    "pm_embedding",       # PM_BUNDLE 임베딩 및 영구 저장
+    "pm_embedding",       # PM_BUNDLE 자동 조립 + 임베딩 + 영구 저장
     "stack_embedding",    # 기술 스택 임베딩 루프용 (별도 유지)
 )
 
 _SA_CHAIN: tuple[str, ...] = (
     "sa_merge_project",
     "component_scheduler",
-    "api_data_modeler",
-    "sa_analysis",
-    "sa_embedding",
+    "sa_unified_modeler",
+    "sa_advisor",         # 통합 QA 검증 + 수정 조언 + sa_arch_bundle 조립
+    "sa_embedding",       # SA 임베딩 + RAG 저장
 )
 
 
@@ -164,7 +162,6 @@ def _build_pm_pipeline():
     workflow.add_node("guardian", _wrap_node_with_usage(guardian_node))
     workflow.add_node("stack_embedding", _wrap_node_with_usage(stack_embedding_node))
     workflow.add_node("stack_retriever", _wrap_node_with_usage(stack_retriever_node))
-    workflow.add_node("pm_analysis", _wrap_node_with_usage(pm_analysis_node))
     workflow.add_node("pm_embedding", _wrap_node_with_usage(pm_embedding_node))
 
     # Edges
@@ -178,7 +175,7 @@ def _build_pm_pipeline():
         _route_stack_planning,
         {
             "loop": "stack_crawling",   # PENDING_CRAWL -> 크롤링
-            "finish": "pm_analysis",    # 완료 -> PM 검증 및 번들 생성
+            "finish": "pm_embedding",   # 완료 -> PM 번들 자동 조립 + 임베딩
             "error": END
         }
     )
@@ -188,9 +185,7 @@ def _build_pm_pipeline():
     workflow.add_edge("guardian", "stack_embedding")
     workflow.add_edge("stack_embedding", "stack_planner")
     
-    # PM Analysis 이후 Integration Fail 체크 후 Embedding 거쳐 종료
-    # PM Analysis 이후 Embedding을 거쳐 Integration Fail 체크 후 종료
-    workflow.add_edge("pm_analysis", "pm_embedding")
+    # PM Embedding 이후 종료
     workflow.add_conditional_edges(
         "pm_embedding",
         _route_pm_integration,
@@ -207,26 +202,17 @@ def _build_sa_pipeline():
     workflow = StateGraph(PipelineState)
     workflow.add_node("sa_merge_project", _wrap_node_with_usage(sa_merge_project_node))
     workflow.add_node("component_scheduler", _wrap_node_with_usage(component_scheduler_node))
-    workflow.add_node("api_data_modeler", _wrap_node_with_usage(api_data_modeler_node))
-    workflow.add_node("sa_analysis", _wrap_node_with_usage(sa_analysis_node))
+    workflow.add_node("sa_unified_modeler", _wrap_node_with_usage(sa_unified_modeler_node))
+    workflow.add_node("sa_advisor", _wrap_node_with_usage(sa_advisor_node))
     workflow.add_node("sa_embedding", _wrap_node_with_usage(sa_embedding_node))
 
     workflow.add_edge(START, "sa_merge_project")
     workflow.add_edge("sa_merge_project", "component_scheduler")
-    workflow.add_edge("component_scheduler", "api_data_modeler")
-    workflow.add_edge("api_data_modeler", "sa_analysis")
-    workflow.add_edge("sa_analysis", "sa_embedding")
+    workflow.add_edge("component_scheduler", "sa_unified_modeler")
+    workflow.add_edge("sa_unified_modeler", "sa_advisor")
+    workflow.add_edge("sa_advisor", "sa_embedding")
+    workflow.add_edge("sa_embedding", END)
 
-    # SA Embedding 이후 FAIL 시 설계 단계로 회귀 루프
-    workflow.add_conditional_edges(
-        "sa_embedding",
-        _route_sa_analysis,
-        {
-            "loop": "component_scheduler",
-            "finish": END,
-            "error": END
-        }
-    )
     return workflow.compile()
 
 
@@ -267,56 +253,34 @@ def get_sa_routing_map() -> dict:
 
 
 def get_analysis_pipeline(action_type: str = "CREATE"):
-    """Compatibility shim: returns full chain for now."""
+    """Full PM-SA pipeline (pm_analysis/sa_analysis removed, advisor handles QA)."""
     workflow = StateGraph(PipelineState)
     # Scan
     workflow.add_node("system_scan", _wrap_node_with_usage(system_scan_node))
-    # PM
+    # PM (pm_analysis 제거: pm_embedding이 pm_bundle 자동 조립)
     workflow.add_node("requirement_analyzer", _wrap_node_with_usage(requirement_analyzer_node))
     workflow.add_node("stack_retriever", _wrap_node_with_usage(stack_retriever_node))
     workflow.add_node("stack_planner", _wrap_node_with_usage(stack_planner_node))
-    workflow.add_node("pm_analysis", _wrap_node_with_usage(pm_analysis_node))
     workflow.add_node("pm_embedding", _wrap_node_with_usage(pm_embedding_node))
-    # SA
+    # SA (sa_analysis 제거: sa_advisor가 QA + 조언 통합)
     workflow.add_node("sa_merge_project", _wrap_node_with_usage(sa_merge_project_node))
     workflow.add_node("component_scheduler", _wrap_node_with_usage(component_scheduler_node))
-    workflow.add_node("api_data_modeler", _wrap_node_with_usage(api_data_modeler_node))
-    workflow.add_node("sa_analysis", _wrap_node_with_usage(sa_analysis_node))
+    workflow.add_node("sa_unified_modeler", _wrap_node_with_usage(sa_unified_modeler_node))
+    workflow.add_node("sa_advisor", _wrap_node_with_usage(sa_advisor_node))
     workflow.add_node("sa_embedding", _wrap_node_with_usage(sa_embedding_node))
 
-    full_chain = [
-        "system_scan", "requirement_analyzer", "stack_retriever", "stack_planner",
-        "pm_analysis", "pm_embedding", "sa_merge_project", "component_scheduler",
-        "api_data_modeler", "sa_analysis", "sa_embedding"
-    ]
-    
-    # Edges with Loops
+    # Edges
     workflow.add_edge(START, "system_scan")
     workflow.add_edge("system_scan", "requirement_analyzer")
     workflow.add_edge("requirement_analyzer", "stack_retriever")
     workflow.add_edge("stack_retriever", "stack_planner")
-    
-    # PM Loop (Planner -> Crawling loop is handled in _build_pm_pipeline, 
-    # but for full_chain we keep it simple or mimic it if needed. 
-    # Here we focus on the SA Loop requested by user)
-    workflow.add_edge("stack_planner", "pm_analysis")
-    workflow.add_edge("pm_analysis", "pm_embedding")
+    workflow.add_edge("stack_planner", "pm_embedding")
     workflow.add_edge("pm_embedding", "sa_merge_project")
     workflow.add_edge("sa_merge_project", "component_scheduler")
-    workflow.add_edge("component_scheduler", "api_data_modeler")
-    workflow.add_edge("api_data_modeler", "sa_analysis")
-    workflow.add_edge("sa_analysis", "sa_embedding")
-
-    # [SA Feedback Loop]
-    workflow.add_conditional_edges(
-        "sa_embedding",
-        _route_sa_analysis,
-        {
-            "loop": "component_scheduler",
-            "finish": END,
-            "error": END
-        }
-    )
+    workflow.add_edge("component_scheduler", "sa_unified_modeler")
+    workflow.add_edge("sa_unified_modeler", "sa_advisor")
+    workflow.add_edge("sa_advisor", "sa_embedding")
+    workflow.add_edge("sa_embedding", END)
     
     return workflow.compile()
 
