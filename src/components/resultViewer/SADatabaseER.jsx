@@ -1,359 +1,286 @@
-import React, { memo, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   ReactFlow,
   Background,
   Handle,
   Position,
+  applyNodeChanges,
+  applyEdgeChanges,
+  addEdge,
   useReactFlow,
   ReactFlowProvider,
-  BaseEdge,
 } from '@xyflow/react';
-import { useShallow } from 'zustand/react/shallow';
 import '@xyflow/react/dist/style.css';
-import ELK from 'elkjs/lib/elk.bundled.js';
-import { SmartStepEdge, getSmartEdge } from '@tisoap/react-flow-smart-edge';
+import { Save, RotateCcw, MessageSquare, History, Edit3 } from 'lucide-react';
+import useAppStore from '../../store/useAppStore';
 
-// 스토어 및 외부 액션 임포트
-import {
-  useERDStore,
-  onNodesChange,
-  onEdgesChange,
-  onConnect,
-  setElements
-} from '../../store/useERDStore';
+// --- 커스텀 노드 정의 ---
 
-// 1. Elk.js 레이아웃 엔진 설정
-const elk = new ELK();
+const EntityNode = ({ data, id }) => {
+  const isDarkMode = useAppStore((state) => state.isDarkMode);
+  const [isEditing, setIsEditing] = useState(false);
+  const [label, setLabel] = useState(data.label);
 
-const elkOptions = {
-  'elk.algorithm': 'layered',
-  'elk.direction': 'RIGHT',
-  'elk.layered.spacing.nodeNodeBetweenLayers': '200',
-  'elk.spacing.nodeNode': '80',
-  'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-  'elk.edgeRouting': 'ORTHOGONAL',
-  'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
-};
-
-const getLayoutedElements = async (nodes, edges) => {
-  const graph = {
-    id: 'root',
-    layoutOptions: elkOptions,
-    children: nodes.map((node) => {
-      const columnCount = node.data.columns?.length || 1;
-      const estimatedHeight = 50 + (columnCount * 40); // 헤더 + 컬럼 높이 추산
-      return {
-        id: node.id,
-        width: 320, // TableNode fixed width
-        height: estimatedHeight,
-      };
-    }),
-    edges: edges.map((edge) => ({
-      id: edge.id,
-      sources: [edge.source],
-      targets: [edge.target],
-    })),
+  const onBlur = () => {
+    setIsEditing(false);
+    if (label !== data.label) data.onRename(id, label);
   };
 
-  try {
-    const layoutedGraph = await elk.layout(graph);
-    const layoutedNodes = nodes.map((node) => {
-      const elkNode = layoutedGraph.children?.find((n) => n.id === node.id);
-      return {
-        ...node,
-        position: {
-          x: elkNode?.x || 0,
-          y: elkNode?.y || 0,
-        },
-      };
-    });
-    return { nodes: layoutedNodes, edges };
-  } catch (error) {
-    console.error("ELK Layout Error:", error);
-    return { nodes, edges };
-  }
-};
-
-// 2. Crow's Foot 카디널리티 SVG 마커 정의
-const CrowsFootMarkers = () => (
-  <svg style={{ position: 'absolute', width: 0, height: 0 }} aria-hidden="true">
-    <defs>
-      <marker
-        id="crow-zero-many"
-        viewBox="0 0 40 40"
-        refX="38"
-        refY="20"
-        markerWidth="16"
-        markerHeight="16"
-        orient="auto-start-reverse"
-      >
-        <path d="M 5,10 L 35,20 L 5,30" fill="none" stroke="#94a3b8" strokeWidth="3" strokeLinejoin="round" />
-        <circle cx="15" cy="20" r="6" fill="#0f172a" stroke="#94a3b8" strokeWidth="2" />
-        <line x1="35" y1="20" x2="22" y2="20" stroke="#94a3b8" strokeWidth="3" />
-      </marker>
-
-      <marker
-        id="crow-one-only"
-        viewBox="0 0 40 40"
-        refX="38"
-        refY="20"
-        markerWidth="16"
-        markerHeight="16"
-        orient="auto-start-reverse"
-      >
-        <line x1="15" y1="5" x2="15" y2="35" stroke="#94a3b8" strokeWidth="4" />
-        <line x1="25" y1="5" x2="25" y2="35" stroke="#94a3b8" strokeWidth="4" />
-        <line x1="0" y1="20" x2="40" y2="20" stroke="#94a3b8" strokeWidth="2" />
-      </marker>
-
-      <marker
-        id="crow-one-many"
-        viewBox="0 0 40 40"
-        refX="38"
-        refY="20"
-        markerWidth="16"
-        markerHeight="16"
-        orient="auto-start-reverse"
-      >
-        <path d="M 5,10 L 35,20 L 5,30" fill="none" stroke="#94a3b8" strokeWidth="3" strokeLinejoin="round" />
-        <line x1="18" y1="5" x2="18" y2="35" stroke="#94a3b8" strokeWidth="4" />
-        <line x1="35" y1="20" x2="25" y2="20" stroke="#94a3b8" strokeWidth="3" />
-      </marker>
-    </defs>
-  </svg>
-);
-
-// 3. 커스텀 테이블 노드
-const TableNode = memo(({ data, id }) => {
   return (
-    <div className="bg-[#0f172a] border-2 border-slate-700 rounded-lg shadow-2xl w-[320px] overflow-visible font-sans border-t-indigo-500">
-      <div className="bg-slate-800/80 px-4 py-3 flex items-center justify-between border-b border-slate-700 rounded-t-lg">
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-indigo-500 rounded-sm rotate-45 shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
-          <span className="text-slate-100 font-black text-sm uppercase tracking-tighter">{data.label}</span>
-        </div>
-        <span className="text-slate-500 text-[10px] font-mono opacity-50">#TABLE</span>
-      </div>
-
-      <div className="flex flex-col">
-        {(data.columns || []).map((col, index) => {
-          const colLow = col.name.toLowerCase();
-          const isPK = (col.constraints || "").toLowerCase().includes("pk") || !!col.isPK;
-          const isFK = (col.constraints || "").toLowerCase().includes("fk") || !!col.isFK || colLow.endsWith("_id");
-
-          return (
-            <div
-              key={`${id}-${colLow}-${index}`}
-              className="relative flex justify-between items-center px-4 py-2.5 border-b border-slate-800/50 last:border-b-0 hover:bg-slate-800/30 transition-all group text-xs"
-            >
-              <Handle
-                type="target"
-                position={Position.Left}
-                id={`target-${colLow}`}
-                className={`!w-2 !h-2 !bg-blue-500 !-left-1 !border-none transition-all ${isFK ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                style={{ top: '50%', transform: 'translateY(-50%)' }}
-              />
-
-              <div className="flex items-center gap-3">
-                <span className={`text-[9px] font-black w-5 text-center rounded px-1 py-0.5 ${isPK ? "bg-amber-500/10 text-amber-500 border border-amber-500/20" : isFK ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20" : "text-slate-600"}`}>
-                  {isPK ? "PK" : isFK ? "FK" : "  "}
-                </span>
-                <span className="text-slate-300 font-semibold tracking-tight">{col.name}</span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-slate-500 font-mono text-[10px] opacity-70 italic">{col.type || 'varchar'}</span>
-                {isPK && <span className="text-amber-500/50 text-[10px]">🔑</span>}
-              </div>
-
-              <Handle
-                type="source"
-                position={Position.Right}
-                id={`source-${colLow}`}
-                className={`!w-2 !h-2 !bg-amber-500 !-right-1 !border-none transition-all ${isPK ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                style={{ top: '50%', transform: 'translateY(-50%)' }}
-              />
-            </div>
-          );
-        })}
-      </div>
+    <div className={`
+      border-2 transition-all duration-300 group
+      min-w-[140px] px-6 py-4 flex items-center justify-center relative
+      ${isDarkMode 
+        ? "bg-[#0f172a] border-indigo-500 text-white shadow-[0_0_15px_rgba(99,102,241,0.2)]" 
+        : "bg-white border-black text-black shadow-[4px_4px_0_rgba(0,0,0,0.1)]"}
+    `} onDoubleClick={() => setIsEditing(true)}>
+      <Handle type="target" position={Position.Top} className="!opacity-0" />
+      <Handle type="source" position={Position.Bottom} className="!opacity-0" />
+      <Handle type="source" position={Position.Left} id="left" className="!opacity-0" />
+      <Handle type="source" position={Position.Right} id="right" className="!opacity-0" />
+      {isEditing ? (
+        <input autoFocus className="bg-transparent border-b border-indigo-400 outline-none text-center font-bold text-sm w-full" value={label} onChange={(e) => setLabel(e.target.value)} onBlur={onBlur} onKeyDown={(e) => e.key === 'Enter' && onBlur()} />
+      ) : (
+        <span className="font-bold text-sm tracking-widest uppercase whitespace-nowrap">{label}</span>
+      )}
     </div>
   );
-});
+};
 
-// 4. 지능형 스마트 엣지
-const CustomSmartEdge = (props) => {
-  const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, nodes } = props;
+const AttributeNode = ({ data, id }) => {
+  const isDarkMode = useAppStore((state) => state.isDarkMode);
+  const [isEditing, setIsEditing] = useState(false);
+  const [label, setLabel] = useState(data.label);
 
-  const smartEdgeResponse = getSmartEdge({
-    sourcePosition,
-    targetPosition,
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    nodes,
-    options: {
-      nodePadding: 20,
-      gridRatio: 10,
-    },
-  });
-
-  if (!smartEdgeResponse) {
-    return <BaseEdge {...props} />;
-  }
-
-  const { svgPathString } = smartEdgeResponse;
+  const onBlur = () => {
+    setIsEditing(false);
+    if (label !== data.label) data.onRename(id, label);
+  };
 
   return (
-    <BaseEdge
-      id={props.id}
-      path={svgPathString}
-      markerStart={props.markerStart}
-      markerEnd={props.markerEnd}
-      style={{ stroke: '#64748b', strokeWidth: 2 }}
-    />
+    <div className={`
+      border-2 rounded-[100%/100%] px-10 py-2.5 transition-all duration-300 group
+      min-w-[140px] w-fit flex items-center justify-center relative
+      ${isDarkMode 
+        ? "bg-[#1e293b] border-slate-500 text-slate-200 hover:border-indigo-400" 
+        : "bg-white border-black text-black shadow-[2px_2px_0_rgba(0,0,0,0.05)] hover:bg-slate-50"}
+    `} onDoubleClick={() => setIsEditing(true)}>
+      <Handle type="target" position={Position.Top} className="!opacity-0" />
+      <Handle type="source" position={Position.Bottom} className="!opacity-0" />
+      {isEditing ? (
+        <input autoFocus className="bg-transparent border-b border-indigo-400 outline-none text-center text-[11px] w-full" value={label} onChange={(e) => setLabel(e.target.value)} onBlur={onBlur} onKeyDown={(e) => e.key === 'Enter' && onBlur()} />
+      ) : (
+        <span className={`text-[11px] whitespace-nowrap tracking-tight px-1 ${data.isPK ? (isDarkMode ? "underline decoration-2 underline-offset-4 font-extrabold text-slate-100" : "underline decoration-2 underline-offset-4 font-extrabold") : "font-medium"}`}>{label}</span>
+      )}
+    </div>
   );
 };
 
-const nodeTypes = {
-  tableNode: TableNode,
-};
+const RelationshipNode = ({ data, id }) => {
+  const isDarkMode = useAppStore((state) => state.isDarkMode);
+  const [isEditing, setIsEditing] = useState(false);
+  const [label, setLabel] = useState(data.label);
 
-const edgeTypes = {
-  smart: CustomSmartEdge,
-};
+  const onBlur = () => {
+    setIsEditing(false);
+    if (label !== data.label) data.onRename(id, label);
+  };
 
-function ERDFlow({ tables }) {
-  const { nodes, edges } = useERDStore(
-    useShallow((state) => ({ nodes: state.nodes, edges: state.edges }))
+  return (
+    <div className="relative w-28 h-28 flex items-center justify-center group transition-all duration-300" onDoubleClick={() => setIsEditing(true)}>
+      <div className={`absolute inset-0 border-2 rotate-45 transition-all ${isDarkMode ? "bg-[#0f172a] border-indigo-400 shadow-[0_0_10px_rgba(99,102,241,0.1)]" : "bg-white border-black shadow-[4px_4px_0_rgba(0,0,0,0.1)]"}`} />
+      {isEditing ? (
+        <input autoFocus className="relative z-10 bg-transparent border-b border-indigo-400 outline-none text-center font-black text-[10px] w-20" value={label} onChange={(e) => setLabel(e.target.value)} onBlur={onBlur} onKeyDown={(e) => e.key === 'Enter' && onBlur()} />
+      ) : (
+        <span className={`relative z-10 text-[10px] font-black text-center break-words px-3 uppercase leading-tight ${isDarkMode ? "text-indigo-300" : "text-black"}`}>{label}</span>
+      )}
+      <Handle type="target" position={Position.Top} className="!opacity-0" />
+      <Handle type="source" position={Position.Bottom} className="!opacity-0" />
+      <Handle type="source" position={Position.Left} id="left" className="!opacity-0" />
+      <Handle type="source" position={Position.Right} id="right" className="!opacity-0" />
+    </div>
   );
+};
 
-  const { fitView } = useReactFlow();
+const nodeTypes = { entityNode: EntityNode, attributeNode: AttributeNode, relationshipNode: RelationshipNode };
 
-  const initializeDiagram = useCallback(async () => {
-    if (!tables || tables.length === 0) return;
+// --- 메인 캔버스 ---
 
-    const initialNodes = [];
-    const initialEdges = [];
-    const tableNames = tables.map(t => t.table_name.toLowerCase());
+function ERDCanvas({ tables }) {
+  const isDarkMode = useAppStore((state) => state.isDarkMode);
+  const { toObject } = useReactFlow();
+  
+  const [nodes, setNodes] = useState([]);
+  const [edges, setEdges] = useState([]);
+  const [history, setHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
 
-    // 1. 노드 생성
-    tables.forEach((table) => {
-      initialNodes.push({
-        id: table.table_name.toLowerCase(),
-        type: 'tableNode',
-        position: { x: 0, y: 0 },
-        data: {
-          label: table.table_name,
-          columns: table.columns,
-        },
+  const addHistory = useCallback((msg) => {
+    const time = new Date().toLocaleTimeString();
+    setHistory(prev => [{ time, msg }, ...prev].slice(0, 50));
+  }, []);
+
+  const onRename = useCallback((nodeId, newLabel) => {
+    setNodes((nds) => nds.map((node) => {
+      if (node.id === nodeId) {
+        const oldLabel = node.data.label;
+        addHistory(`[이름 변경] '${oldLabel}' -> '${newLabel}'`);
+        return { ...node, data: { ...node.data, label: newLabel } };
+      }
+      return node;
+    }));
+  }, [addHistory]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('erd-chen-edit-backup-v2');
+    if (saved) {
+      const { nodes: sn, edges: se, history: sh } = JSON.parse(saved);
+      setNodes(sn.map(n => ({ ...n, data: { ...n.data, onRename }})));
+      setEdges(se);
+      setHistory(sh || []);
+      return;
+    }
+
+    const tableArray = Array.isArray(tables) ? tables : Object.values(tables || {});
+    if (tableArray.length === 0) return;
+
+    const newNodes = [];
+    const newEdges = [];
+    const uniqueTables = Array.from(new Map(tableArray.map(t => [(t.table_name || t.name || "").toLowerCase(), t])).values());
+    const tableNames = uniqueTables.map(t => (t.table_name || t.name || "").toLowerCase());
+
+    const GRID_X = 1000;
+    const GRID_Y = 600;
+    const ATTR_DIST = 190;
+
+    uniqueTables.forEach((table, tIdx) => {
+      const tableName = table.table_name || table.name || "Unknown";
+      const baseX = (tIdx % 2) * GRID_X;
+      const baseY = Math.floor(tIdx / 2) * GRID_Y;
+      const entityId = `ent-${tableName.toLowerCase()}`;
+
+      newNodes.push({ id: entityId, type: "entityNode", data: { label: tableName, onRename }, position: { x: baseX, y: baseY } });
+
+      const columns = (table.columns || []).filter(col => {
+        const name = typeof col === 'string' ? col.split(':')[0] : (col.name || "");
+        return name.toLowerCase() !== 'fk';
+      });
+
+      columns.forEach((col, cIdx) => {
+        const colName = typeof col === 'string' ? col.split(':')[0] : (col.name || "");
+        const constraints = (typeof col === 'string' ? col : (col.constraints || "")).toLowerCase();
+        
+        const angle = (cIdx / columns.length) * Math.PI * 2;
+        const attrX = baseX + 25 + Math.cos(angle) * ATTR_DIST;
+        const attrY = baseY + 10 + Math.sin(angle) * ATTR_DIST;
+        const attrId = `attr-${entityId}-${colName.toLowerCase()}`;
+
+        newNodes.push({ id: attrId, type: "attributeNode", data: { label: colName, isPK: constraints.includes("pk"), onRename }, position: { x: attrX, y: attrY } });
+        newEdges.push({ id: `e-${attrId}`, source: entityId, target: attrId, type: "straight", style: { stroke: isDarkMode ? "#475569" : "#94a3b8", strokeWidth: 1.5, opacity: 0.8 } });
       });
     });
 
-    // 2. 엣지 생성
-    tables.forEach((table) => {
-      const sourceTableLow = table.table_name.toLowerCase();
+    let relCounter = 0;
+    const existingRels = new Set();
+    uniqueTables.forEach((table) => {
+      const sourceTableName = (table.table_name || table.name || "").toLowerCase();
       (table.columns || []).forEach((col) => {
-        const colLow = col.name.toLowerCase();
-        const constLow = (col.constraints || "").toLowerCase();
-        let targetTable = null;
-        let targetField = "id";
+        const colName = (typeof col === 'string' ? col.split(':')[0] : (col.name || "")).toLowerCase();
+        const constraints = (typeof col === 'string' ? col : (col.constraints || "")).toLowerCase();
 
-        const fkMatch = constLow.match(/fk\s*\(?([^). \n]+)(?:\.([^)]+))?\)?/) ||
-          constLow.match(/references\s+([^(\s]+)(?:\(([^)]+)\))?/);
-
-        if (fkMatch) {
-          targetTable = fkMatch[1].toLowerCase();
-          targetField = (fkMatch[2] || "id").toLowerCase();
-        } else if (colLow.endsWith("id") || colLow.endsWith("_id")) {
-          const base = colLow.replace(/_?id$/, "");
-          targetTable = tableNames.find(tn => tn === base || tn === base + "s" || base === tn + "s");
+        let targetName = null;
+        const fkMatch = constraints.match(/fk\s*\(?([^). \n]+)/);
+        if (fkMatch) targetName = fkMatch[1].toLowerCase();
+        else if (colName.endsWith("id")) {
+          const base = colName.replace(/_?id$/, "");
+          targetName = tableNames.find(tn => tn === base || tn === base + "s" || base === tn + "s");
         }
 
-        if (targetTable && targetTable !== sourceTableLow) {
-          const actualTargetTable = tables.find(t => t.table_name.toLowerCase() === targetTable);
-          if (actualTargetTable) {
-            const hasTargetField = actualTargetTable.columns.some(c => c.name.toLowerCase() === targetField);
-            const finalTargetField = hasTargetField ? targetField : (actualTargetTable.columns[0]?.name.toLowerCase() || "id");
-
-            const isJunctionTable = sourceTableLow.includes('member') || sourceTableLow.includes('mapping');
-
-            initialEdges.push({
-              id: `edge-${targetTable}-${sourceTableLow}-${colLow}`,
-              source: targetTable,
-              target: sourceTableLow,
-              sourceHandle: `source-${finalTargetField}`,
-              targetHandle: `target-${colLow}`,
-              type: 'smart',
-              markerStart: 'crow-one-only',
-              markerEnd: isJunctionTable ? 'crow-zero-many' : 'crow-one-many',
-            });
+        if (targetName && targetName !== sourceTableName) {
+          const relKey = [sourceTableName, targetName].sort().join("-");
+          if (!existingRels.has(relKey)) {
+            existingRels.add(relKey);
+            const relId = `rel-${relCounter++}`;
+            const sIdx = uniqueTables.findIndex(t => (t.table_name || t.name || "").toLowerCase() === targetName);
+            const tIdx = uniqueTables.findIndex(t => (t.table_name || t.name || "").toLowerCase() === sourceTableName);
+            const rX = ((sIdx % 2) * GRID_X + (tIdx % 2) * GRID_X) / 2 + 15;
+            const rY = (Math.floor(sIdx / 2) * GRID_Y + Math.floor(tIdx / 2) * GRID_Y) / 2;
+            newNodes.push({ id: relId, type: "relationshipNode", data: { label: "관계", onRename }, position: { x: rX, y: rY } });
+            const commonEdge = { type: "smoothstep", style: { stroke: isDarkMode ? "#6366f1" : "#000", strokeWidth: 2 } };
+            newEdges.push({ id: `e1-${relId}`, source: `ent-${targetName}`, target: relId, label: "1", ...commonEdge });
+            newEdges.push({ id: `e2-${relId}`, source: relId, target: `ent-${sourceTableName}`, label: "N", ...commonEdge });
           }
         }
       });
     });
 
-    // 3. ELK 레이아웃 적용
-    const { nodes: layoutedNodes, edges: layoutedEdges } = await getLayoutedElements(initialNodes, initialEdges);
+    setNodes(newNodes);
+    setEdges(newEdges);
+    addHistory("AI가 최적의 ER 다이어그램 초안을 생성했습니다.");
+  }, [tables, onRename, isDarkMode, addHistory]);
 
-    setElements(layoutedNodes, layoutedEdges);
+  const onNodesChange = useCallback((changes) => {
+    setNodes((nds) => applyNodeChanges(changes, nds));
+    const positionChange = changes.find(c => c.type === 'position' && c.dragging === false);
+    if (positionChange) {
+      const node = nodes.find(n => n.id === positionChange.id);
+      if (node) addHistory(`[위치 이동] '${node.data.label}' 노드 배치 조정`);
+    }
+  }, [nodes, addHistory]);
 
-    setTimeout(() => fitView({ padding: 0.2, duration: 1000 }), 100);
-  }, [tables, fitView]);
-
-  useEffect(() => {
-    initializeDiagram();
-  }, [initializeDiagram]);
+  const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
+  const onConnect = useCallback((params) => {
+    setEdges((eds) => addEdge({ ...params, type: 'smoothstep', style: { stroke: isDarkMode ? '#6366f1' : '#000', strokeWidth: 2 } }, eds));
+    addHistory(`[관계 추가] 새로운 연결선 생성`);
+  }, [isDarkMode, addHistory]);
 
   return (
-    <div className="w-full h-full relative bg-[#020617]">
-      <CrowsFootMarkers />
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        fitView
-      >
-        <Background color="#1e293b" gap={30} variant="dots" className="opacity-20" />
+    <div className={`h-[850px] w-full rounded-3xl border-2 overflow-hidden relative shadow-2xl transition-all duration-500 ${isDarkMode ? "bg-[#020617] border-slate-800" : "bg-[#fafafa] border-slate-200"}`}>
+      <div className="absolute top-6 right-6 z-50 flex gap-2">
+        <button onClick={() => setShowHistory(!showHistory)} className={`p-2 rounded-xl border-2 flex items-center gap-2 text-xs font-bold transition-all ${isDarkMode ? "bg-[#0f172a] border-slate-700 text-slate-300 hover:border-indigo-500" : "bg-white border-slate-200 text-slate-600 hover:border-black"}`}><History size={14} /> {showHistory ? "닫기" : "이력"}</button>
+        <button onClick={() => { localStorage.setItem('erd-chen-edit-backup-v2', JSON.stringify({ ...toObject(), history })); alert('저장되었습니다.'); }} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl shadow-lg flex items-center gap-2 text-xs font-bold"><Save size={14} /> 저장</button>
+        <button onClick={() => { if (window.confirm('초기화할까요?')) { localStorage.removeItem('erd-chen-edit-backup-v2'); window.location.reload(); } }} className={`p-2 rounded-xl border-2 flex items-center gap-2 text-xs font-bold transition-all ${isDarkMode ? "bg-[#0f172a] border-slate-700 text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}><RotateCcw size={14} /> 초기화</button>
+      </div>
+
+      {showHistory && (
+        <div className={`absolute top-20 right-6 z-50 w-72 max-h-[500px] overflow-y-auto p-5 border-2 rounded-2xl shadow-2xl backdrop-blur-xl ${isDarkMode ? "bg-slate-900/90 border-slate-700 text-slate-300" : "bg-white/90 border-slate-200 text-slate-600"}`}>
+          <h4 className="font-bold text-sm mb-4 border-b pb-2 flex items-center gap-2"><MessageSquare size={14} /> 작업 메모</h4>
+          <div className="space-y-3">{history.map((item, idx) => (<div key={idx} className="flex flex-col gap-1 border-l-2 border-indigo-500/30 pl-3"><span className="text-[10px] opacity-50">{item.time}</span><p className="text-[11px]">{item.msg}</p></div>))}</div>
+        </div>
+      )}
+
+      <div className={`absolute top-6 left-6 z-50 p-5 border-2 shadow-[4px_4px_0_rgba(0,0,0,0.1)] transition-all ${isDarkMode ? "bg-[#0f172a] border-indigo-500/50" : "bg-white border-black"}`}>
+        <h3 className={`font-bold border-b-2 pb-2 mb-4 text-sm uppercase tracking-widest ${isDarkMode ? "text-indigo-400 border-indigo-500/30" : "text-black border-black"}`}>수정 가능한 ERD</h3>
+        <p className="text-[10px] text-slate-500 mb-4">* 더블 클릭하여 이름 수정 가능</p>
+        <div className="space-y-4 text-xs font-bold">
+          <div className="flex items-center gap-4">
+            <div className={`w-8 h-4 border-2 ${isDarkMode ? "bg-[#0f172a] border-indigo-500" : "border-black"}`}></div>
+            <span className={isDarkMode ? "text-slate-300" : "text-black"}>개체 (Entity)</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className={`w-5 h-5 border-2 rotate-45 ml-1.5 mr-1.5 ${isDarkMode ? "bg-[#0f172a] border-indigo-400" : "border-black"}`}></div>
+            <span className={isDarkMode ? "text-slate-300" : "text-black"}>관계 (Relationship)</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className={`w-8 h-5 border-2 rounded-[100%/100%] flex items-center justify-center ${isDarkMode ? "bg-[#1e293b] border-slate-500" : "border-black"}`}></div>
+            <span className={isDarkMode ? "text-slate-300" : "text-black"}>속성 (Attribute)</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className={`w-8 h-5 border-2 rounded-[100%/100%] flex items-center justify-center ${isDarkMode ? "bg-[#1e293b] border-slate-500" : "border-black"}`}>
+              <span className={`text-[9px] underline decoration-2 ${isDarkMode ? "text-slate-100" : "text-black"}`}>PK</span>
+            </div>
+            <span className={isDarkMode ? "text-slate-300" : "text-black"}>기본키 (Primary Key)</span>
+          </div>
+        </div>
+      </div>
+
+      <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} fitView fitViewOptions={{ padding: 0.15 }}>
+        <Background color={isDarkMode ? "#1e293b" : "#cbd5e1"} gap={30} variant="dots" size={2} className={isDarkMode ? "opacity-30" : "opacity-100"} />
       </ReactFlow>
-
-      {/* HUD Info */}
-      <div className="absolute top-8 left-8 z-10 space-y-2 pointer-events-none">
-        <div className="flex items-center gap-3">
-          <div className="w-1.5 h-6 bg-indigo-500 rounded-full" />
-          <h3 className="text-white text-2xl font-black tracking-tighter uppercase leading-none">Architectural ERD Engine</h3>
-        </div>
-        <p className="text-slate-500 text-[11px] font-mono tracking-[0.3em] uppercase pl-4">ELK Hierarchical / Crow's Foot / Smart Routing</p>
-      </div>
-
-      {/* Legend */}
-      <div className="absolute bottom-8 right-8 z-10 bg-slate-900/80 border border-slate-800 p-4 rounded-xl backdrop-blur-xl shadow-2xl flex flex-col gap-3">
-        <div className="flex items-center gap-3 text-[10px] font-mono text-slate-400">
-          <div className="w-4 h-3 bg-amber-500/20 border border-amber-500/40 rounded-sm" /> <span>PK / IDENTIFIER</span>
-        </div>
-        <div className="flex items-center gap-3 text-[10px] font-mono text-slate-400">
-          <div className="w-4 h-3 bg-indigo-500/20 border border-indigo-500/40 rounded-sm" /> <span>FK / RELATIONSHIP</span>
-        </div>
-        <div className="border-t border-slate-800 my-1" />
-        <div className="flex items-center gap-3 text-[10px] font-mono text-slate-400">
-          <div className="w-6 h-0.5 bg-slate-500" /> <span>SMART A* ROUTING</span>
-        </div>
-      </div>
     </div>
   );
 }
 
-export default function SADatabaseER({ tables }) {
-  return (
-    <div className="h-[900px] w-full bg-[#020617] rounded-3xl border border-slate-800/50 overflow-hidden shadow-2xl relative">
-      <ReactFlowProvider>
-        <ERDFlow tables={tables} />
-      </ReactFlowProvider>
-    </div>
-  );
+export default function SADatabaseER(props) {
+  return <ReactFlowProvider><ERDCanvas {...props} /></ReactFlowProvider>;
 }

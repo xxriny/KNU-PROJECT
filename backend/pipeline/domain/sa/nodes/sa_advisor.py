@@ -226,6 +226,7 @@ def sa_advisor_node(ctx: NodeContext) -> dict:
         )
 
         # 7. 추천 사항 병합 및 구조화 (QA vs Architect)
+        output = res.parsed
         raw_recs = output.recommendations
         seen_actions = set()
         qa_recs = []
@@ -261,7 +262,7 @@ def sa_advisor_node(ctx: NodeContext) -> dict:
             "status": "FAIL" if qa_recs else ("WARNING" if arch_recs else "PASS"),
             "gaps": [f"{r['target']}|{r['action']}" for r in qa_recs],
         }
-        logger.info(f"SA Advisor: status={advisor_data['status']}, {len(recommendations)} recommendations")
+        logger.info(f"SA Advisor: status={advisor_data['status']}, {len(advisor_data['recommendations'])} recommendations")
 
         return {
             "sa_advisor_output": advisor_data,
