@@ -90,20 +90,20 @@ class ApiDataModelerOutput(BaseModel):
     apis: List[ApiDefinition] = Field(description="API 명세 목록")
     tables: List[TableDefinition] = Field(description="데이터베이스 테이블 정의 목록")
 
-    @model_validator(mode="after")
-    def validate_foreign_keys(self) -> "ApiDataModelerOutput":
-        table_names = {t.table_name for t in self.tables}
-        for table in self.tables:
-            for col in table.columns:
-                col_name = col.get("name", "")
-                if col_name.endswith("_id") and col_name != "id":
-                    target_table = col_name[:-3] # user_id -> user
-                    # 복수형 처리 (users, orders 등)
-                    if target_table not in table_names and (target_table + "s") not in table_names:
-                        # 좀 더 유연하게: 's'가 붙은 경우나 뺀 경우 모두 체크
-                        if not any(tn.startswith(target_table) for tn in table_names):
-                            raise ValueError(f"Foreign key '{col_name}' in table '{table.table_name}' refers to non-existent base table logic (Expected: {target_table} or {target_table}s)")
-        return self
+    # @model_validator(mode="after")
+    # def validate_foreign_keys(self) -> "ApiDataModelerOutput":
+    #     table_names = {t.table_name for t in self.tables}
+    #     for table in self.tables:
+    #         for col in table.columns:
+    #             col_name = col.get("name", "")
+    #             if col_name.endswith("_id") and col_name != "id":
+    #                 target_table = col_name[:-3] # user_id -> user
+    #                 # 복수형 처리 (users, orders 등)
+    #                 if target_table not in table_names and (target_table + "s") not in table_names:
+    #                     # 좀 더 유연하게: 's'가 붙은 경우나 뺀 경우 모두 체크
+    #                     if not any(tn.startswith(target_table) for tn in table_names):
+    #                         raise ValueError(f"Foreign key '{col_name}' in table '{table.table_name}' refers to non-existent base table logic (Expected: {target_table} or {target_table}s)")
+    #     return self
 
 class SAAnalysisOutput(BaseModel):
     thinking: str = Field(default="", description="최종 검증 및 정합성 검토 과정")
