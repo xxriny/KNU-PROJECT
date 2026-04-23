@@ -13,7 +13,8 @@ sys.path.insert(0, ROOT_DIR)
 
 from pipeline.domain.sa.test.sa_test_utils import UsageTracker
 from pipeline.domain.sa.nodes.component_scheduler import component_scheduler_node
-from pipeline.domain.sa.nodes.api_data_modeler import api_data_modeler_node
+from pipeline.domain.sa.nodes.api_modeler import api_modeler_node
+from pipeline.domain.sa.nodes.db_schema_architect import db_schema_architect_node
 from pipeline.domain.sa.nodes.sa_analysis import sa_analysis_node
 from pipeline.core.state import PipelineState, make_sget
 from pipeline.core.node_base import NodeContext
@@ -83,9 +84,12 @@ def run_sa_pipeline(scenario: SAScenario, error_details: list) -> Dict[str, Any]
         summary = ""
         if "component_scheduler_output" in result:
             summary = f"Components: {len(result['component_scheduler_output'].get('components', []))}"
-        elif "api_data_modeler_output" in result:
-            out = result["api_data_modeler_output"]
-            summary = f"APIs: {len(out.get('apis', []))}, Tables: {len(out.get('tables', []))}"
+        elif "api_modeler_output" in result:
+            out = result["api_modeler_output"]
+            summary = f"APIs: {len(out.get('apis', []))}"
+        elif "db_schema_architect_output" in result:
+            out = result["db_schema_architect_output"]
+            summary = f"Tables: {len(out.get('tables', []))}"
         elif "sa_analysis_output" in result:
             out = result["sa_analysis_output"]
             summary = f"Status: {out.get('status')}, Gaps: {len(out.get('gaps', []))}"
@@ -102,13 +106,19 @@ def run_sa_pipeline(scenario: SAScenario, error_details: list) -> Dict[str, Any]
         return {"status": "ERROR", "error": comp_res["error"]}
     state.update(comp_res)
 
-    # Step 2: Data Modeling
-    model_res = api_data_modeler_node(state)
-    if log_output("api_data_modeler", model_res):
-        return {"status": "ERROR", "error": model_res["error"]}
-    state.update(model_res)
+    # Step 2: API Modeling
+    api_res = api_modeler_node(state)
+    if log_output("api_modeler", api_res):
+        return {"status": "ERROR", "error": api_res["error"]}
+    state.update(api_res)
 
-    # Step 3: Analysis
+    # Step 3: DB Schema Architect
+    db_res = db_schema_architect_node(state)
+    if log_output("db_schema_architect", db_res):
+        return {"status": "ERROR", "error": db_res["error"]}
+    state.update(db_res)
+
+    # Step 4: Analysis
     analysis_res = sa_analysis_node(state)
     if log_output("sa_analysis", analysis_res):
         return {"status": "ERROR", "error": analysis_res["error"]}
@@ -123,8 +133,8 @@ def run_sa_pipeline(scenario: SAScenario, error_details: list) -> Dict[str, Any]
     else:
         print(f"   [WARN] Result: {status} with {len(gaps)} gaps.")
         
-    # STEP 4: 통합 Judge
-    print(f"   [Step 4] Running Integration Judge for Developer Feedback...")
+    # STEP 5: 통합 Judge
+    print(f"   [Step 5] Running Integration Judge for Developer Feedback...")
     from pipeline.domain.sa.test.integration.sa_integration_judge import judge_integration
     
     judge_res = judge_integration(scenario.name, scenario.rtm, state.get("sa_analysis_output"))
@@ -135,6 +145,7 @@ def run_sa_pipeline(scenario: SAScenario, error_details: list) -> Dict[str, Any]
         "bundle": state.get("sa_analysis_output"),
         "judge_report": judge_res 
     }
+
 
 def run_sa_benchmark():
     print("\n" + "="*80)
