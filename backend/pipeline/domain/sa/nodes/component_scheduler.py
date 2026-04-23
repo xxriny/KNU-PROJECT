@@ -37,17 +37,13 @@ def _to_compact_text(items: list[dict]) -> str:
     if not items: return "없음"
     return "\n".join("- " + ", ".join(f"{k}: {v}" for k, v in item.items() if v) for item in items)
 
-def _build_user_message(merged_project: dict, feedback_gaps: list[str] = None) -> str:
-    """LLM 메시지 최적화 (토큰 절감) 및 피드백 반영"""
+def _build_user_message(merged_project: dict) -> str:
+    """LLM 메시지 최적화 (토큰 절감)"""
     plan = merged_project.get("plan", {})
     rtm = plan.get("requirements_rtm", [])
     pruned_rtm = _to_compact_text([{"id": r.get("id"), "desc": r.get("desc")} for r in rtm])
     
-    feedback_section = ""
-    if feedback_gaps:
-        feedback_section = f"\n[IMPORTANT: FEEDBACK FROM PREVIOUS ANALYSIS]\n이전 설계 분석에서 다음과 같은 결함이 발견되었습니다. 이번 설계에서 반드시 해결하십시오:\n" + "\n".join(f"- {gap}" for gap in feedback_gaps) + "\n"
-        
-    return f"\n[Merge Strategy]\n{merged_project.get('merge_strategy', '')}\n\n[Requirements]\n{pruned_rtm}\n{feedback_section}"
+    return f"\n[Merge Strategy]\n{merged_project.get('merge_strategy', '')}\n\n[Requirements]\n{pruned_rtm}"
 
 from observability.logger import get_logger
 
@@ -59,16 +55,8 @@ def component_scheduler_node(ctx: NodeContext) -> dict:
     logger.info("=== [Node Entry] component_scheduler_node ===")
     merged_project = sget("merged_project", {})
 
-    # 1. Feedback & Looping check
-    sa_anal_out = sget("sa_analysis_output", {})
-    feedback_gaps = sa_anal_out.get("gaps", [])
-    sa_loop_count = sget("sa_loop_count", 0)
-    
-    if feedback_gaps:
-        logger.info(f"Retrying component design (Loop:{sa_loop_count}) with {len(feedback_gaps)} gaps.")
-
-    # 2. Prepare optimized user prompt
-    user_content = _build_user_message(merged_project, feedback_gaps)
+    # 1. Prepare optimized user prompt
+    user_content = _build_user_message(merged_project)
     
     # 3. Call LLM
     res = call_structured(

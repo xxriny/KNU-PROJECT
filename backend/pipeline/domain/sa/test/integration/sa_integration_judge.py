@@ -13,6 +13,8 @@ class SAIntegrationJudgeOutput(BaseModel):
     interface_consistency: str = Field(..., description="API와 컴포넌트 간 인터페이스 일치 여부")
     requirement_coverage: str = Field(..., description="전체 요구사항 반영도")
     suggestions: str = Field(..., description="파이프라인 개선 제안")
+    root_cause: str = Field(..., description="결함이 발생한 근본 원인 분석 (어떤 노드의 한계인가?)")
+    remediation_strategy: str = Field(..., description="해결을 위한 구체적 가이드 (프롬프트 수정, 제약 조건 추가 등)")
 
 JUDGE_SYSTEM_PROMPT = """
 당신은 SA 파이프라인의 통합 품질을 평가하는 '수석 통합 아키텍트'이자 QA 전문가입니다.
@@ -29,6 +31,10 @@ JUDGE_SYSTEM_PROMPT = """
 1. 인터페이스 일치: API 스키마와 컴포넌트 로직 간의 필드명/데이터 타입 일치 여부.
 2. 데이터 정합성: API가 참조하는 모든 엔티티가 DB 테이블로 정의되었는가?
 3. 검증 정확성: 설계의 결함을 놓치지 않고 분석 결과(status, gaps)에 반영했는가?
+
+[디벨로퍼 피드백 지침]
+- **Root Cause**: 단순히 "실패했다"가 아니라, "api_data_modeler가 FE 컴포넌트의 role을 오해함"과 같이 구체적인 병목 지점을 짚어주십시오.
+- **Remediation**: "프롬프트의 [설계 규칙] 섹션에 ~라는 제약 사항을 추가하십시오"와 같이 바로 코드에 반영 가능한 수준의 가이드를 제공하십시오.
 """
 
 def judge_integration(scenario_name: str, requirements: list, sa_bundle: Dict[str, Any]):
@@ -62,10 +68,11 @@ def judge_integration(scenario_name: str, requirements: list, sa_bundle: Dict[st
         report = res.parsed
         print(f"▶ Score: {report.score} / 5")
         print(f"▶ Rationale: {report.rationale}")
-        print(f"▶ Interface: {report.interface_consistency}")
-        print(f"▶ Coverage: {report.requirement_coverage}")
-        print(f"▶ Suggestions: {report.suggestions}")
+        print(f"▶ Root Cause: {report.root_cause}")
+        print(f"▶ Remediation: {report.remediation_strategy}")
         print("-"*80 + "\n")
+        return report.model_dump()
         
     except Exception as e:
         print(f"Judge Error: {str(e)}")
+        return None

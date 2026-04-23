@@ -101,21 +101,12 @@ def _route_pm_integration(state: PipelineState) -> str:
 
 
 def _route_sa_analysis(state: PipelineState) -> str:
-    """SA Analysis 결과를 보고 설계 단계로 재시도 여부를 결정합니다."""
+    """SA Analysis 결과를 보고 설계 단계로 재시도 여부를 결정합니다. (루프 차단 모드)"""
     # 1. 에러 체크
     if _check_status(state) == "error":
         return "error"
     
-    # 2. 루프 횟수 제한 (Max 3회 재시도)
-    sa_loop_count = state.get("sa_loop_count", 0)
-    if sa_loop_count >= 3:
-        return "finish"
-
-    # 3. 분석 결과 체크
-    sa_output = state.get("sa_analysis_output", {})
-    if sa_output.get("status") == "FAIL":
-        return "loop"
-        
+    # 2. 루프 차단: 결과에 상관없이 1회 실행 후 종료
     return "finish"
 
 
