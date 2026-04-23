@@ -1,26 +1,24 @@
 {
-  "timestamp": "2026-04-23T16:25:36.605133",
+  "timestamp": "2026-04-23T17:52:25.955120",
   "summary": {
-    "total_tokens": 8484,
-    "total_cost": 0.010931320000000001,
-    "avg_retry": 0.0
+    "total_tokens": 29322,
+    "total_cost": 0.0216982
   },
   "scenarios": [
     {
       "name": "ST-01: Nightmare Intergalactic Logistics",
       "status": "FAIL",
-      "retries": 0,
-      "tokens": 8484,
-      "cost": 0.010931320000000001,
-      "duration": 93.41194152832031,
+      "tokens": 29322,
+      "cost": 0.0216982,
+      "duration": 126.53154253959656,
       "judge_report": {
         "score": 5,
-        "rationale": "설계 산출물에서 API와 Table이 완전히 누락되는 치명적인 결함이 발생했으나, 검증 노드(sa_analysis)가 이를 정확히 감지하여 'FAIL'로 판정하고 명확한 Gap 분석을 수행했습니다. 파이프라인의 자가 검증 능력이 완벽하게 작동하였으므로 검증 관점에서 만점을 부여합니다.",
-        "interface_consistency": "API와 Table이 누락되어 컴포넌트와의 인터페이스 일치 여부를 물리적으로 확인할 수 없습니다. 단, 검증 노드가 외부 인터페이스 부재를 정확히 지적했습니다.",
-        "requirement_coverage": "컴포넌트 레벨에서는 REQ-001부터 REQ-005까지의 요구사항이 모두 반영되었으나, 데이터 영속성(Table)과 외부 인터페이스(API) 커버리지는 0%입니다. 검증 노드가 이 불균형을 정확히 식별했습니다.",
-        "suggestions": "API 및 Table 생성 노드의 실행 여부와 프롬프트 전달 과정을 점검하고, 빈 배열 반환을 방지하는 강제 조항을 추가하여 파이프라인의 설계 노드 안정성을 높여야 합니다.",
-        "root_cause": "API 및 Table을 생성하는 설계 노드(예: api_designer, db_modeler)가 파이프라인 오케스트레이션 오류로 인해 실행되지 않았거나, 입력 컨텍스트를 제대로 처리하지 못해 빈 배열을 반환한 파이프라인 연결/실행 병목이 원인입니다.",
-        "remediation_strategy": "파이프라인 워크플로우에서 API/Table 생성 노드의 입출력 데이터 매핑을 디버깅하십시오. 또한 해당 노드의 프롬프트 [설계 규칙] 섹션에 '어떠한 경우에도 빈 배열을 반환하지 마십시오. 제공된 Component를 바탕으로 반드시 1개 이상의 API와 Table을 도출해야 합니다.'라는 엄격한 제약 조건을 추가하십시오."
+        "rationale": "설계 산출물(Components, APIs, Tables) 간에 타입 불일치(dict vs string, datetime vs string), 명칭 불일치(hash_schema vs hashed_schema), DB 스키마의 구체적 데이터 타입(UUID, JSONB) 누락 등 다수의 정합성 결함이 존재했습니다. 그러나 검증 노드(sa_analysis)가 이러한 인터페이스 불일치와 데이터 정합성 문제를 완벽하게 식별하고, 구체적인 Target, Reason, Action을 포함하여 'FAIL'로 정확히 판정했습니다. 파이프라인의 자가 검증 및 결함 탐지 능력이 요구사항을 완벽히 충족하므로 만점을 부여합니다.",
+        "interface_consistency": "컴포넌트와 API 간(예: `response_data`, `challenge_data`의 dict vs string), API와 DB 간(예: `hash_schema` vs `hashed_schema`, `country_code` 단수/복수) 다수의 불일치가 발생했으나, 분석 노드가 이를 모두 정확하게 식별해 냈습니다.",
+        "requirement_coverage": "5개의 복잡한 요구사항(다중 주권 과세, 상대성 재고 관리, 무한 순환 공급망, 반물질 에스크로, 영지식 증명)에 대응하는 컴포넌트, API, 테이블이 모두 도출되어 기능적 커버리지는 100% 달성되었습니다.",
+        "suggestions": "설계 노드들이 데이터를 생성할 때 엄격한 타입 매핑 규칙을 따르도록 프롬프트를 개선해야 합니다. 특히 DB 스키마 설계 시 식별자(UUID)와 복합 데이터 타입(JSONB)의 명시적 선언을 강제하는 가이드가 필요합니다.",
+        "root_cause": "설계 노드(api_data_modeler, db_schema_architect)가 컴포넌트의 인터페이스 정의를 API 및 DB 스키마로 변환할 때, 엄격한 타입 매핑 및 명명 규칙을 강제받지 않아 발생한 병목입니다. RDBMS 스키마 설계 시 복합 데이터에 대한 JSONB 타입 지정이나 식별자에 대한 UUID 타입 지정 지침이 프롬프트에 부재했습니다.",
+        "remediation_strategy": "1. `api_data_modeler` 프롬프트의 [설계 규칙]에 '컴포넌트 인터페이스의 dict 타입은 API 스키마에서 {}로, datetime은 ISO8601 string으로 변환 규칙을 엄격히 적용하라'는 제약 조건을 추가하십시오. 2. `db_schema_architect` 프롬프트에 '모든 PK/FK는 UUID 타입을 명시하고, API에서 배열이나 객체로 전달되는 필드는 JSONB 또는 배열 타입으로 데이터 타입을 반드시 명시하라'는 지침을 추가하십시오."
       }
     }
   ]

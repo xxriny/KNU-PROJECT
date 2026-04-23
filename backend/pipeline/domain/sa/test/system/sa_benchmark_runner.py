@@ -50,7 +50,7 @@ SCENARIOS = [
 # [BENCHMARK RUNNER] 
 # --------------------------------------------------------------------------------
 
-def run_sa_pipeline(scenario: SAScenario) -> Dict[str, Any]:
+def run_sa_pipeline(scenario: SAScenario, error_details: list) -> Dict[str, Any]:
     """단일 파이프라인 실행을 수행합니다."""
     api_key = os.getenv("GEMINI_API_KEY")
     model = DEFAULT_MODEL # 프로젝트 표준 모델 사용
@@ -68,9 +68,6 @@ def run_sa_pipeline(scenario: SAScenario) -> Dict[str, Any]:
         "skip_rag_persistence": False # 즉시 저장 활성화
     }
 
-    # 에러 세부 사항 저장용
-    error_details = []
-
     def log_output(node_name, result):
         if "error" in result:
             error_msg = result["error"]
@@ -79,9 +76,9 @@ def run_sa_pipeline(scenario: SAScenario) -> Dict[str, Any]:
                 "error": error_msg,
                 "timestamp": datetime.now().isoformat()
             })
-            print(f"   ❌ [ERROR from {node_name}] Details saved to error_details.json")
-            return
-
+            print(f"   [ERROR from {node_name}] {error_msg}")
+            return True # 에러 발생함
+        
         keys = list(result.keys())
         summary = ""
         if "component_scheduler_output" in result:
@@ -92,34 +89,39 @@ def run_sa_pipeline(scenario: SAScenario) -> Dict[str, Any]:
         elif "sa_analysis_output" in result:
             out = result["sa_analysis_output"]
             summary = f"Status: {out.get('status')}, Gaps: {len(out.get('gaps', []))}"
-        print(f"   📤 [OUTPUT from {node_name}] Keys: {keys} | {summary}")
+        
+        print(f"   [OUTPUT from {node_name}] Keys: {keys} | {summary}")
+        return False
 
     # 2. 파이프라인 순차 실행
     print(f"\n[Execution: Initial Design]")
     
     # Step 1: Scheduling
     comp_res = component_scheduler_node(state)
-    log_output("component_scheduler", comp_res)
+    if log_output("component_scheduler", comp_res):
+        return {"status": "ERROR", "error": comp_res["error"]}
     state.update(comp_res)
 
     # Step 2: Data Modeling
     model_res = api_data_modeler_node(state)
-    log_output("api_data_modeler", model_res)
+    if log_output("api_data_modeler", model_res):
+        return {"status": "ERROR", "error": model_res["error"]}
     state.update(model_res)
 
     # Step 3: Analysis
     analysis_res = sa_analysis_node(state)
-    log_output("sa_analysis", analysis_res)
+    if log_output("sa_analysis", analysis_res):
+        return {"status": "ERROR", "error": analysis_res["error"]}
     state.update(analysis_res)
 
     analysis_out = state.get("sa_analysis_output", {})
-    status = analysis_out.get("status")
+    status = analysis_out.get("status", "FAIL")
     gaps = analysis_out.get("gaps", [])
 
     if status == "PASS":
-        print(f"   ✅ PASS achieved!")
+        print(f"   [PASS] achieved!")
     else:
-        print(f"   ⚠️ Result: {status} with {len(gaps)} gaps.")
+        print(f"   [WARN] Result: {status} with {len(gaps)} gaps.")
         
     # STEP 4: 통합 Judge
     print(f"   [Step 4] Running Integration Judge for Developer Feedback...")
@@ -133,21 +135,6 @@ def run_sa_pipeline(scenario: SAScenario) -> Dict[str, Any]:
         "bundle": state.get("sa_analysis_output"),
         "judge_report": judge_res 
     }
-        
-    # STEP 4: 통합 Judge (개발용 피드백 포함)
-    print(f"   [Step 4] Running Integration Judge for Developer Feedback...")
-    from pipeline.domain.sa.test.integration.sa_integration_judge import judge_integration
-    
-    # 현재 시나리오 데이터를 바탕으로 최종 품질 평가
-    judge_res = judge_integration(scenario.name, scenario.rtm, state.get("sa_analysis_output"))
-
-    return {
-        "status": status,
-        "retry_count": min(retry_count, max_retries),
-        "gaps_final": gaps,
-        "bundle": state.get("sa_analysis_output"),
-        "judge_report": judge_res 
-    }
 
 def run_sa_benchmark():
     print("\n" + "="*80)
@@ -155,18 +142,19 @@ def run_sa_benchmark():
     print("="*80)
 
     results = []
+    error_details = []
     total_cost = 0.0
     total_tokens = 0
 
     for scenario in SCENARIOS:
-        print(f"\n🚀 Running Scenario: {scenario.name}")
+        print(f"\n[RUN] Running Scenario: {scenario.name}")
         print(f"   Desc: {scenario.description}")
         
         tracker = UsageTracker()
         
         try:
             with tracker.track():
-                final_res = run_sa_pipeline(scenario)
+                final_res = run_sa_pipeline(scenario, error_details)
             
             summary = tracker.get_summary()
             results.append({
@@ -221,9 +209,9 @@ def run_sa_benchmark():
         error_path = os.path.join(report_dir, "error_details.json")
         with open(error_path, "w", encoding="utf-8") as f:
             json.dump(error_details, f, indent=2, ensure_ascii=False)
-        print(f"📂 Error details saved to: {error_path}")
+        print(f"   Error details saved to: {error_path}")
     
-    print(f"\n📂 Development report saved to: {report_path}")
+    print(f"\n   Development report saved to: {report_path}")
     print("="*80 + "\n")
 
 if __name__ == "__main__":
