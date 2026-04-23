@@ -1,5 +1,5 @@
 """
-pipeline/ast_scanner.py — 소스코드 AST 스캐너
+pipeline/ast_scanner.py — 소스코드 AST 스캐너(수정)
 
 Python 표준 ast 모듈과 정규식으로 소스코드 함수 목록을 추출한다.
 외부 의존성 없음. source_dir이 비어 있거나 파싱 실패 시 빈 리스트로 Graceful degrade.
