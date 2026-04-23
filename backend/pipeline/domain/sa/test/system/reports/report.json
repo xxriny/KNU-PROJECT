@@ -1,24 +1,24 @@
 {
-  "timestamp": "2026-04-23T17:52:25.955120",
+  "timestamp": "2026-04-23T18:08:43.379200",
   "summary": {
-    "total_tokens": 29322,
-    "total_cost": 0.0216982
+    "total_tokens": 31234,
+    "total_cost": 0.01825792
   },
   "scenarios": [
     {
       "name": "ST-01: Nightmare Intergalactic Logistics",
       "status": "FAIL",
-      "tokens": 29322,
-      "cost": 0.0216982,
-      "duration": 126.53154253959656,
+      "tokens": 31234,
+      "cost": 0.01825792,
+      "duration": 179.3553864955902,
       "judge_report": {
         "score": 5,
-        "rationale": "설계 산출물(Components, APIs, Tables) 간에 타입 불일치(dict vs string, datetime vs string), 명칭 불일치(hash_schema vs hashed_schema), DB 스키마의 구체적 데이터 타입(UUID, JSONB) 누락 등 다수의 정합성 결함이 존재했습니다. 그러나 검증 노드(sa_analysis)가 이러한 인터페이스 불일치와 데이터 정합성 문제를 완벽하게 식별하고, 구체적인 Target, Reason, Action을 포함하여 'FAIL'로 정확히 판정했습니다. 파이프라인의 자가 검증 및 결함 탐지 능력이 요구사항을 완벽히 충족하므로 만점을 부여합니다.",
-        "interface_consistency": "컴포넌트와 API 간(예: `response_data`, `challenge_data`의 dict vs string), API와 DB 간(예: `hash_schema` vs `hashed_schema`, `country_code` 단수/복수) 다수의 불일치가 발생했으나, 분석 노드가 이를 모두 정확하게 식별해 냈습니다.",
-        "requirement_coverage": "5개의 복잡한 요구사항(다중 주권 과세, 상대성 재고 관리, 무한 순환 공급망, 반물질 에스크로, 영지식 증명)에 대응하는 컴포넌트, API, 테이블이 모두 도출되어 기능적 커버리지는 100% 달성되었습니다.",
-        "suggestions": "설계 노드들이 데이터를 생성할 때 엄격한 타입 매핑 규칙을 따르도록 프롬프트를 개선해야 합니다. 특히 DB 스키마 설계 시 식별자(UUID)와 복합 데이터 타입(JSONB)의 명시적 선언을 강제하는 가이드가 필요합니다.",
-        "root_cause": "설계 노드(api_data_modeler, db_schema_architect)가 컴포넌트의 인터페이스 정의를 API 및 DB 스키마로 변환할 때, 엄격한 타입 매핑 및 명명 규칙을 강제받지 않아 발생한 병목입니다. RDBMS 스키마 설계 시 복합 데이터에 대한 JSONB 타입 지정이나 식별자에 대한 UUID 타입 지정 지침이 프롬프트에 부재했습니다.",
-        "remediation_strategy": "1. `api_data_modeler` 프롬프트의 [설계 규칙]에 '컴포넌트 인터페이스의 dict 타입은 API 스키마에서 {}로, datetime은 ISO8601 string으로 변환 규칙을 엄격히 적용하라'는 제약 조건을 추가하십시오. 2. `db_schema_architect` 프롬프트에 '모든 PK/FK는 UUID 타입을 명시하고, API에서 배열이나 객체로 전달되는 필드는 JSONB 또는 배열 타입으로 데이터 타입을 반드시 명시하라'는 지침을 추가하십시오."
+        "rationale": "설계 단계에서 컴포넌트의 필드명이 한글로 생성되어 API 및 DB의 영문 필드명과 불일치하는 심각한 결함이 발생했습니다. 그러나 검증 노드(sa_analysis)가 이 명칭 불일치 문제를 'Zero-Tolerance' 기준에 따라 정확히 식별하고 FAIL로 판정하였으며, gaps 배열에 모든 불일치 항목에 대한 구체적인 수정 조치를 완벽하게 도출해냈으므로 검증 능력에 대해 만점을 부여합니다.",
+        "interface_consistency": "불일치 (컴포넌트는 한글 필드명 사용, API와 DB는 영문 snake_case 사용). 단, 검증 파이프라인이 이를 정확히 감지함.",
+        "requirement_coverage": "제시된 5가지 시나리오 요구사항(다중 주권 과세, 상대성 재고, 순환 공급망, 반물질 에스크로, 영지식 증명)에 대응하는 컴포넌트, API, 테이블이 모두 누락 없이 도출되었습니다.",
+        "suggestions": "컴포넌트 설계 노드에 대한 명명 규칙(Naming Convention) 제약 강화 및 다국어 혼용 방지 로직 추가가 필요합니다.",
+        "root_cause": "컴포넌트 설계 노드(component_designer)가 요구사항의 한글 설명을 바탕으로 속성을 추출할 때, 영문 변환을 수행하지 않고 한글 명칭을 그대로 컴포넌트 필드명으로 사용하여 API/DB 설계 노드와의 인터페이스 불일치를 유발했습니다.",
+        "remediation_strategy": "컴포넌트 설계 노드의 프롬프트 [설계 규칙] 섹션에 '모든 컴포넌트의 필드명은 API 스키마 및 DB 컬럼명과 1:1로 매핑되어야 하므로, 반드시 영문 snake_case로 번역하여 작성하십시오. 한글 필드명 사용은 엄격히 금지됩니다.'라는 제약 사항을 추가하십시오."
       }
     }
   ]

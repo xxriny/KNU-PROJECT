@@ -9,7 +9,8 @@ backend_path = os.path.abspath(os.path.join(current_dir, "../../../../../"))
 if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
-from pipeline.domain.sa.nodes.api_data_modeler import api_data_modeler_node
+from pipeline.domain.sa.nodes.api_modeler import api_modeler_node
+from pipeline.domain.sa.nodes.db_schema_architect import db_schema_architect_node
 from sa_unit_judge import judge_node
 from dotenv import load_dotenv
 
@@ -17,34 +18,51 @@ load_dotenv()
 
 def run_test_scenario(scenario_name: str, state: Dict[str, Any], use_judge: bool = True):
     """
-    특정 시나리오에 대해 api_data_modeler_node를 실행하고 결과를 채점합니다.
+    특정 시나리오에 대해 api_modeler_node와 db_schema_architect_node를 차례대로 실행하고 결과를 채점합니다.
     """
     print(f"\n" + "*" * 80)
     print(f" [SCENARIO] {scenario_name} ".center(80, " "))
     print("*" * 80 + "\n")
 
-    # 1. 노드 실행
-    result = api_data_modeler_node(state)
-    
-    if "error" in result:
-        print(f"[ERROR] Node Execution Failed: {result['error']}")
+    # 1. API Modeler 실행
+    api_result = api_modeler_node(state)
+    if "error" in api_result:
+        print(f"[ERROR] API Modeler Failed: {api_result['error']}")
+        return None
+    state.update(api_result)
+
+    api_output = api_result.get("api_modeler_output")
+    if not api_output:
+        print(f"[ERROR] 'api_modeler_output' not found.")
         return None
 
-    output = result.get("api_data_modeler_output")
-    if not output:
-        print(f"[ERROR] 'api_data_modeler_output' not found in result.")
-        print(f"   Full Result: {json.dumps(result, indent=2, ensure_ascii=False)}")
+    # 2. DB Schema Architect 실행
+    db_result = db_schema_architect_node(state)
+    if "error" in db_result:
+        print(f"[ERROR] DB Schema Architect Failed: {db_result['error']}")
+        return None
+    state.update(db_result)
+
+    db_output = db_result.get("db_schema_architect_output")
+    if not db_output:
+        print(f"[ERROR] 'db_schema_architect_output' not found.")
         return None
         
-    # 2. 결과 요약 출력
+    # 3. 결과 요약 출력
     print(f"[SUCCESS] Modeling Result Summary:")
-    print(f"   - Thinking: {output.get('thinking', 'N/A')[:100]}...")
-    print(f"   - APIs: {len(output.get('apis', []))} defined")
-    print(f"   - Tables: {len(output.get('tables', []))} defined")
+    print(f"   - API Thinking: {api_output.get('thinking', 'N/A')[:50]}...")
+    print(f"   - DB Thinking: {db_output.get('thinking', 'N/A')[:50]}...")
+    print(f"   - APIs: {len(api_output.get('apis', []))} defined")
+    print(f"   - Tables: {len(db_output.get('tables', []))} defined")
     
-    # 3. Judge 평가
+    # 4. Judge 평가
     if use_judge:
-        judge_res = judge_node("api_data_modeler", state, output)
+        # 통합된 출력을 만들어서 judge에 전달
+        combined_output = {
+            "apis": api_output.get("apis", []),
+            "tables": db_output.get("tables", [])
+        }
+        judge_res = judge_node("api_and_data_modeler", state, combined_output)
         return judge_res
     return None
 

@@ -80,8 +80,8 @@ def sa_analysis_node(ctx: NodeContext) -> dict:
            sget("features", []))
     
     components = sget("component_scheduler_output", {}).get("components", [])
-    apis = sget("api_data_modeler_output", {}).get("apis", [])
-    tables = sget("api_data_modeler_output", {}).get("tables", [])
+    apis = sget("api_modeler_output", {}).get("apis", [])
+    tables = sget("db_schema_architect_output", {}).get("tables", [])
     run_id = sget("run_id", "unknown_session")
     
     # 1. Python Pre-check (물리적 결함 선행 검출)

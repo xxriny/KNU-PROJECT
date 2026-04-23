@@ -27,10 +27,11 @@ JUDGE_SYSTEM_PROMPT = """
 2. component_scheduler:
    - 도메인별 컴포넌트 분리가 적절하며, 의존성 관계가 순환(Circular)하지 않는가?
    - 요구사항(RTM)의 기능들이 컴포넌트의 'role'에 모두 할당되었는가?
-3. api_data_modeler:
+3. api_and_data_modeler (API Modeler + DB Schema Architect):
    - [필수] Naming Dictionary 준수 (id는 uuid, user_id, snake_case 등)
+   - [필수] 타입 매핑 준수: 객체/배열은 JSONB로, 일자는 ISO8601로 명확히 변환되었는가?
    - [필수] 참조 무결성: API에서 사용하는 foreign key가 tables 목록에 존재하는가?
-   - [필수] Zero-Null Policy: 모든 필드가 의미 있는 값으로 채워졌는가? (특히 request/response schema)
+   - [필수] Zero-Null Policy: request/response 스키마 및 DB 컬럼 등 내부 속성을 절대 비워두지 않았는가?
 4. sa_analysis:
    - [핵심] 설계의 결함을 정확히 찾아냈는가? (설계가 나쁘더라도 분석 노드가 이를 'FAIL'로 짚어내면 만점)
    - 'gaps'가 구체적이고 수정 가능한 형태로 제안되었는가?
