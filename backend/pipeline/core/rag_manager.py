@@ -5,7 +5,7 @@ RAG Manager — 통합 지식 관리 및 적응형 검색 (Phase 2)
 
 from typing import List, Dict, Any, Optional
 from observability.logger import get_logger
-from pipeline.core.utils import call_structured
+from pipeline.core.utils import call_structured, format_chroma_results
 
 logger = get_logger()
 
@@ -48,7 +48,7 @@ class RAGManager:
         """
         from pipeline.domain.pm.nodes.pm_db import query_pm_artifacts
         raw_results = query_pm_artifacts(query, n_results=n_results)
-        items = self._format_chroma_results(raw_results)
+        items = format_chroma_results(raw_results)
         
         # [Adaptive Logic] 계층형 필터링: 동일 feature_id에 대해 가장 유사도가 높은 것만 본문을 유지
         seen_features = {}
@@ -84,22 +84,7 @@ class RAGManager:
         """
         from pipeline.domain.pm.nodes.memo_db import query_memos
         results = query_memos(query, n_results=n_results)
-        return self._format_chroma_results(results)
-
-    def _format_chroma_results(self, results: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """ChromaDB 원시 결과를 표준 리스트 형식으로 변환"""
-        formatted = []
-        if not results or not results.get("ids"):
-            return formatted
-            
-        for i in range(len(results["ids"][0])):
-            formatted.append({
-                "id": results["ids"][0][i],
-                "content": results["documents"][0][i],
-                "metadata": results["metadatas"][0][i],
-                "distance": results["distances"][0][i] if "distances" in results else 0
-            })
-        return formatted
+        return format_chroma_results(results)
 
 # 싱글톤 인스턴스
 rag_manager = RAGManager()

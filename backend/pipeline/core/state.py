@@ -7,6 +7,7 @@ PipelineState 는 이들의 합집합(union)으로 유지하여 하위 호환성
 """
 
 from typing import TypedDict, Annotated
+from pipeline.core.utils import make_sget
 
 
 # ── 리듀서 함수 ─────────────────────────────────
@@ -138,19 +139,4 @@ class PipelineState(_BaseState, _AnalysisFields, _ChatFields, _IdeaFields, total
     pass
 
 
-# ── 헬퍼 함수 ───────────────────────────────────
-
-def sget(state: PipelineState, key: str, default=None):
-    """Shared helper to read values from dict-like/object-like PipelineState."""
-    if hasattr(state, "get"):
-        value = state.get(key, default)
-    else:
-        value = getattr(state, key, default)
-    return default if value is None else value
-
-
-def make_sget(state: PipelineState):
-    """Curried sget — 노드 함수 상단에서 ``sget = make_sget(state)`` 로 사용."""
-    def _sget(key: str, default=None):
-        return sget(state, key, default)
-    return _sget
+# sget and make_sget moved to pipeline.core.utils

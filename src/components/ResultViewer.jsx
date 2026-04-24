@@ -1,11 +1,7 @@
-/**
- * ResultViewer — 파이프라인 산출물 뷰어 (라우터)
- * tabId에 따라 개별 탭 컴포넌트를 렌더링한다.
- */
-
-import React, { useState, useEffect, useRef } from "react";
+import React, { useRef } from "react";
 import useAppStore from "../store/useAppStore";
-import { MessageSquarePlus, Bot, X } from "lucide-react";
+import useCommentPopover from "../hooks/useCommentPopover";
+import { MessageSquarePlus, X, Loader2 } from "lucide-react";
 import OverviewTab from "./resultViewer/OverviewTab";
 import RTMTab from "./resultViewer/RTMTab";
 import StackTab from "./resultViewer/StackTab";
@@ -14,6 +10,9 @@ import SAComponentsTab from "./resultViewer/SAComponentsTab";
 import SAApiTab from "./resultViewer/SAApiTab";
 import SADatabaseTab from "./resultViewer/SADatabaseTab";
 import MemoManager from "./resultViewer/MemoManager";
+import Card from "./ui/Card";
+import Button from "./ui/Button";
+import Skeleton from "./ui/Skeleton";
 
 const TAB_COMPONENTS = {
   overview: OverviewTab,
@@ -27,95 +26,90 @@ const TAB_COMPONENTS = {
 };
 
 export default function ResultViewer({ tabId = "overview" }) {
-  const TabComponent = TAB_COMPONENTS[tabId] || OverviewTab;
-  const { isDarkMode, addComment } = useAppStore();
+  const isDarkMode = useAppStore((state) => state.isDarkMode);
+  const pipelineStatus = useAppStore((state) => state.pipelineStatus);
+  const resultData = useAppStore((state) => state.resultData);
   
-  const [popover, setPopover] = useState({ visible: false, x: 0, y: 0, selectedText: "" });
-  const [commentInput, setCommentInput] = useState("");
+  const TabComponent = TAB_COMPONENTS[tabId] || OverviewTab;
   const contentRef = useRef(null);
 
-  useEffect(() => {
-    const handleMouseUp = (e) => {
-      // Prevent closing when clicking inside the popover
-      if (e.target.closest('.comment-popover')) return;
+  const {
+    popover,
+    commentInput,
+    setCommentInput,
+    handleAddComment,
+    closePopover
+  } = useCommentPopover(contentRef, tabId);
 
-      const selection = window.getSelection();
-      const text = selection.toString().trim();
-
-      // Only trigger if text is selected inside the content area
-      if (text.length > 0 && contentRef.current?.contains(selection.anchorNode)) {
-        const range = selection.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-        
-        // Find container relative position
-        const containerRect = contentRef.current.getBoundingClientRect();
-        
-        setPopover({
-          visible: true,
-          x: rect.left - containerRect.left + (rect.width / 2),
-          y: rect.bottom - containerRect.top + 10,
-          selectedText: text,
-        });
-      } else {
-        setPopover({ visible: false, x: 0, y: 0, selectedText: "" });
-      }
-    };
-
-    document.addEventListener("mouseup", handleMouseUp);
-    return () => document.removeEventListener("mouseup", handleMouseUp);
-  }, []);
-
-  const handleAddComment = () => {
-    if (!commentInput.trim()) return;
-    addComment({ text: commentInput, selectedText: popover.selectedText, section: tabId });
-    setCommentInput("");
-    setPopover({ visible: false, x: 0, y: 0, selectedText: "" });
-    window.getSelection()?.removeAllRanges();
-  };
+  // 로딩 상태 처리
+  const isLoading = pipelineStatus === "running" && !resultData;
 
   return (
-    <div className="relative h-full" ref={contentRef}>
+    <div className="relative h-full overflow-hidden" ref={contentRef}>
+      {/* Comment Popover (Modernized) */}
       {popover.visible && (
         <div 
-          className="comment-popover absolute z-50 p-3 rounded-xl shadow-2xl border flex flex-col gap-2 transform -translate-x-1/2"
+          className="comment-popover absolute z-[100] animate-fade-in animate-slide-up"
           style={{ 
             left: popover.x, 
             top: popover.y,
-            backgroundColor: isDarkMode ? "#1e293b" : "#ffffff",
-            borderColor: isDarkMode ? "#334155" : "#e2e8f0",
-            width: "300px"
+            transform: "translateX(-50%) translateY(10px)"
           }}
         >
-          <div className="text-xs font-bold text-slate-400 mb-1 line-clamp-2 italic">
-            "{popover.selectedText}"
-          </div>
-          <textarea
-            autoFocus
-            className={`w-full text-sm rounded-md p-2 outline-none resize-none h-20 ${isDarkMode ? "bg-slate-900/50 text-white placeholder-slate-500" : "bg-slate-50 text-slate-900 placeholder-slate-400"}`}
-            placeholder="이 부분에 대한 피드백을 남겨주세요..."
-            value={commentInput}
-            onChange={(e) => setCommentInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleAddComment();
-              }
-            }}
-          />
-          <div className="flex justify-between items-center mt-1">
-            <button onClick={() => setPopover({ ...popover, visible: false })} className="text-xs font-bold text-slate-400 hover:text-red-400">취소</button>
-            <button onClick={handleAddComment} className="flex items-center gap-1 bg-blue-500 hover:bg-blue-600 text-white text-xs font-bold py-1 px-3 rounded-md transition-colors">
-              <MessageSquarePlus size={12} /> 댓글 달기
-            </button>
-          </div>
+          <Card variant="solid" className="w-[320px] p-4 shadow-2xl border-blue-500/30 ring-4 ring-blue-500/5">
+            <div className="flex justify-between items-start mb-3">
+              <span className="text-[10px] font-black uppercase tracking-widest text-blue-500">Add Feedback</span>
+              <button onClick={closePopover} className="text-slate-500 hover:text-red-500 transition-colors">
+                <X size={14} />
+              </button>
+            </div>
+            
+            <div className={`text-[11px] font-medium p-2 rounded mb-3 line-clamp-2 italic border-l-2 border-blue-500/30 ${isDarkMode ? "bg-white/5 text-slate-400" : "bg-slate-50 text-slate-500"}`}>
+              "{popover.selectedText}"
+            </div>
+
+            <textarea
+              autoFocus
+              className={`w-full text-[13px] font-medium rounded-lg p-3 outline-none resize-none h-24 mb-3 transition-all border ${
+                isDarkMode 
+                  ? "bg-slate-900/50 border-white/5 focus:border-blue-500/50 text-white" 
+                  : "bg-slate-50 border-slate-200 focus:border-blue-500/50 text-slate-900"
+              }`}
+              placeholder="피드백이나 수정 제안을 입력하세요..."
+              value={commentInput}
+              onChange={(e) => setCommentInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleAddComment();
+                }
+              }}
+            />
+
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={closePopover}>취소</Button>
+              <Button variant="primary" size="sm" onClick={handleAddComment} Icon={MessageSquarePlus}>저장</Button>
+            </div>
+          </Card>
         </div>
       )}
+
       {/* Main Content Area */}
-      <div className="flex h-full overflow-hidden">
-        {/* Right: Document Viewer */}
-        <div className="flex-1 h-full overflow-y-auto doc-font-up selectable relative">
-          <TabComponent />
-        </div>
+      <div className="h-full overflow-hidden flex flex-col">
+        {isLoading ? (
+          <div className="flex-1 p-8 space-y-8 animate-fade-in">
+            <Skeleton className="h-12 w-3/4" />
+            <div className="grid grid-cols-2 gap-4">
+              <Skeleton className="h-32" />
+              <Skeleton className="h-32" />
+            </div>
+            <Skeleton className="h-64" />
+          </div>
+        ) : (
+          <div className="flex-1 h-full overflow-y-auto custom-scrollbar doc-font-up selectable">
+            <TabComponent />
+          </div>
+        )}
       </div>
     </div>
   );

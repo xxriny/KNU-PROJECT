@@ -34,9 +34,6 @@ const PIPELINE_STEPS_BY_TYPE = {
   analysis_create: [...SCAN_STEPS, ...PM_PIPELINE_STEPS, ...SA_PIPELINE_STEPS],
   analysis_reverse: [...SCAN_STEPS, ...SA_PIPELINE_STEPS],
   analysis_update: [...SCAN_STEPS, ...PM_PIPELINE_STEPS, ...SA_PIPELINE_STEPS],
-  revision: [
-    { key: "chat_revision", label: "수정 반영", desc: "기존 RTM 결과를 최소 수정으로 갱신" },
-  ],
   idea_chat: [
     { key: "idea_chat", label: "아이디어 탐색", desc: "아이디어를 구체화하고 다음 분석 방향을 제안" },
   ],

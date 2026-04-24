@@ -4,31 +4,38 @@
     "status": "FAIL",
     "input_idea": "우주 간 물류 배송 시스템을 만들어줘. 행성별 세금 계산, 상대성 이론을 적용한 유효기간 관리, 순환 참조 없는 공급망, 반물질 에스크로 결제, 영지식 증명 익명 인증이 필요해.",
     "requirements_count": 6,
-    "api_count": 7,
-    "table_count": 2,
+    "api_count": 3,
+    "table_count": 1,
     "component_count": 3,
-    "recommendation_count": 3,
-    "cost": 0.0019678,
-    "tokens": 7526,
-    "duration": 80.70955896377563,
+    "recommendation_count": 4,
+    "cost": 0.000605,
+    "tokens": 2372,
+    "duration": 75.31230592727661,
     "gaps": [
-      "RTM FEAT_DELIVERY_001, FEAT_TAX_001|우주 물품 배송 및 세금 계산 관련 API 경로와 DB 테이블을 설계에 추가하십시오."
+      "RTM FEAT_001, FEAT_002|물류 배송 관리 및 세금 자동 계산 관련 API와 DB 스키마를 설계에 추가해야 합니다.",
+      "DB users 테이블|API의 'username' 필드를 DB 'users' 테이블에 VARCHAR 타입으로 추가하세요.",
+      "DB users 테이블|API의 'user_id' 필드를 DB 'users' 테이블에 INT 또는 UUID 타입의 PK로 추가하세요."
     ],
     "recommendations": [
       {
         "priority": "Critical",
-        "target": "RTM FEAT_DELIVERY_001, FEAT_TAX_001",
-        "action": "우주 물품 배송 및 세금 계산 관련 API 경로와 DB 테이블을 설계에 추가하십시오."
+        "target": "RTM FEAT_001, FEAT_002",
+        "action": "물류 배송 관리 및 세금 자동 계산 관련 API와 DB 스키마를 설계에 추가해야 합니다."
+      },
+      {
+        "priority": "Critical",
+        "target": "DB users 테이블",
+        "action": "API의 'username' 필드를 DB 'users' 테이블에 VARCHAR 타입으로 추가하세요."
+      },
+      {
+        "priority": "Critical",
+        "target": "DB users 테이블",
+        "action": "API의 'user_id' 필드를 DB 'users' 테이블에 INT 또는 UUID 타입의 PK로 추가하세요."
       },
       {
         "priority": "Warning",
-        "target": "API 응답 Ref 타입 (UserSummary, UserDetail, AuthTokens, AccessToken, Message)",
-        "action": "각 Ref 타입에 포함될 필드명과 타입을 구체적으로 정의하여 API 명세를 완성하십시오."
-      },
-      {
-        "priority": "Info",
-        "target": "DB auth_tokens.userId",
-        "action": "auth_tokens 테이블의 userId 필드에 인덱스 추가를 고려하여 성능을 최적화하십시오."
+        "target": "API 및 DB 스키마 필드",
+        "action": "'password', 'email', 'token' 필드의 구체적인 데이터 타입(예: VARCHAR(255))을 명시하세요."
       }
     ]
   }

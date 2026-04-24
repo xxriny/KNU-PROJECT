@@ -57,23 +57,15 @@ class PromptCompressor:
 
         # 1. 보존할 키워드 추출
         patterns = self.PRESERVE_PATTERNS + (extra_preserve or [])
-        preserved_segments = []
-        
-        # 간단한 보존 로직: 패턴에 맞는 부분을 임시 토큰으로 치환하거나 
-        # LLMLingua-2의 condition_compare/target_token 등을 활용할 수 있으나,
-        # LLMLingua-2 자체의 forced_reserve 기능을 우선 시도합니다.
         
         try:
-            # LLMLingua-2 API 호출 (지원되지 않는 인자 제거 및 안정화)
-            # force_tokens는 리스트 형태로 전달
+            # LLMLingua-2 API 호출
             result = self.compressor.compress_prompt(
                 [text],
                 rate=target_token_rate,
                 force_tokens=patterns if patterns else None,
-                # chunk_end_any_whitespace 제거 (오류 원인)
             )
             
-            # 결과 파싱 (리스트 또는 단일 딕셔너리 대응)
             if isinstance(result, list) and len(result) > 0:
                 result = result[0]
             
@@ -82,7 +74,7 @@ class PromptCompressor:
             else:
                 compressed_text = text
             
-            # 압축 효율 계산 및 출력 (디버깅)
+            # 압축 효율 계산
             original_len = len(text)
             compressed_len = len(compressed_text)
             savings = (1 - compressed_len / original_len) * 100 if original_len > 0 else 0

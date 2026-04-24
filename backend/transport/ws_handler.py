@@ -11,7 +11,7 @@ import json
 from fastapi import WebSocket, WebSocketDisconnect
 
 from transport.connection_manager import manager
-from orchestration.pipeline_runner import run_analysis, run_revision, run_idea_chat
+from orchestration.pipeline_runner import run_analysis, run_idea_chat
 from observability.logger import get_logger
 
 
@@ -20,7 +20,7 @@ async def websocket_pipeline(websocket: WebSocket):
     WebSocket 파이프라인 엔드포인트.
 
     Client → Server:
-        {"type": "analyze"|"revise"|"idea_chat"|"ping", "payload": {...}}
+        {"type": "analyze"|"idea_chat"|"ping", "payload": {...}}
 
     Server → Client:
         {"type": "status"|"thinking"|"result"|"error"|"pong", "node": "...", "data": {...}}
@@ -45,8 +45,6 @@ async def websocket_pipeline(websocket: WebSocket):
 
             if msg_type == "analyze":
                 await run_analysis(websocket, payload)
-            elif msg_type == "revise":
-                await run_revision(websocket, payload)
             elif msg_type == "idea_chat":
                 await run_idea_chat(websocket, payload)
             elif msg_type == "ping":
