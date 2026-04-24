@@ -59,6 +59,16 @@ def requirement_analyzer_node(state: PipelineState) -> Dict[str, Any]:
         funcs = system_scan.get("sample_functions", []) or []
         if summary or funcs:
             parts.append(f"<existing_system_analysis>\nSummary: {summary}\nScanned Functions: {len(funcs)}\n</existing_system_analysis>")
+    else:
+        # RAG Ingest 결과 확인 (Stage 1 대체 대응)
+        rag_out = sget("rag_ingest_output", {}) or {}
+        if rag_out:
+            parts.append(
+                f"<existing_system_analysis>\n"
+                f"Status: Code base indexed via RAG\n"
+                f"Chunks Ingested: {rag_out.get('chunks_ingested', 0)}\n"
+                f"</existing_system_analysis>"
+            )
             
     user_content = "\n\n".join(parts)
     if not user_content:

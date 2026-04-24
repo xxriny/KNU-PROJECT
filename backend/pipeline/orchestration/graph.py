@@ -10,7 +10,7 @@ from pipeline.core.state import PipelineState
 from pipeline.core.utils import active_usage_log
 
 # Node Chain Definitions
-_SCAN_CHAIN = ("system_scan",)
+_SCAN_CHAIN = ("code_chunker", "code_embedding")
 
 _PM_CHAIN = (
     "requirement_analyzer",
@@ -215,8 +215,9 @@ def get_sa_routing_map() -> dict:
 
 
 def get_analysis_pipeline(action_type: str = "CREATE"):
-    """Full PM-SA pipeline (pm_analysis/sa_analysis removed, advisor handles QA)."""
-    from pipeline.domain.rag.nodes.system_scanner import system_scan_node
+    """Full RAG-PM-SA pipeline."""
+    from pipeline.domain.rag.nodes.code_chunker import code_chunker_node
+    from pipeline.domain.rag.nodes.code_embedding import code_embedding_node
     from pipeline.domain.pm.nodes.requirement_analyzer import requirement_analyzer_node
     from pipeline.domain.pm.nodes.stack_retriever import stack_retriever_node
     from pipeline.domain.pm.nodes.stack_planner import stack_planner_node
@@ -228,8 +229,9 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     from pipeline.domain.sa.nodes.sa_embedding import sa_embedding_node
 
     workflow = StateGraph(PipelineState)
-    # Scan
-    workflow.add_node("system_scan", system_scan_node)
+    # RAG Ingest
+    workflow.add_node("code_chunker", code_chunker_node)
+    workflow.add_node("code_embedding", code_embedding_node)
     # PM
     workflow.add_node("requirement_analyzer", requirement_analyzer_node)
     workflow.add_node("stack_retriever", stack_retriever_node)
@@ -243,8 +245,9 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     workflow.add_node("sa_embedding", sa_embedding_node)
 
     # Edges
-    workflow.add_edge(START, "system_scan")
-    workflow.add_edge("system_scan", "requirement_analyzer")
+    workflow.add_edge(START, "code_chunker")
+    workflow.add_edge("code_chunker", "code_embedding")
+    workflow.add_edge("code_embedding", "requirement_analyzer")
     workflow.add_edge("requirement_analyzer", "stack_retriever")
     workflow.add_edge("stack_retriever", "stack_planner")
     workflow.add_edge("stack_planner", "pm_embedding")
