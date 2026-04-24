@@ -30,3 +30,14 @@ def get_rag_query_pipeline():
     graph.set_entry_point("code_retriever")
     graph.add_edge("code_retriever", END)
     return graph.compile()
+
+
+def get_rag_routing_map() -> dict:
+    return {
+        "first_node": "code_chunker",
+        "next_nodes": {
+            "code_chunker": ["code_embedding"],
+            "code_embedding": [],
+        },
+        "start_message": "코드 RAG 인제스트 시작 (청킹 및 임베딩)...",
+    }

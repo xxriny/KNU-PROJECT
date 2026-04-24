@@ -23,6 +23,7 @@ from pipeline.orchestration.aux_graphs import (
 from pipeline.orchestration.rag_graph import (
     get_rag_ingest_pipeline,
     get_rag_query_pipeline,
+    get_rag_routing_map,
 )
 
 __all__ = [
@@ -38,5 +39,6 @@ __all__ = [
     "get_idea_chat_routing_map",
     "get_rag_ingest_pipeline",
     "get_rag_query_pipeline",
+    "get_rag_routing_map",
 ]
 

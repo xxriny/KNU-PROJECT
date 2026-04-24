@@ -18,7 +18,6 @@ from observability.logger import get_logger
 from pipeline.core.action_type import normalize_action_type
 from pipeline.orchestration.facade import (
     get_analysis_pipeline,
-    get_revision_pipeline,
     get_idea_pipeline,
     get_rag_ingest_pipeline,
 )

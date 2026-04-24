@@ -17,10 +17,12 @@ from pipeline.orchestration.facade import (
     get_pm_pipeline,
     get_sa_pipeline,
     get_scan_pipeline,
+    get_rag_ingest_pipeline,
     get_pipeline_routing_map,
     get_pm_routing_map,
     get_sa_routing_map,
     get_scan_routing_map,
+    get_rag_routing_map,
     get_idea_chat_routing_map,
 )
 from pipeline.core.action_type import ANALYSIS_ACTION_TYPES, normalize_action_type
@@ -155,13 +157,13 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
         "run_id": run_id,
     }
 
-    # 1. Project Scan (Stage 1) - AST 분석 등 기초 정보 수집
+    # 1. RAG Ingestion (Stage 1) - 코드 청킹 및 벡터 색인
     scan_result = await _run_pipeline_base(
         ws,
-        pipeline=get_scan_pipeline(),
-        routing=get_scan_routing_map(),
+        pipeline=get_rag_ingest_pipeline(),
+        routing=get_rag_routing_map(),
         state_payload=initial_state,
-        pipeline_type="scan_only",
+        pipeline_type="rag_ingest",
         save=False,
         log=log,
     )
