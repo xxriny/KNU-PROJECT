@@ -9,21 +9,17 @@ from typing import Optional, List, Dict, Any
 from pipeline.core.models.pm_embedding_model import get_pm_embeddings
 from observability.logger import get_logger
 
-# backend 디렉토리 위치 계산 (backend/pipeline/domain/pm/nodes/pm_db.py 기준)
-# 5단계 상위: nodes -> pm -> domain -> pipeline -> backend
-_BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-DB_PATH = os.path.join(_BACKEND_ROOT, "storage", "pm_sa_vector_db")
+from pipeline.core.utils import get_vector_db_client
+from observability.logger import get_logger
 
 # 글로벌 ChromaDB 클라이언트 (싱글톤)
-_client: Optional[chromadb.PersistentClient] = None
-_collection: Optional[chromadb.Collection] = None
+_collection = None
 
 def _get_collection():
-    global _client, _collection
-    if _client is None:
-        os.makedirs(DB_PATH, exist_ok=True)
-        _client = chromadb.PersistentClient(path=DB_PATH)
-        _collection = _client.get_or_create_collection(
+    global _collection
+    if _collection is None:
+        client = get_vector_db_client("pm_sa_vector_db")
+        _collection = client.get_or_create_collection(
             name="pm_artifact_knowledge",
             metadata={"hnsw:space": "cosine"}
         )
@@ -36,7 +32,8 @@ def upsert_pm_artifact(
     feature_id: Optional[str] = None,
     artifact_type: str = "RTM_STACK_BUNDLE",
     version: str = "v1.0",
-    vector: Optional[List[float]] = None
+    vector: Optional[List[float]] = None,
+    phase: str = "PM"
 ) -> str:
     """
     PM 단계의 산출물(Table 04)을 RAG에 저장합니다.
@@ -44,13 +41,18 @@ def upsert_pm_artifact(
     collection = _get_collection()
     
     cid = chunk_id or f"pm_{session_id}_{artifact_type}"
-    content_text = artifact_data if isinstance(artifact_data, str) else str(artifact_data)
+    
+    import json
+    if isinstance(artifact_data, (dict, list)):
+        content_text = json.dumps(artifact_data, ensure_ascii=False)
+    else:
+        content_text = str(artifact_data)
     
     metadata = {
         "session_id": session_id,
         "chunk_id": cid,
         "version": version,
-        "phase": "PM",
+        "phase": phase,
         "artifact_type": artifact_type,
         "feature_id": feature_id or ""
     }

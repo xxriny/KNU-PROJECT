@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from functools import wraps
 from typing import Any
 
-from pipeline.core.state import PipelineState, make_sget
+from pipeline.core.state import PipelineState
+from pipeline.core.utils import make_sget
 from observability.logger import get_logger
 from version import DEFAULT_MODEL
 
@@ -50,6 +51,22 @@ def pipeline_node(node_name: str):
     def decorator(fn):
         @wraps(fn)
         def wrapper(state: PipelineState) -> dict:
+            from pipeline.core.utils import active_usage_log, active_session_id, make_sget
+            from observability.logger import get_logger, setup_session_logger
+            
+            # 1. 컨텍스트 초기화
+            active_usage_log.set([])
+            run_id = state.get("run_id", "unknown")
+            active_session_id.set(run_id)
+            
+            # 최초 실행 시 세션 로거 설정
+            if run_id != "unknown" and not getattr(wrapper, "_logger_setup_done", False):
+                setup_session_logger(run_id)
+                wrapper._logger_setup_done = True
+
+            logger = get_logger(run_id=run_id, node_name=node_name)
+            logger.info(f"[START] Node Entry: {node_name}")
+            
             sget = make_sget(state)
             ctx = NodeContext(
                 state=state,
@@ -58,24 +75,43 @@ def pipeline_node(node_name: str):
                 model=sget("model", DEFAULT_MODEL),
                 node_name=node_name,
             )
+            
             try:
+                # 2. 노드 함수 실행
                 result = fn(ctx)
                 if not isinstance(result, dict):
                     result = {}
 
+                # 3. 토큰 사용량 및 비용 합산
+                new_logs = active_usage_log.get()
+                node_cost = 0.0
+                if new_logs:
+                    for log in new_logs:
+                        log["node"] = node_name
+                    
+                    existing_usage = state.get("accumulated_usage", []) or []
+                    result["accumulated_usage"] = existing_usage + new_logs
+                    
+                    existing_cost = state.get("accumulated_cost", 0.0) or 0.0
+                    node_cost = sum(log["cost"] - log.get("savings", 0.0) for log in new_logs)
+                    result["accumulated_cost"] = max(0.0, existing_cost + node_cost)
+
+                # 4. Thinking Log 처리
                 thinking_text = result.pop("_thinking", None)
                 if thinking_text is not None and "thinking_log" not in result:
                     result["thinking_log"] = ctx.thinking_log + [
                         {"node": node_name, "thinking": thinking_text}
                     ]
 
+                # 5. 다음 스텝 설정
                 if "current_step" not in result:
                     result["current_step"] = f"{node_name}_done"
 
+                logger.info(f"[SUCCESS] Node: {node_name}", cost=f"${node_cost:.4f}")
                 return result
 
             except Exception as e:
-                get_logger().exception(f"{node_name} failed")
+                logger.exception(f"[FAILED] Node: {node_name}", error=str(e))
                 return {
                     "error": f"{node_name} 실패: {e}",
                     "thinking_log": ctx.thinking_log + [

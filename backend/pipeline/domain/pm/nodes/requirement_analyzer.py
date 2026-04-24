@@ -14,16 +14,12 @@ from observability.logger import get_logger
 from version import DEFAULT_MODEL
 
 SYSTEM_PROMPT = """# 역할: 방어적 요구사항 분석가
-## 목표: 시스템 안정성을 위해 '엣지 케이스'를 30% 이상 포함한 원자 단위 기능 도출.
+## 목표: 중복 없는 린(Lean)한 원자 단위 기능 도출.
 ## 규칙:
-- ID: 'FEAT_XXX' 형식 고수.
-- MoSCoW: 보안/안정성/유효성 검사는 반드시 Must-have(MH)로 분류.
-- 방어적 설계: 3가지 실패 시나리오를 상상하고 이를 방어하는 기능 정의.
-- 명세: 유효성 검사, 타임아웃, 재시도, 데이터 부재 대응 포함. 기술 스택 언급 금지.
-## 예시:
-- 입력: "사용자 로그인"
-  - ❌ Bad: 로그인 로직만 나열.
-  - ✅ Good: 로그인(MH), 계정잠금(MH), 데이터검증(MH), 세션정책(SH).
+- **린(Lean) 기획**: 기능 과분할을 방지하고 유사 기능은 통합하십시오.
+- **Thinking**: 반드시 한국어 핵심 단어 **3개 이내**. 문장 금지.
+- **ID/우선순위**: 'FEAT_XXX' 형식 고수 및 MoSCoW(Must/Should/Could/Won't) 적용.
+- **언어**: 반드시 한국어로 작성하십시오.
 """
 
 REVERSE_SYSTEM_PROMPT = """# 역할: 리버스 엔지니어
@@ -32,6 +28,7 @@ REVERSE_SYSTEM_PROMPT = """# 역할: 리버스 엔지니어
 - ID: 'FEAT_XXX' 형식 고수.
 - 원칙: 오직 코드에 존재하는 기능만 기술.
 - 명세: 순수 비즈니스 로직(What) 위주. 기술 스택 제외.
+- 언어 규칙: 모든 분석 내용과 사고 과정(thinking)은 반드시 한국어로 상세히 작성하십시오.
 """
 
 def requirement_analyzer_node(state: PipelineState) -> Dict[str, Any]:
@@ -62,6 +59,16 @@ def requirement_analyzer_node(state: PipelineState) -> Dict[str, Any]:
         funcs = system_scan.get("sample_functions", []) or []
         if summary or funcs:
             parts.append(f"<existing_system_analysis>\nSummary: {summary}\nScanned Functions: {len(funcs)}\n</existing_system_analysis>")
+    else:
+        # RAG Ingest 결과 확인 (Stage 1 대체 대응)
+        rag_out = sget("rag_ingest_output", {}) or {}
+        if rag_out:
+            parts.append(
+                f"<existing_system_analysis>\n"
+                f"Status: Code base indexed via RAG\n"
+                f"Chunks Ingested: {rag_out.get('chunks_ingested', 0)}\n"
+                f"</existing_system_analysis>"
+            )
             
     user_content = "\n\n".join(parts)
     if not user_content:
@@ -76,7 +83,8 @@ def requirement_analyzer_node(state: PipelineState) -> Dict[str, Any]:
             system_prompt=system_prompt,
             user_msg=user_content,
             max_retries=3,
-            temperature=0.1
+            temperature=0.1,
+            compress_prompt=True # Phase 3: Prompt Compression enabled
         )
         out = res.parsed
         usage = res.usage

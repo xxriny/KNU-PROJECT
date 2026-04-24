@@ -1,59 +1,80 @@
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
-from enum import Enum
+"""
+SA Pipeline Schemas — DSL 기반 초압축 출력 스키마 정의
+활성 노드: merge_project → component_scheduler → sa_unified_modeler → sa_analysis
+"""
+from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Dict, Any
 
-class SAStatusEnum(str, Enum):
-    PASS = "Pass"
-    NEEDS_CLARIFICATION = "Needs_Clarification"
-    FAIL = "Fail"
-    SKIPPED = "Skipped"
-    WARNING = "Warning_Hallucination_Detected"
-    ERROR = "Error"
 
-class SAStatus(BaseModel):
-    status: SAStatusEnum = Field(description="상태 판정")
-    confidence: float = Field(default=0.7, description="신뢰도 0.0 ~ 1.0")
-    assumptions: List[str] = Field(default_factory=list)
-    risks: List[str] = Field(default_factory=list)
+# ── Merge Project ────────────────────────────────────────
 
-class RequirementImpact(BaseModel):
-    """요구사항별 영향도 분석 정보"""
-    req_id: str = Field(description="요구사항 ID")
-    impact_level: str = Field(description="High | Medium | Low")
-    change_type: str = Field(description="Create | Modify | Delete")
-    side_effects: str = Field(description="예상 부작용 및 주의사항")
+class MergeProjectOutput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    thinking: str = Field(alias="th", default="", description="단어 5개")
+    mode: str = Field(alias="md", description="C|U|R")
+    base_context: Dict[str, Any] = Field(alias="bc")
+    merge_strategy: str = Field(alias="ms")
 
-class GapReportOutput(BaseModel):
-    """sa_phase2 LLM 출력 스키마"""
-    thinking: str = Field(default="", description="영향도 분석 추론 과정")
-    overall_risk: str = Field(description="프로젝트 전체의 아키텍처 수정 위험도 요약")
-    gap_report: List[RequirementImpact] = Field(description="요구사항별 상세 영향도 분석")
 
-class SystemScanOutput(SAStatus):
-    thinking: str = ""
-    architecture_assessment: str = ""
-    key_modules: List[str] = Field(default_factory=list)
-    concerns: List[str] = Field(default_factory=list)
-    recommended_focus: List[str] = Field(default_factory=list)
+# ── Component Scheduler ─────────────────────────────────
 
-class ArchitectureMappingOutput(BaseModel):
-    thinking: str = ""
-    pattern_name: str = "Clean Architecture"
-    mapped_requirements: List[dict] = Field(default_factory=list)
+class ComponentDefinition(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    domain: str = Field(alias="dm", description="F|B")
+    name: str = Field(alias="nm")
+    role: str = Field(alias="rl")
+    rtms: str = Field(alias="rt", description="ID,ID")
+    deps: str = Field(alias="dp", default="", description="ID,ID")
 
-class SecurityDesignOutput(BaseModel):
-    thinking: str = ""
-    defined_roles: List[dict] = Field(default_factory=list)
-    authz_matrix: List[dict] = Field(default_factory=list)
-    trust_boundaries: List[dict] = Field(default_factory=list)
+class ComponentSchedulerOutput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    thinking: str = Field(alias="th", default="", description="단어 5개")
+    components: List[ComponentDefinition] = Field(alias="cp")
 
-class InterfaceDesignOutput(BaseModel):
-    thinking: str = ""
-    interface_contracts: List[dict] = Field(default_factory=list)
-    guardrails: List[str] = Field(default_factory=list)
 
-class SAPhase8Output(SAStatus):
-    topo_queue: List[str] = Field(default_factory=list)
-    cyclic_requirements: List[str] = Field(default_factory=list)
-    parallel_batches: List[List[str]] = Field(default_factory=list)
-    dependency_sources: Dict[str, Any] = Field(default_factory=dict)
+# ── Unified Modeler (API + DB) ──────────────────────────
+
+class ApiDefinition(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    ep: str = Field(description="M /p")
+    req: str = Field(alias="rq", description="f:t,f:t")
+    res: str = Field(alias="rs", description="f:t|Ref(N)")
+
+class TableDefinition(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    name: str = Field(alias="nm")
+    cols: str = Field(alias="cl", description="n:t:pk,n:t:fk")
+
+class SAUnifiedModelerOutput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    thinking: str = Field(alias="th", default="", description="단어 5개")
+    definitions: Dict[str, Any] = Field(alias="df", default_factory=dict)
+    apis: List[ApiDefinition] = Field(alias="ap")
+    tables: List[TableDefinition] = Field(alias="tb")
+
+
+# ── SA Analysis (검증) ──────────────────────────────────
+
+class SAAnalysisOutput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    thinking: str = Field(alias="th", default="", description="단어 5개")
+    phase: str = Field(alias="ph", default="SA")
+    version: str = Field(alias="vs")
+    bundle_id: str = Field(alias="bi")
+    status: str = Field(alias="st", default="P", description="P|F|W")
+    gaps: List[str] = Field(alias="gp", default_factory=list, description="T|R|A")
+    definitions: Dict[str, Any] = Field(alias="df", default_factory=dict)
+
+
+# ── SA Advisor (수정 조언) ──────────────────────────────
+
+class AdvisorRecommendation(BaseModel):
+    priority: str = Field(description="Critical|Warning|Info")
+    target: str = Field(description="수정 대상 (파일/필드/테이블 등)")
+    action: str = Field(description="구체적 수정 방법")
+
+class SAAdvisorOutput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    thinking: str = Field(alias="th", default="", description="단어 3개")
+    summary: str = Field(alias="sm", default="", description="전체 요약")
+    recommendations: List[AdvisorRecommendation] = Field(alias="rc", default_factory=list)
