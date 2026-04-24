@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from version import APP_VERSION, DEFAULT_MODEL
 from observability.logger import get_logger
 from pipeline.core.action_type import normalize_action_type
-from pipeline.orchestration.facade import get_analysis_pipeline, get_revision_pipeline, get_idea_pipeline
+from pipeline.orchestration.facade import get_analysis_pipeline, get_idea_pipeline
 from orchestration.executor import execute_pipeline
 from orchestration.pipeline_runner import (
     validate_analysis_inputs,
@@ -64,14 +64,6 @@ class AnalysisRequest(BaseModel):
     model: str = DEFAULT_MODEL
     action_type: str = "CREATE"
     source_dir: str = ""
-
-
-class RevisionRequest(BaseModel):
-    user_request: str
-    previous_result: dict = {}
-    chat_history: list = []
-    api_key: str = ""
-    model: str = DEFAULT_MODEL
 
 
 class IdeaChatRequest(BaseModel):
@@ -208,26 +200,6 @@ async def analyze(req: AnalysisRequest):
         return {"status": "error", "error": str(e)}
 
 
-@rest_router.post("/api/revise")
-async def revise(req: RevisionRequest):
-    try:
-        api_key = req.api_key
-        return _to_response(execute_pipeline(
-            get_revision_pipeline(),
-            {
-                "api_key": api_key,
-                "model": req.model,
-                "user_request": req.user_request,
-                "previous_result": req.previous_result,
-                "chat_history": req.chat_history,
-            },
-            "revision",
-        ))
-    except Exception as e:
-        get_logger().exception("revise endpoint failed")
-        return {"status": "error", "error": str(e)}
-
-
 @rest_router.post("/api/idea-chat")
 async def idea_chat(req: IdeaChatRequest):
     try:
@@ -293,17 +265,16 @@ async def restore_session(run_id: str):
         if not results["ids"]:
             return {"status": "error", "error": "해당 세션의 데이터를 찾을 수 없습니다."}
             
-        # 데이터를 UI가 이해할 수 있는 resultData 구조로 재조립
-        restored_data = {
+        # 데이터를 LangGraph Raw State처럼 조립
+        raw_state = {
             "run_id": run_id,
-            "metadata": {"session_id": run_id}
+            "metadata": {"session_id": run_id, "project_name": "Restored Project", "status": "Completed"}
         }
         
         for i in range(len(results["ids"])):
             artifact_type = results["metadatas"][i].get("artifact_type")
             doc_str = results["documents"][i]
             
-            # 데이터 복원 로직 (JSON 우선, Python literal 폴백)
             try:
                 import json
                 parsed_content = json.loads(doc_str)
@@ -315,25 +286,25 @@ async def restore_session(run_id: str):
                     parsed_content = doc_str
                 
             if artifact_type == "PM_BUNDLE":
-                restored_data["pm_bundle"] = parsed_content
+                raw_state["pm_bundle"] = parsed_content
             elif artifact_type == "SA_ARCH_BUNDLE":
-                restored_data["sa_output"] = parsed_content
-                restored_data["sa_arch_bundle"] = parsed_content
-                if isinstance(parsed_content, dict) and "data" in parsed_content:
-                    for key, val in parsed_content["data"].items():
-                        restored_data[key] = val
-                        
+                raw_state["sa_advisor_output"] = parsed_content
+                # Legacy 호환을 위해 sa_output으로도 저장
+                raw_state["sa_output"] = parsed_content
             elif "API" in artifact_type.upper():
-                restored_data["apis"] = parsed_content.get("apis", parsed_content) if isinstance(parsed_content, dict) else parsed_content
+                raw_state["sa_unified_modeler_output"] = parsed_content
             elif "TABLE" in artifact_type.upper() or "DB" in artifact_type.upper():
-                restored_data["tables"] = parsed_content.get("tables", parsed_content) if isinstance(parsed_content, dict) else parsed_content
-                
+                # 이미 SA_ARCH_BUNDLE이나 Unified에 포함되어 있을 확률이 높음
+                if "sa_unified_modeler_output" not in raw_state:
+                    raw_state["sa_unified_modeler_output"] = parsed_content
             elif artifact_type == "RTM_STACK_BUNDLE":
-                restored_data["requirements_rtm"] = parsed_content
-            elif "STACK" in artifact_type.upper():
-                restored_data["tech_stacks"] = parsed_content
+                raw_state["requirements_rtm"] = parsed_content
+
+        # ── 핵심: 새로운 Shaper를 적용하여 UI용 데이터로 변환 ──
+        from result_shaping.result_shaper import shape_result
+        final_data = shape_result(raw_state)
         
-        return {"status": "ok", "data": restored_data}
+        return {"status": "ok", "data": final_data}
         
     except Exception as e:
         get_logger().error(f"Restore failed: {e}")

@@ -206,55 +206,47 @@ code,
   background: rgba(255, 255, 255, 0.2);
 }
 
-/* ── 리사이즈 핸들 커스텀 ────────────────────── */
-[data-panel-group-direction="horizontal"]>[data-resize-handle] {
-  width: 6px;
-  background: transparent;
-  position: relative;
-  cursor: col-resize;
-  z-index: 50;
+/* ── 보고서 전용 유틸리티 (Phase 5) ────────────────────── */
+.report-page-container {
+  @apply max-w-6xl mx-auto px-8 py-16 pb-32 space-y-12 animate-fade-in animate-slide-up;
 }
 
-[data-panel-group-direction="horizontal"]>[data-resize-handle]::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 0;
-  width: 2px;
-  height: 100%;
-  background: transparent;
-  transform: translateX(-50%);
-  transition: all 0.2s ease;
+.report-header-badge-group {
+  @apply flex items-center gap-2 mb-6;
 }
 
-[data-panel-group-direction="horizontal"]>[data-resize-handle]:hover::after,
-[data-panel-group-direction="horizontal"]>[data-resize-handle][data-resize-handle-active]::after {
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--accent);
+.report-title {
+  @apply text-5xl font-black tracking-tight leading-tight mb-4;
 }
 
-[data-panel-group-direction="vertical"]>[data-resize-handle] {
-  height: 6px;
-  background: transparent;
-  position: relative;
-  cursor: row-resize;
-  z-index: 50;
+.report-subtitle {
+  @apply text-lg text-slate-500 font-medium max-w-2xl leading-relaxed;
 }
 
-[data-panel-group-direction="vertical"]>[data-resize-handle]::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 0;
-  height: 2px;
-  width: 100%;
-  background: transparent;
-  transform: translateY(-50%);
-  transition: all 0.2s ease;
+.report-section-title-group {
+  @apply flex items-center gap-3 px-1 mb-6;
 }
 
-[data-panel-group-direction="vertical"]>[data-resize-handle]:hover::after,
-[data-panel-group-direction="vertical"]>[data-resize-handle][data-resize-handle-active]::after {
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--accent);
+.report-section-title {
+  @apply text-2xl font-black tracking-tight;
+}
+
+.report-label-sm {
+  @apply text-[10px] font-black uppercase tracking-widest text-slate-500;
+}
+
+.report-grid-3 {
+  @apply grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6;
+}
+
+.report-grid-2 {
+  @apply grid grid-cols-1 md:grid-cols-2 gap-6;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  @apply w-1.5 h-1.5;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-slate-500/20 hover:bg-slate-500/40;
 }

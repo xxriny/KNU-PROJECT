@@ -101,67 +101,67 @@ export const EMPTY_RESULT_FIELDS = {
   metadata: null,
 };
 
-import useAppStore from "./useAppStore";
-
 /** 배열 타입 검증 및 디버깅 로그 기록 */
 function validateArray(key, data, fallback = []) {
   if (Array.isArray(data)) return data;
   if (!data && data !== "") return fallback;
 
-  // 타입 불일치 발생 시 디버그 로그 기록
-  const actualType = typeof data;
-  const message = `[TypeMismatch] '${key}' expected Array, but got ${actualType}`;
-  
-  // Zustand store의 getState를 통해 직접 액션 호출
-  if (useAppStore.getState().addDebugLog) {
-    useAppStore.getState().addDebugLog({
-      level: "error",
-      key,
-      message,
-      rawData: data
-    });
-  }
-  
-  // 문자열인데 내용이 있는 경우 등 상황에 따라 래핑 혹은 빈 배열 반환
+  // 타입 불일치 발생 시 콘솔에 기록 (순환 참조 방지를 위해 store 직접 접근 지양)
+  console.warn(`[TypeMismatch] '${key}' expected Array, but got ${typeof data}`, data);
+
   if (typeof data === "string" && data.length > 0) return [data];
   return fallback;
 }
 
-/** resultData에서 개별 필드를 추출하는 공통 로직 */
+/** resultData에서 개별 필드를 추출하는 공통 로직 (LLM Shaper 최적화) */
 export function spreadResultData(data) {
-  const pmBundle = data?.pm_bundle || null;
+  if (!data) return EMPTY_RESULT_FIELDS;
+
+  // 1. LLM Shaper가 생성한 표준 필드들 (최우선)
+  const rtm = validateArray("requirements_rtm", data.requirements_rtm || []);
+  const techStacks = validateArray("tech_stacks", data.tech_stacks || []);
+  const apis = validateArray("apis", data.apis || []);
+  const tables = validateArray("tables", data.tables || []);
+  const components = validateArray("components", data.components || []);
+  const recommendations = validateArray("recommendations", data.recommendations || []);
   
-  // 검증 유틸リティ를 통한 안전한 데이터 추출
-  const rtm = validateArray("requirements_rtm", pmBundle?.data?.rtm || data?.requirements_rtm || data?.raw_requirements);
-  const techStacks = validateArray("tech_stacks", pmBundle?.data?.tech_stacks || data?.stack_planner_output?.stack_mapping || data?.stack_planner_output?.m);
-  const pmWarnings = validateArray("pm_warnings", data?.pm_warnings);
-  const thinkingLog = validateArray("thinking_log", data?.thinking_log);
+  // 2. 과거 데이터 또는 내부 번들에서 추출 (폴백)
+  const pmBundle = data.pm_bundle || {};
+  const pmData = pmBundle.data || {};
 
   return {
-    resultData: data || null,
-    pm_bundle: pmBundle,
-    pm_coverage_rate: data?.pm_coverage_rate || 0,
-    pm_warnings: pmWarnings,
-    requirements_rtm: rtm,
-    tech_stacks: techStacks,
-    metadata: data?.metadata || null,
-    semantic_graph: data?.semantic_graph || null,
-    context_spec: data?.context_spec || null,
-    sa_reverse_context: data?.sa_reverse_context || null,
-    sa_output: data?.sa_output || null,
-    sa_artifacts: data?.sa_artifacts || null,
-    system_scan: data?.system_scan || null,
-    sa_phase2: data?.sa_phase2 || null,
-    sa_phase3: data?.sa_phase3 || null,
-    sa_phase4: data?.sa_phase4 || null,
-    sa_phase5: data?.sa_phase5 || null,
-    sa_phase6: data?.sa_phase6 || null,
-    sa_phase7: data?.sa_phase7 || null,
-    sa_phase8: data?.sa_phase8 || null,
-    // [Knowledge Restore] RAG에서 복원된 개별 필드들
-    tables: data?.tables || data?.sa_output?.data?.tables || [],
-    apis: data?.apis || data?.sa_output?.data?.apis || [],
-    sa_advisor_output: data?.sa_advisor_output || (data?.sa_output?.recommendations ? data.sa_output : null),
-    thinking_log: thinkingLog,
+    resultData: data,
+    metadata: data.metadata || {
+      project_name: data.project_name,
+      status: data.status,
+      run_id: data.run_id,
+      action_type: data.action_type
+    },
+    project_overview: data.project_overview || {
+      project_name: data.project_name,
+      summary: data.summary,
+      status: data.status
+    },
+    // 핵심 리스트 데이터
+    requirements_rtm: rtm.length > 0 ? rtm : validateArray("rtm_fallback", pmData.rtm),
+    tech_stacks: techStacks.length > 0 ? techStacks : validateArray("stack_fallback", pmData.stacks),
+    apis: apis,
+    tables: tables,
+    components: components,
+    recommendations: recommendations,
+    
+    // 지표 및 요약
+    pm_coverage_rate: data.pm_coverage_rate || pmData.coverage_rate || 0,
+    pm_warnings: validateArray("pm_warnings", data.pm_warnings || pmData.warnings),
+    metrics: data.metrics || { performance: 0, stability: 0, integrity: "UNKNOWN" },
+    analysis: {
+      summary: data.summary || "분석 결과를 표시할 수 없습니다.",
+      source: "llm_shaper"
+    },
+    
+    // 시스템 필드
+    thinking_log: validateArray("thinking_log", data.thinking_log),
+    sa_output: data.sa_output || data, // 탭 활성화 호환성
+    sa_artifacts: data.sa_artifacts || null,
   };
 }

@@ -9,7 +9,7 @@ sa_analysis를 대체하며 다음 역할을 수행합니다:
 from __future__ import annotations
 import json
 from pipeline.core.node_base import pipeline_node, NodeContext
-from pipeline.core.utils import call_structured
+from pipeline.core.utils import call_structured, safe_get
 from pipeline.domain.sa.schemas import SAAdvisorOutput
 from observability.logger import get_logger
 
@@ -36,28 +36,21 @@ SYSTEM_PROMPT = """# 역할: 시니어 아키텍처 어드바이저 & QA 검증�
 
 # ── 헬퍼 함수 ────────────────────────────────────────────
 
-def _safe_get(obj, keys, default=""):
-    for k in keys:
-        if hasattr(obj, 'get'):
-            v = obj.get(k)
-            if v: return v
-        v = getattr(obj, k, None)
-        if v: return v
-    return default
+# _safe_get removed, now using safe_get from core.utils
 
 
 def _run_python_precheck(apis: list, tables: list) -> list:
     """LLM 호출 전 Python으로 물리적 결함을 선행 검출"""
     gaps = []
     for api in apis:
-        ep = _safe_get(api, ["ep"]).upper()
-        if not _safe_get(api, ["req", "rq"]) and not any(m in ep for m in ["GET", "DELETE"]):
-            gaps.append(f"API: {_safe_get(api, ['ep'])} 의 req가 비어있음")
-        if not _safe_get(api, ["res", "rs"]):
-            gaps.append(f"API: {_safe_get(api, ['ep'])} 의 res가 비어있음")
+        ep = safe_get(api, ["ep"]).upper()
+        if not safe_get(api, ["req", "rq"]) and not any(m in ep for m in ["GET", "DELETE"]):
+            gaps.append(f"API: {safe_get(api, ['ep'])} 의 req가 비어있음")
+        if not safe_get(api, ["res", "rs"]):
+            gaps.append(f"API: {safe_get(api, ['ep'])} 의 res가 비어있음")
     for table in tables:
-        if not _safe_get(table, ["cols", "cl"]):
-            gaps.append(f"DB: {_safe_get(table, ['name', 'nm'])} 테이블에 컬럼 없음")
+        if not safe_get(table, ["cols", "cl"]):
+            gaps.append(f"DB: {safe_get(table, ['name', 'nm'])} 테이블에 컬럼 없음")
     return gaps
 
 
@@ -67,21 +60,21 @@ def _expand_for_frontend(components: list, apis: list, tables: list) -> dict:
     expanded_comps = []
     for c in components:
         expanded_comps.append({
-            "component_name": _safe_get(c, ["name", "nm"]),
-            "role": _safe_get(c, ["role", "rl"]),
+            "component_name": safe_get(c, ["name", "nm"]),
+            "role": safe_get(c, ["role", "rl"]),
             "domain": {"F": "Frontend", "B": "Backend"}.get(
-                _safe_get(c, ["domain", "dm"]), _safe_get(c, ["domain", "dm"])
+                safe_get(c, ["domain", "dm"]), safe_get(c, ["domain", "dm"])
             ),
-            "dependencies": [d.strip() for d in (_safe_get(c, ["deps", "dp"]) or "").split(",") if d.strip()],
-            "rtms": _safe_get(c, ["rtms", "rt"]),
+            "dependencies": [d.strip() for d in (safe_get(c, ["deps", "dp"]) or "").split(",") if d.strip()],
+            "rtms": safe_get(c, ["rtms", "rt"]),
         })
 
     # APIs
     expanded_apis = []
     for a in apis:
-        ep = _safe_get(a, ["ep"])
-        rq = _safe_get(a, ["req", "rq"])
-        rs = _safe_get(a, ["res", "rs"])
+        ep = safe_get(a, ["ep"])
+        rq = safe_get(a, ["req", "rq"])
+        rs = safe_get(a, ["res", "rs"])
 
         def _try_parse(val):
             if isinstance(val, dict): return val
@@ -93,14 +86,13 @@ def _expand_for_frontend(components: list, apis: list, tables: list) -> dict:
         expanded_apis.append({
             "endpoint": ep, "description": ep,
             "request_schema": _try_parse(rq), "response_schema": _try_parse(rs),
-            "ep": ep, "rq": rq, "rs": rs,
         })
 
     # Tables
     expanded_tables = []
     for t in tables:
-        nm = _safe_get(t, ["name", "nm"])
-        cl_raw = _safe_get(t, ["cols", "cl"])
+        nm = safe_get(t, ["name", "nm"])
+        cl_raw = safe_get(t, ["cols", "cl"])
         columns = []
         if isinstance(cl_raw, str):
             for col_str in cl_raw.split(","):
@@ -127,7 +119,6 @@ def _expand_for_frontend(components: list, apis: list, tables: list) -> dict:
             columns = cl_raw
         expanded_tables.append({
             "table_name": nm, "columns": columns,
-            "nm": nm, "cl": cl_raw,
         })
 
     return {"components": expanded_comps, "apis": expanded_apis, "tables": expanded_tables}
@@ -158,10 +149,10 @@ def _build_rag_context(session_id: str) -> str:
 
 
 def _build_user_message(rtm: list, components: list, apis: list, tables: list, precheck_gaps: list, rag_ctx: str) -> str:
-    p_rtm = "\n".join(f"{_safe_get(r, ['id'])}:{_safe_get(r, ['desc'])}" for r in rtm)
-    p_comp = "\n".join(f"{_safe_get(c, ['name', 'nm'])}:{_safe_get(c, ['role', 'rl'])}" for c in components)
-    p_api = "\n".join(f"{_safe_get(a, ['ep'])}|{_safe_get(a, ['req', 'rq'])}|{_safe_get(a, ['res', 'rs'])}" for a in apis)
-    p_db = "\n".join(f"{_safe_get(t, ['name', 'nm'])}|{_safe_get(t, ['cols', 'cl'])}" for t in tables)
+    p_rtm = "\n".join(f"{safe_get(r, ['id'])}:{safe_get(r, ['desc'])}" for r in rtm)
+    p_comp = "\n".join(f"{safe_get(c, ['name', 'nm'])}:{safe_get(c, ['role', 'rl'])}" for c in components)
+    p_api = "\n".join(f"{safe_get(a, ['ep'])}|{safe_get(a, ['req', 'rq'])}|{safe_get(a, ['res', 'rs'])}" for a in apis)
+    p_db = "\n".join(f"{safe_get(t, ['name', 'nm'])}|{safe_get(t, ['cols', 'cl'])}" for t in tables)
     
     precheck_section = ""
     if precheck_gaps:

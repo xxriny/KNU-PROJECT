@@ -8,6 +8,7 @@ PM Agent Pipeline — 유틸리티 v6.3 (FastAPI 구조 적용)
 """
 
 import json, re, os, threading
+from pathlib import Path
 from contextvars import ContextVar
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -24,6 +25,11 @@ from version import DEFAULT_MODEL, DEFAULT_TEMPERATURE, MAX_LLM_RETRIES
 T = TypeVar("T", bound=BaseModel)
 _CACHE_LIMIT = 32
 logger = get_logger()
+
+# Pre-compiled Regex for performance
+_JSON_BLOCK_RE = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL)
+_JSON_FALLBACK_RE = re.compile(r"(\{.*)", re.DOTALL)
+_THINKING_RE = re.compile(r"<thinking>(.*?)</thinking>", re.DOTALL)
 
 def create_context_cache(api_key: str, model: str, system_instruction: str, contents: list, ttl_seconds: int = 3600) -> str:
     """Vertex AI Context Cache 리소스 생성 후 cache_name 반환"""
@@ -71,28 +77,21 @@ def _remember_cache_entry(cache: OrderedDict[str, Any], key: str, value: Any):
         cache.popitem(last=False)
 
 # ── API 키 해석 ────────────────────────────────
-def _get_effective_key(api_key: str) -> str:
+def get_effective_key(api_key: str) -> str:
     """
-    전달받은 api_key가 비어있거나 프론트엔드 플레이스홀더(\'[.env]\') 일 경우
-    환경변수 GEMINI_API_KEY를 사용.
+    전달받은 api_key가 비어있거나 프론트엔드 플레이스홀더('[.env]') 일 경우
+    환경변수 GEMINI_API_KEY를 사용하며, 영문/숫자 유효성 검사를 수행합니다.
     """
     key = (api_key or "").strip()
-    # 프론트엔드가 \'[.env]\' 플레이스홀더를 보낸 경우 환경변수로 폴백
     if key in ("", "[.env]", "[env]"):
         key = os.environ.get("GEMINI_API_KEY", "")
     if not key:
         raise ValueError(
             "Gemini API Key가 설정되지 않았습니다. "
-            "백엔드 .env 파일에 GEMINI_API_KEY=<키> 를 추가하거나 "
-            "프론트엔드 설정에서 API 키를 입력해 주세요."
+            "백엔드 .env 파일에 GEMINI_API_KEY=<키> 를 추가해 주세요."
         )
-    # 비ASCII 문자 포함 여부 검증 (httpx 헤더 인코딩 오류 방지)
     if not key.isascii():
-        raise ValueError(
-            "API 키에 한글 등 비ASCII 문자가 포함되어 있습니다. "
-            "Gemini API 키는 영문자/숫자/하이픈만 포함해야 합니다. "
-            "Google AI Studio에서 정확한 키를 복사해 주세요."
-        )
+        raise ValueError("API 키에 한글 등 비ASCII 문자가 포함되어 있습니다.")
     return key
 
 
@@ -326,10 +325,10 @@ def call_gemini(api_key: str, model: str = DEFAULT_MODEL, system: str = "",
 # ── JSON 유틸 ────────────────────────────────────
 
 def extract_json_block(text: str) -> str:
-    m = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL)
+    m = _JSON_BLOCK_RE.search(text)
     if m:
         return m.group(1)
-    b = re.search(r"(\{.*)", text, re.DOTALL)
+    b = _JSON_FALLBACK_RE.search(text)
     return b.group(1) if b else ""
 
 
@@ -344,14 +343,87 @@ def parse_json_safe(text: str):
 
 
 def extract_thinking(text: str) -> str:
-    m = re.search(r"<thinking>(.*?)</thinking>", text, re.DOTALL)
+    m = _THINKING_RE.search(text)
     return m.group(1).strip() if m else ""
+
+
+def safe_get(obj: Any, keys: list[str], default: Any = "") -> Any:
+    """객체나 딕셔너리에서 여러 키 후보 중 첫 번째로 유효한 값을 추출."""
+    for k in keys:
+        if isinstance(obj, dict):
+            val = obj.get(k)
+        else:
+            val = getattr(obj, k, None)
+        if val:
+            return val
+    return default
+def sget(state: Any, key: str, default: Any = None) -> Any:
+    """Shared helper to read values from dict-like/object-like State objects."""
+    if hasattr(state, "get"):
+        value = state.get(key, default)
+    else:
+        value = getattr(state, key, default)
+    return default if value is None else value
+
+
+def make_sget(state: Any):
+    """Curried sget — used at the top of node functions."""
+    def _sget(key: str, default: Any = None):
+        return sget(state, key, default)
+    return _sget
+def format_chroma_results(results: dict[str, Any]) -> list[dict[str, Any]]:
+    """ChromaDB 원시 결과를 표준 리스트 형식으로 변환."""
+    formatted = []
+    if not results or not results.get("ids") or not results["ids"]:
+        return formatted
+        
+    # results["ids"]는 [[]] 형태일 수도 있고 [] 형태일 수도 있음
+    ids_list = results["ids"][0] if isinstance(results["ids"][0], list) else results["ids"]
+    docs_list = results["documents"][0] if isinstance(results["documents"][0], list) else results["documents"]
+    metas_list = results["metadatas"][0] if isinstance(results["metadatas"][0], list) else results["metadatas"]
+    dists_list = results.get("distances", [[]])[0] if results.get("distances") and isinstance(results["distances"][0], list) else results.get("distances", [])
+
+    for i in range(len(ids_list)):
+        formatted.append({
+            "id": ids_list[i],
+            "content": docs_list[i],
+            "metadata": metas_list[i],
+            "distance": dists_list[i] if i < len(dists_list) else 0
+        })
+    return formatted
+
+
+# ── DB 및 저장소 유틸 ────────────────────────────
+
+def get_backend_root() -> Path:
+    """백엔드 루트 디렉토리 경로 반환."""
+    return Path(__file__).parent.parent.parent
+
+
+def get_storage_path(sub_dir: str = "pm_sa_vector_db") -> str:
+    """백엔드 storage 하위 경로를 안전하게 생성하고 반환."""
+    path = get_backend_root() / "storage" / sub_dir
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+_DB_CLIENTS: dict[str, Any] = {}
+
+def get_vector_db_client(db_name: str = "pm_sa_vector_db") -> Any:
+    """ChromaDB 싱글톤 클라이언트 반환."""
+    import chromadb
+    if db_name not in _DB_CLIENTS:
+        path = get_storage_path(db_name)
+        _DB_CLIENTS[db_name] = chromadb.PersistentClient(path=path)
+    return _DB_CLIENTS[db_name]
 
 
 # ── 직렬화 유틸 ──────────────────────────────────
 
 def to_serializable(obj: Any) -> Any:
     """Pydantic 모델, dict, list를 재귀적으로 JSON 직렬화 가능하게 변환."""
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
     if hasattr(obj, "model_dump"):
         return obj.model_dump()
     if hasattr(obj, "dict"):
@@ -360,6 +432,4 @@ def to_serializable(obj: Any) -> Any:
         return {k: to_serializable(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [to_serializable(item) for item in obj]
-    if isinstance(obj, (str, int, float, bool, type(None))):
-        return obj
     return str(obj)

@@ -1,6 +1,17 @@
 import React, { useState, useEffect } from "react";
 import useAppStore from "../../store/useAppStore";
-import { StickyNote, Trash2, Edit3, Search, Filter, MessageSquarePlus } from "lucide-react";
+import { StickyNote, Trash2, Edit3, Search, Filter, MessageSquarePlus, RefreshCw, Zap } from "lucide-react";
+
+const SECTION_MAP = {
+  overview: "분석 개요",
+  rtm: "요구사항(RTM)",
+  stack: "기술 스택",
+  sa_overview: "아키텍처 분석",
+  sa_components: "컴포넌트 설계",
+  sa_api: "API 설계",
+  sa_db: "데이터베이스 설계",
+  memo: "메모 관리",
+};
 
 export default function MemoManager() {
   const { isDarkMode, userComments, removeComment, syncMemos } = useAppStore();
@@ -19,6 +30,11 @@ export default function MemoManager() {
     const matchesFilter = filterSection === "All" || memo.section === filterSection;
     return matchesSearch && matchesFilter;
   });
+
+  const handleUpdatePipeline = () => {
+    // UI 전용 (향후 업데이트 파이프라인 연동 예정)
+    alert("지적사항을 기반으로 설계 업데이트 파이프라인(UPDATE 모드)을 실행합니다. (고도화 예정)");
+  };
 
   return (
     <div className={`h-full flex flex-col p-6 space-y-6 ${isDarkMode ? "text-slate-300" : "text-slate-800"}`}>
@@ -45,7 +61,7 @@ export default function MemoManager() {
             onChange={(e) => setFilterSection(e.target.value)}
             className="bg-transparent border-none outline-none text-sm cursor-pointer"
           >
-            {sections.map(s => <option key={s} value={s}>{s}</option>)}
+            {sections.map(s => <option key={s} value={s}>{SECTION_MAP[s] || s}</option>)}
           </select>
         </div>
       </div>
@@ -67,7 +83,7 @@ export default function MemoManager() {
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
                       isDarkMode ? "bg-blue-500/20 text-blue-300" : "bg-blue-50 text-blue-600"
                     }`}>
-                      {memo.section}
+                      {SECTION_MAP[memo.section] || memo.section}
                     </span>
                   </div>
                   <h3 className={`text-base font-bold mb-2 ${isDarkMode ? "text-slate-100" : "text-slate-800"}`}>
@@ -94,6 +110,23 @@ export default function MemoManager() {
           ))
         )}
       </div>
+
+      {/* Update Pipeline Trigger Button */}
+      {userComments.length > 0 && (
+        <div className="pt-4 border-t border-white/10">
+          <button
+            onClick={handleUpdatePipeline}
+            className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-lg shadow-lg shadow-blue-500/20 transition-all hover:scale-[1.02] active:scale-95 group"
+          >
+            <RefreshCw size={20} className="group-hover:rotate-180 transition-transform duration-700" />
+            <span>지적사항 반영 설계 업데이트</span>
+            <Zap size={18} className="text-yellow-400 fill-yellow-400 animate-pulse" />
+          </button>
+          <p className="text-center text-[11px] mt-3 opacity-40">
+            현재 기록된 모든 메모를 RAG 컨텍스트로 활용하여 프로젝트 문서를 갱신합니다.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

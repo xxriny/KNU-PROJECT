@@ -9,21 +9,17 @@ from typing import Optional, List, Dict, Any
 from pipeline.core.models.pm_embedding_model import get_pm_embeddings
 from observability.logger import get_logger
 
-# backend 디렉토리 위치 계산 (backend/pipeline/domain/pm/nodes/pm_db.py 기준)
-# 5단계 상위: nodes -> pm -> domain -> pipeline -> backend
-_BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-DB_PATH = os.path.join(_BACKEND_ROOT, "storage", "pm_sa_vector_db")
+from pipeline.core.utils import get_vector_db_client
+from observability.logger import get_logger
 
 # 글로벌 ChromaDB 클라이언트 (싱글톤)
-_client: Optional[chromadb.PersistentClient] = None
-_collection: Optional[chromadb.Collection] = None
+_collection = None
 
 def _get_collection():
-    global _client, _collection
-    if _client is None:
-        os.makedirs(DB_PATH, exist_ok=True)
-        _client = chromadb.PersistentClient(path=DB_PATH)
-        _collection = _client.get_or_create_collection(
+    global _collection
+    if _collection is None:
+        client = get_vector_db_client("pm_sa_vector_db")
+        _collection = client.get_or_create_collection(
             name="pm_artifact_knowledge",
             metadata={"hnsw:space": "cosine"}
         )

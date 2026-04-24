@@ -83,10 +83,10 @@ def _build_pm_overview(
     ).model_dump()
 
 
-def _build_sa_overview(sa_phase2: dict, sa_phase3: dict, skipped_phases: list[str]) -> dict:
+def _build_sa_overview(sa_advisor: dict, skipped_phases: list[str]) -> dict:
     return SAOverview(
-        feasibility=sa_phase3,
-        critical_gaps=sa_phase2.get("gap_report", []),
+        feasibility={"status": sa_advisor.get("status", "Pass")},
+        critical_gaps=sa_advisor.get("gaps", []),
         skipped_phases=skipped_phases,
     ).model_dump()
 
@@ -107,10 +107,10 @@ def _build_priority_counts(requirements_rtm: list) -> dict[str, int]:
     }
 
 
-def _build_layer_distribution(sa_phase5: dict) -> dict[str, int]:
+def _build_layer_distribution(components: list) -> dict[str, int]:
     layer_distribution: dict[str, int] = {}
-    for req in sa_phase5.get("mapped_requirements", []) or []:
-        layer = str(req.get("layer") or "Unknown")
+    for c in components or []:
+        layer = str(c.get("domain") or "Unknown")
         layer_distribution[layer] = layer_distribution.get(layer, 0) + 1
     return layer_distribution
 
@@ -126,11 +126,11 @@ def _build_data_flags(
     }
 
 
-def _compute_next_actions(data_flags: dict[str, bool], sa_phase3: dict, container_summary: dict) -> list[str]:
+def _compute_next_actions(data_flags: dict[str, bool], sa_status: str, container_summary: dict) -> list[str]:
     next_actions: list[str] = []
     if not data_flags["has_rtm"]:
         next_actions.append("요구사항(RTM) 또는 추적 가능한 유저 스토리를 보강하세요.")
-    if (sa_phase3.get("status") or "") != "Pass":
+    if sa_status != "Pass":
         next_actions.append("타당성 판정 근거(reasons/alternatives)를 검토해 리스크를 먼저 해소하세요.")
     if (container_summary.get("external_count") or 0) > 0:
         next_actions.append("외부 연동 구간의 인증/재시도/관측성 정책을 계약 수준에서 명시하세요.")
@@ -147,10 +147,8 @@ def _build_project_overview(
     requirements_rtm: list,
     priority_counts: dict[str, int],
     context_spec: dict,
-    sa_output: dict,
-    sa_phase2: dict,
-    sa_phase3: dict,
-    sa_phase5: dict,
+    sa_advisor: dict,
+    components: list,
     skipped_phases: list[str],
     layer_distribution: dict[str, int],
     container_summary: dict,
@@ -167,11 +165,11 @@ def _build_project_overview(
         requirement_count=len(requirements_rtm),
         priority_counts=priority_counts,
         risks=context_spec.get("risk_factors", []),
-        feasibility_status=sa_phase3.get("status"),
-        complexity_score=sa_phase3.get("complexity_score"),
-        critical_gap_count=len(sa_phase2.get("gap_report", []) or []),
+        feasibility_status=sa_advisor.get("status"),
+        complexity_score=sa_advisor.get("complexity_score"),
+        critical_gap_count=len(sa_advisor.get("gaps", []) or []),
         skipped_phases=skipped_phases,
-        architecture_pattern=sa_phase5.get("pattern") or "Clean Architecture",
+        architecture_pattern=sa_advisor.get("pattern") or "Clean Architecture",
         layer_distribution=layer_distribution,
         container_summary={
             "component_count": int(container_summary.get("component_count") or 0),
@@ -193,89 +191,97 @@ def shape_result(raw_result: dict) -> dict:
     for key, value in raw_result.items():
         if key in _EXCLUDED_KEYS:
             continue
-        sanitized[key] = deep_sanitize(value)
+        sanitized[key] = to_serializable(value)
 
     requirements_rtm: list = sanitized.get("requirements_rtm") or []
     context_spec: dict = sanitized.get("context_spec") or {}
     metadata: dict = sanitized.get("metadata") or {}
-    # --- Compatibility Bridge: Map new modular SA nodes to existing phase-based logic ---
-    sa_merge = sanitized.get("sa_merge_project_output") or {}
+    
+    sa_advisor = sanitized.get("sa_advisor_output") or {}
     sa_sched = sanitized.get("component_scheduler_output") or {}
-    sa_api_model = sanitized.get("api_modeler_output") or {}
-    sa_db_model = sanitized.get("db_schema_architect_output") or {}
-    sa_anal = sanitized.get("sa_advisor_output") or sanitized.get("sa_analysis_output") or {}
-
-    # Map sa_advisor to phase2 (Gaps) and phase3 (Feasibility)
-    sa_phase2: dict = {
-        "status": sa_anal.get("status"),
-        "gap_report": sa_anal.get("gaps", [])
-    }
-    sa_phase3: dict = {
-        "status": sa_anal.get("status", "Pass"),
-        "reasons": [sa_anal.get("summary", "")] if sa_anal.get("summary") else []
-    }
-    # Map scheduler to phase5 (Components)
-    sa_phase5: dict = {
-        "components": sa_sched.get("components", []),
-        "mapped_requirements": [
-            {"REQ_ID": "REQ-101", "layer": c.get("domain"), "description": c.get("role")}
-            for c in sa_sched.get("components", [])
-        ]
-    }
-    # Map modeler to phase7 (Interfaces)
     sa_unified = sanitized.get("sa_unified_modeler_output") or {}
-    all_apis = sa_unified.get("apis", []) or sa_api_model.get("apis", [])
-    all_tables = sa_unified.get("tables", []) or sa_db_model.get("tables", [])
-    sa_phase7: dict = {
-        "interface_contracts": [
-            {"contract_id": f"IF-{i}", "interface_name": a.get("endpoint", a.get("ep")), "input_spec": str(a.get("request_schema", a.get("rq"))), "output_spec": str(a.get("response_schema", a.get("rs")))}
-            for i, a in enumerate(all_apis)
-        ]
-    }
-    
-    # ── Legacy Bridge for UI: 결합된 api_data_modeler_output 생성 ──
-    combined_model = {
-        "thinking": f"{sa_api_model.get('thinking', '')}\n{sa_db_model.get('thinking', '')}",
-        "apis": all_apis,
-        "tables": all_tables
-    }
-    sanitized["api_data_modeler_output"] = combined_model
-    
-    sa_phase6: dict = {}
-    sa_phase8: dict = {}
-    
-    # sa_output: advisor 결과 + expanded data (프론트엔드 탭용)
-    sa_output_data = sanitized.get("sa_output") or {}
-    if not sa_output_data.get("data"):
-        # sa_arch_bundle에서 expanded data를 가져옴
-        sa_bundle = sanitized.get("sa_arch_bundle") or {}
-        bundle_data = sa_bundle.get("data", {})
-        sa_output_data = {
-            **sa_anal,
-            "data": {
-                "components": bundle_data.get("components", sa_sched.get("components", [])),
-                "apis": bundle_data.get("apis", all_apis),
-                "tables": bundle_data.get("tables", all_tables),
-            }
-        }
-    sa_output = sa_output_data
+    sa_output_raw = sanitized.get("sa_output") or {}
+    sa_data = sa_output_raw.get("data") or {}
+    pm_bundle = sanitized.get("pm_bundle") or {}
+    pm_data = pm_bundle.get("data") or {}
+    merged_project = sanitized.get("merged_project") or {}
+    merged_plan = merged_project.get("plan") or {}
 
-    # 프론트엔드 직접 접근용 키 추가
-    if not sanitized.get("components"):
-        sanitized["components"] = sa_output.get("data", {}).get("components", [])
-    if not sanitized.get("apis"):
-        sanitized["apis"] = sa_output.get("data", {}).get("apis", [])
-    if not sanitized.get("tables"):
-        sanitized["tables"] = sa_output.get("data", {}).get("tables", [])
+    # ── Modular Data Aliasing (Prioritize pre-expanded sa_output) ──
+    # 0. PM Stacks
+    sanitized["tech_stacks"] = pm_data.get("stacks") or sanitized.get("stacks") or []
+    
+    extracted_rtm = (
+        merged_plan.get("requirements_rtm") or 
+        pm_data.get("rtm") or 
+        sanitized.get("requirements_rtm") or 
+        []
+    )
+    sanitized["requirements_rtm"] = extracted_rtm
+    requirements_rtm: list = extracted_rtm
+    
+    context_spec: dict = sanitized.get("context_spec") or merged_plan.get("context_spec") or {}
 
-    # Store in sanitized for compiler and UI compatibility
-    sanitized["sa_phase2"] = sa_phase2
-    sanitized["sa_phase3"] = sa_phase3
-    sanitized["sa_phase5"] = sa_phase5
-    sanitized["sa_phase6"] = sa_phase6
-    sanitized["sa_phase7"] = sa_phase7
-    sanitized["sa_phase8"] = sa_phase8
-    sanitized["sa_output"] = sa_output
+    # 1. APIs (sa_output.data.apis > sa_unified.apis)
+    raw_apis = sa_data.get("apis") or sa_unified.get("apis") or []
+    expanded_apis = []
+    for a in raw_apis:
+        # 이미 확장된 객체인지 확인 (sa_advisor가 처리한 경우)
+        if "endpoint" in a:
+            expanded_apis.append(a)
+        else:
+            expanded_apis.append({
+                "endpoint": a.get("ep", "GET /"),
+                "request_schema": a.get("rq") or a.get("req", {}),
+                "response_schema": a.get("rs") or a.get("res", {}),
+                "description": a.get("description", "")
+            })
+    sanitized["apis"] = expanded_apis
+
+    # 2. Tables (sa_output.data.tables > sa_unified.tables)
+    raw_tables = sa_data.get("tables") or sa_unified.get("tables") or []
+    expanded_tables = []
+    for t in raw_tables:
+        if "table_name" in t:
+            expanded_tables.append(t)
+        else:
+            # 수동 확장 (폴백)
+            cols_str = t.get("cl") or t.get("cols", "")
+            columns = []
+            if isinstance(cols_str, str):
+                for col_def in (cols_str.split(",") if cols_str else []):
+                    parts = col_def.split(":")
+                    columns.append({
+                        "name": parts[0] if len(parts) > 0 else "unknown",
+                        "type": parts[1] if len(parts) > 1 else "string",
+                        "constraints": parts[2] if len(parts) > 2 else ""
+                    })
+            else:
+                columns = cols_str # 이미 리스트인 경우
+            expanded_tables.append({"table_name": t.get("nm") or t.get("name", "Unknown"), "columns": columns})
+    sanitized["tables"] = expanded_tables
+
+    # 3. Components
+    raw_components = sa_data.get("components") or sa_sched.get("components") or []
+    expanded_components = []
+    for c in raw_components:
+        if "component_name" in c:
+            expanded_components.append(c)
+        elif "name" in c:
+            # UI가 name과 component_name 둘 다 쓸 수 있으므로 alias 생성
+            c_copy = dict(c)
+            if "nm" in c_copy and "name" not in c_copy: c_copy["name"] = c_copy["nm"]
+            if "dm" in c_copy and "domain" not in c_copy: c_copy["domain"] = c_copy["dm"]
+            if "rl" in c_copy and "role" not in c_copy: c_copy["role"] = c_copy["rl"]
+            expanded_components.append(c_copy)
+        else:
+            expanded_components.append(c)
+    
+    sanitized["components"] = expanded_components
+    sanitized["gaps"] = sa_advisor.get("gaps", [])
+    sanitized["sa_output"] = sa_output_raw # UI 탭 활성화(hasSaData)를 위해 필수
+
+    skipped_phases = _collect_skipped_phases(sanitized)
 
     skipped_phases = _collect_skipped_phases(sanitized)
 
@@ -284,19 +290,36 @@ def shape_result(raw_result: dict) -> dict:
         context_spec=context_spec,
         requirements_rtm=requirements_rtm,
     )
-    sanitized["sa_overview"] = _build_sa_overview(sa_phase2, sa_phase3, skipped_phases)
-
+    sanitized["sa_overview"] = _build_sa_overview(sa_advisor, skipped_phases)
     sanitized["sa_artifacts"] = compile_sa_artifacts(sanitized)
 
-    summary_text, summary_source = _resolve_summary(context_spec, sa_output)
+    summary_text, summary_source = _resolve_summary(context_spec, sa_advisor)
     priority_counts = _build_priority_counts(requirements_rtm)
-    layer_distribution = _build_layer_distribution(sa_phase5)
+    layer_distribution = _build_layer_distribution(expanded_components)
+
+    # ── UI Dashboard Mapping (REQ-UI-001) ──
+    # 1. Metrics
+    sa_status = sa_advisor.get("status", "UNKNOWN")
+    sanitized["metrics"] = {
+        "performance": 95 if sa_status == "PASS" else (80 if sa_status == "WARNING" else 40),
+        "stability": 90 if sa_status == "PASS" else (75 if sa_status == "WARNING" else 30),
+        "integrity": sa_status
+    }
+
+    # 2. Recommendations
+    sanitized["recommendations"] = sa_advisor.get("recommendations", [])
+
+    # 3. Analysis Summary
+    sanitized["analysis"] = {
+        "summary": summary_text or "분석 결과를 생성할 수 없습니다.",
+        "source": summary_source
+    }
 
     container_spec = (sanitized.get("sa_artifacts") or {}).get("container_diagram_spec") or {}
     container_summary = container_spec.get("summary") or {}
 
     data_flags = _build_data_flags(requirements_rtm, sanitized)
-    next_actions = _compute_next_actions(data_flags, sa_phase3, container_summary)
+    next_actions = _compute_next_actions(data_flags, sa_advisor.get("status", "Pass"), container_summary)
 
     usage_summary = {
         "total_tokens": sum(log.get("total", 0) for log in (raw_result.get("accumulated_usage") or [])),
@@ -312,10 +335,8 @@ def shape_result(raw_result: dict) -> dict:
         requirements_rtm=requirements_rtm,
         priority_counts=priority_counts,
         context_spec=context_spec,
-        sa_output=sa_output,
-        sa_phase2=sa_phase2,
-        sa_phase3=sa_phase3,
-        sa_phase5=sa_phase5,
+        sa_advisor=sa_advisor,
+        components=expanded_components,
         skipped_phases=skipped_phases,
         layer_distribution=layer_distribution,
         container_summary=container_summary,
@@ -325,8 +346,3 @@ def shape_result(raw_result: dict) -> dict:
     )
 
     return sanitized
-
-
-def deep_sanitize(obj: Any) -> Any:
-    """to_serializable의 하위 호환 별칭."""
-    return to_serializable(obj)
