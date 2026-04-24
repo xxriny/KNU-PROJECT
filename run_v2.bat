@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title PM Agent Pipeline v2
+title NAVIGATOR
 
 cd /d "%~dp0"
 

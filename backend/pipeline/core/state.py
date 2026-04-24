@@ -7,6 +7,7 @@ PipelineState 는 이들의 합집합(union)으로 유지하여 하위 호환성
 """
 
 from typing import TypedDict, Annotated
+from pipeline.core.utils import make_sget
 
 
 # ── 리듀서 함수 ─────────────────────────────────
@@ -83,11 +84,21 @@ class _AnalysisFields(TypedDict, total=False):
     sa_phase7: dict                  # 인터페이스/가드레일 설계 결과
     sa_phase8: dict                  # 위상 정렬 결과
     sa_output: dict                  # SA 최종 통합 산출물
+    sa_arch_bundle: dict             # SA 최종 임베딩 대상 번들
+    sa_merge_project_output: dict    # merge_project 노드 전용 출력
+    component_scheduler_output: dict # component_scheduler 노드 전용 출력
+    api_data_modeler_output: dict    # [DEPRECATED] api_modeler_output, db_schema_architect_output 사용 권장
+    api_modeler_output: dict         # api_modeler 노드 전용 출력 (APIs)
+    db_schema_architect_output: dict # db_schema_architect 노드 전용 출력 (Tables)
+    sa_analysis_output: dict         # sa_analysis 노드 전용 출력
+    sa_advisor_output: dict          # sa_advisor 노드 수정 조언 출력
+    sa_unified_modeler_output: dict  # sa_unified_modeler 노드 전용 출력
     merged_project: dict             # merge_project가 생성한 단일 결합 입력
     merge_report: dict               # merge_project 판정/병합 리포트
 
     # ── 기술 스택 (PM Loop) 필드 ────────────────
     loop_count: int                  # 회귀 루프 횟수 추적
+    sa_loop_count: int               # SA 설계 회귀 루프 횟수 추적
     stack_crawler_output: dict       # 크롤링 결과
     guardian_output: dict            # 검증 결과
     stack_embedding_output: dict     # 벡터화 결과
@@ -118,9 +129,18 @@ class _IdeaFields(TypedDict, total=False):
     suggested_mode: str              # create | update | reverse
 
 
+# ── RAG 파이프라인 필드 ──────────────────────────
+
+class _RAGFields(TypedDict, total=False):
+    rag_chunks: list                 # CodeChunk dict 목록 (code_chunker 산출물)
+    rag_ingest_output: dict          # RAGIngestOutput dict (code_embedding 산출물)
+    rag_query_input: str             # 코드 검색 쿼리 텍스트
+    rag_query_result: list           # RAGQueryResult dict 목록 (code_retriever 산출물)
+
+
 # ── 통합 상태 (하위 호환) ───────────────────────
 
-class PipelineState(_BaseState, _AnalysisFields, _ChatFields, _IdeaFields, total=False):
+class PipelineState(_BaseState, _AnalysisFields, _ChatFields, _IdeaFields, _RAGFields, total=False):
     """LangGraph 파이프라인 공유 상태 — 모든 모드의 합집합.
 
     개별 모드가 사용하는 필드는 _AnalysisFields, _ChatFields, _IdeaFields를 참조.
@@ -128,19 +148,4 @@ class PipelineState(_BaseState, _AnalysisFields, _ChatFields, _IdeaFields, total
     pass
 
 
-# ── 헬퍼 함수 ───────────────────────────────────
-
-def sget(state: PipelineState, key: str, default=None):
-    """Shared helper to read values from dict-like/object-like PipelineState."""
-    if hasattr(state, "get"):
-        value = state.get(key, default)
-    else:
-        value = getattr(state, key, default)
-    return default if value is None else value
-
-
-def make_sget(state: PipelineState):
-    """Curried sget — 노드 함수 상단에서 ``sget = make_sget(state)`` 로 사용."""
-    def _sget(key: str, default=None):
-        return sget(state, key, default)
-    return _sget
+# sget and make_sget moved to pipeline.core.utils

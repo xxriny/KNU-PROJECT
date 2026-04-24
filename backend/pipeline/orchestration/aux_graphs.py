@@ -9,7 +9,6 @@ from __future__ import annotations
 from langgraph.graph import StateGraph, START, END
 
 from pipeline.core.state import PipelineState
-from pipeline.domain.chat.chat_revision import chat_revision_node
 from pipeline.domain.chat.idea_chat import idea_chat_node
 
 
@@ -23,19 +22,6 @@ class _PipelineRegistry:
         return cls._cache[key]
 
 
-def get_revision_pipeline():
-    """수정 파이프라인 (START -> chat_revision -> END)"""
-
-    def _build():
-        workflow = StateGraph(PipelineState)
-        workflow.add_node("chat_revision", chat_revision_node)
-        workflow.add_edge(START, "chat_revision")
-        workflow.add_edge("chat_revision", END)
-        return workflow.compile()
-
-    return _PipelineRegistry.get_or_build("revision", _build)
-
-
 def get_idea_pipeline():
     """아이디어 발전 파이프라인 (START -> idea_chat -> END)"""
 
@@ -47,14 +33,6 @@ def get_idea_pipeline():
         return workflow.compile()
 
     return _PipelineRegistry.get_or_build("idea_chat", _build)
-
-
-def get_revision_routing_map() -> dict:
-    return {
-        "first_node": "chat_revision",
-        "next_nodes": {"chat_revision": []},
-        "start_message": "수정 요청 처리 중...",
-    }
 
 
 def get_idea_chat_routing_map() -> dict:

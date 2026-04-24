@@ -28,17 +28,18 @@ def stack_retriever_node(state: PipelineState) -> Dict[str, Any]:
     search_query = " ".join(query_parts)
     
     try:
-        # 2. 벡터 DB 검색 (Top-10 추출)
-        # 모든 승인된 스택을 넣는 대신, 관련 있는 10개만 선별하여 Input 토큰을 획기적으로 줄입니다.
-        results = search_tech_stacks(search_query, top_k=10)
+        # 2. RAG Manager를 통한 적응형 검색 (Phase 2)
+        from pipeline.core.rag_manager import rag_manager
+        results = rag_manager.adaptive_search(search_query, context_type="stack", n_results=10)
         
         if not results:
-            logger.info("No matching stacks found in RAG.")
+            logger.info("No matching stacks found via RAGManager.")
             return {"stack_rag_context": "No approved stacks matching requirements were found in RAG."}
             
         # 3. 컨텍스트 포맷팅
         context_lines = ["# Approved Tech Stacks (Relevant to your requirements):"]
         for res in results:
+            # RAGManager는 표준화된 형식을 반환하므로 필드 접근 방식 확인 필요
             line = f"- {res['package_name']} (v{res['version_req']}): {res['content']}"
             if res.get('install_cmd'):
                 line += f" | Install: {res['install_cmd']}"
@@ -46,7 +47,7 @@ def stack_retriever_node(state: PipelineState) -> Dict[str, Any]:
             
         rag_context = "\n".join(context_lines)
         
-        logger.info(f"RAG Retrieval Success: Found {len(results)} relevant stacks.")
+        logger.info(f"RAG Retrieval Success: Found {len(results)} relevant stacks via RAGManager.")
         
         return {
             "stack_rag_context": rag_context,

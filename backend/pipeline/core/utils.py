@@ -8,23 +8,53 @@ PM Agent Pipeline — 유틸리티 v6.3 (FastAPI 구조 적용)
 """
 
 import json, re, os, threading
+from pathlib import Path
 from contextvars import ContextVar
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Generic, Type, TypeVar
 from pydantic import BaseModel, ValidationError
+from observability.logger import get_logger
 from pipeline.core.models.gemini_model import get_gemini_client, get_raw_genai_client
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from pipeline.core.cost_manager import calculate_cost
+from pipeline.core.compressor import get_compressor
 from version import DEFAULT_MODEL, DEFAULT_TEMPERATURE, MAX_LLM_RETRIES
 
 T = TypeVar("T", bound=BaseModel)
 _CACHE_LIMIT = 32
+logger = get_logger()
+
+# Pre-compiled Regex for performance
+_JSON_BLOCK_RE = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL)
+_JSON_FALLBACK_RE = re.compile(r"(\{.*)", re.DOTALL)
+_THINKING_RE = re.compile(r"<thinking>(.*?)</thinking>", re.DOTALL)
+
+def create_context_cache(api_key: str, model: str, system_instruction: str, contents: list, ttl_seconds: int = 3600) -> str:
+    """Vertex AI Context Cache 리소스 생성 후 cache_name 반환"""
+    client = get_raw_genai_client(api_key)
+    try:
+        from google.genai import types
+        # 32k 토큰 미만이면 생성이 실패할 수 있음 (Flash 기준)
+        cache = client.caches.create(
+            model=model,
+            config=types.CreateCachedContentConfig(
+                system_instruction=system_instruction,
+                contents=contents,
+                ttl=f"{ttl_seconds}s",
+            )
+        )
+        logger.info(f"[ContextCache] Resource created: {cache.name}")
+        return cache.name
+    except Exception as e:
+        logger.warning(f"[ContextCache] Creation failed: {e}")
+        return ""
 
 # ── 비용 및 토큰 추적용 전역 컨텍스트 (Phase 0) ──────
 # 각 노드 실행 중 발생하는 모든 LLM 호출의 사용량을 임시 저장합니다.
 active_usage_log: ContextVar[list] = ContextVar("active_usage_log", default=[])
+active_session_id: ContextVar[str] = ContextVar("active_session_id", default="")
 
 
 @dataclass
@@ -47,28 +77,21 @@ def _remember_cache_entry(cache: OrderedDict[str, Any], key: str, value: Any):
         cache.popitem(last=False)
 
 # ── API 키 해석 ────────────────────────────────
-def _get_effective_key(api_key: str) -> str:
+def get_effective_key(api_key: str) -> str:
     """
-    전달받은 api_key가 비어있거나 프론트엔드 플레이스홀더(\'[.env]\') 일 경우
-    환경변수 GEMINI_API_KEY를 사용.
+    전달받은 api_key가 비어있거나 프론트엔드 플레이스홀더('[.env]') 일 경우
+    환경변수 GEMINI_API_KEY를 사용하며, 영문/숫자 유효성 검사를 수행합니다.
     """
     key = (api_key or "").strip()
-    # 프론트엔드가 \'[.env]\' 플레이스홀더를 보낸 경우 환경변수로 폴백
     if key in ("", "[.env]", "[env]"):
         key = os.environ.get("GEMINI_API_KEY", "")
     if not key:
         raise ValueError(
             "Gemini API Key가 설정되지 않았습니다. "
-            "백엔드 .env 파일에 GEMINI_API_KEY=<키> 를 추가하거나 "
-            "프론트엔드 설정에서 API 키를 입력해 주세요."
+            "백엔드 .env 파일에 GEMINI_API_KEY=<키> 를 추가해 주세요."
         )
-    # 비ASCII 문자 포함 여부 검증 (httpx 헤더 인코딩 오류 방지)
     if not key.isascii():
-        raise ValueError(
-            "API 키에 한글 등 비ASCII 문자가 포함되어 있습니다. "
-            "Gemini API 키는 영문자/숫자/하이픈만 포함해야 합니다. "
-            "Google AI Studio에서 정확한 키를 복사해 주세요."
-        )
+        raise ValueError("API 키에 한글 등 비ASCII 문자가 포함되어 있습니다.")
     return key
 
 
@@ -120,8 +143,46 @@ def call_structured(
     user_msg: str,
     max_retries: int = MAX_LLM_RETRIES,
     temperature: float = DEFAULT_TEMPERATURE,
+    compress_prompt: bool = False,
+    compression_rate: float = 0.5,
+    context_cache: str = None # 추가
 ) -> LLMResult[T]:
     """Unified structured output: parsed result, usage metadata, and thinking."""
+    if compress_prompt:
+        user_msg = get_compressor().compress_with_preservation(user_msg, target_token_rate=compression_rate)
+        logger.info(f"[PromptCompressor] Compressed with rate {compression_rate}")
+
+    # 캐시가 있는 경우 원시 SDK 호출 (캐싱 지원)
+    if context_cache:
+        try:
+            from google.genai import types
+            client = get_raw_genai_client(api_key)
+            # 구조적 출력을 위해 response_mime_type 및 response_schema 설정
+            res = client.models.generate_content(
+                model=model,
+                contents=user_msg,
+                config=types.GenerateContentConfig(
+                    cached_content=context_cache,
+                    temperature=temperature,
+                    response_mime_type="application/json",
+                    response_schema=schema.model_json_schema() if hasattr(schema, "model_json_schema") else None,
+                )
+            )
+            parsed_dict = json.loads(res.text)
+            parsed = schema.model_validate(parsed_dict)
+            
+            usage_meta = res.usage_metadata
+            usage = {
+                "input_tokens": usage_meta.prompt_token_count or 0,
+                "output_tokens": usage_meta.candidates_token_count or 0,
+                "total_tokens": usage_meta.total_token_count or 0,
+                "cached_tokens": usage_meta.cached_content_token_count or 0
+            }
+            cost = calculate_cost(model, usage["input_tokens"], usage["output_tokens"])
+            return LLMResult(parsed=parsed, usage=usage, cost=cost, thinking=getattr(parsed, "thinking", ""), retry_count=0)
+        except Exception as e:
+            logger.error(f"[ContextCache] Call failed, falling back to normal: {e}")
+
     llm = get_llm(api_key, model, temperature)
     messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_msg)]
 
@@ -161,15 +222,28 @@ def call_structured(
     
     cost = calculate_cost(model, usage["input_tokens"], usage["output_tokens"])
 
-    # 중앙 집중형 추적을 위해 컨텍스트에 기록 (Phase 0)
+    # 중앙 집중형 추적을 위해 컨텍스트에 기록
     current_log = active_usage_log.get().copy()
-    current_log.append({
+    
+    # 캐싱 통계 계산
+    from pipeline.core.cache_manager import cache_manager
+    session_id = active_session_id.get()
+    cache_stats = {"cache_hit": False, "savings_usd": 0.0}
+    
+    if session_id and session_id in cache_manager.session_pool:
+        cache_stats = cache_manager.get_cache_stats(session_id, model, usage)
+
+    log_entry = {
         "model": model,
         "input": usage["input_tokens"],
         "output": usage["output_tokens"],
-        "cost": cost
-    })
+        "cost": cost,
+        "cache_hit": cache_stats["cache_hit"],
+        "savings": cache_stats["savings_usd"]
+    }
+    current_log.append(log_entry)
     active_usage_log.set(current_log)
+
 
     return LLMResult(
         parsed=parsed,
@@ -251,10 +325,10 @@ def call_gemini(api_key: str, model: str = DEFAULT_MODEL, system: str = "",
 # ── JSON 유틸 ────────────────────────────────────
 
 def extract_json_block(text: str) -> str:
-    m = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL)
+    m = _JSON_BLOCK_RE.search(text)
     if m:
         return m.group(1)
-    b = re.search(r"(\{.*)", text, re.DOTALL)
+    b = _JSON_FALLBACK_RE.search(text)
     return b.group(1) if b else ""
 
 
@@ -269,14 +343,87 @@ def parse_json_safe(text: str):
 
 
 def extract_thinking(text: str) -> str:
-    m = re.search(r"<thinking>(.*?)</thinking>", text, re.DOTALL)
+    m = _THINKING_RE.search(text)
     return m.group(1).strip() if m else ""
+
+
+def safe_get(obj: Any, keys: list[str], default: Any = "") -> Any:
+    """객체나 딕셔너리에서 여러 키 후보 중 첫 번째로 유효한 값을 추출."""
+    for k in keys:
+        if isinstance(obj, dict):
+            val = obj.get(k)
+        else:
+            val = getattr(obj, k, None)
+        if val:
+            return val
+    return default
+def sget(state: Any, key: str, default: Any = None) -> Any:
+    """Shared helper to read values from dict-like/object-like State objects."""
+    if hasattr(state, "get"):
+        value = state.get(key, default)
+    else:
+        value = getattr(state, key, default)
+    return default if value is None else value
+
+
+def make_sget(state: Any):
+    """Curried sget — used at the top of node functions."""
+    def _sget(key: str, default: Any = None):
+        return sget(state, key, default)
+    return _sget
+def format_chroma_results(results: dict[str, Any]) -> list[dict[str, Any]]:
+    """ChromaDB 원시 결과를 표준 리스트 형식으로 변환."""
+    formatted = []
+    if not results or not results.get("ids") or not results["ids"]:
+        return formatted
+        
+    # results["ids"]는 [[]] 형태일 수도 있고 [] 형태일 수도 있음
+    ids_list = results["ids"][0] if isinstance(results["ids"][0], list) else results["ids"]
+    docs_list = results["documents"][0] if isinstance(results["documents"][0], list) else results["documents"]
+    metas_list = results["metadatas"][0] if isinstance(results["metadatas"][0], list) else results["metadatas"]
+    dists_list = results.get("distances", [[]])[0] if results.get("distances") and isinstance(results["distances"][0], list) else results.get("distances", [])
+
+    for i in range(len(ids_list)):
+        formatted.append({
+            "id": ids_list[i],
+            "content": docs_list[i],
+            "metadata": metas_list[i],
+            "distance": dists_list[i] if i < len(dists_list) else 0
+        })
+    return formatted
+
+
+# ── DB 및 저장소 유틸 ────────────────────────────
+
+def get_backend_root() -> Path:
+    """백엔드 루트 디렉토리 경로 반환."""
+    return Path(__file__).parent.parent.parent
+
+
+def get_storage_path(sub_dir: str = "pm_sa_vector_db") -> str:
+    """백엔드 storage 하위 경로를 안전하게 생성하고 반환."""
+    path = get_backend_root() / "storage" / sub_dir
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+_DB_CLIENTS: dict[str, Any] = {}
+
+def get_vector_db_client(db_name: str = "pm_sa_vector_db") -> Any:
+    """ChromaDB 싱글톤 클라이언트 반환."""
+    import chromadb
+    if db_name not in _DB_CLIENTS:
+        path = get_storage_path(db_name)
+        _DB_CLIENTS[db_name] = chromadb.PersistentClient(path=path)
+    return _DB_CLIENTS[db_name]
 
 
 # ── 직렬화 유틸 ──────────────────────────────────
 
 def to_serializable(obj: Any) -> Any:
     """Pydantic 모델, dict, list를 재귀적으로 JSON 직렬화 가능하게 변환."""
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
     if hasattr(obj, "model_dump"):
         return obj.model_dump()
     if hasattr(obj, "dict"):
@@ -285,6 +432,4 @@ def to_serializable(obj: Any) -> Any:
         return {k: to_serializable(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [to_serializable(item) for item in obj]
-    if isinstance(obj, (str, int, float, bool, type(None))):
-        return obj
     return str(obj)

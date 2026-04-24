@@ -1,0 +1,28 @@
+{
+  "timestamp": "2026-04-23T23:51:18.975785",
+  "summary": {
+    "total_input": 2213,
+    "total_output": 11816,
+    "total_cost": 0.0037660999999999997
+  },
+  "scenarios": [
+    {
+      "name": "ST-01: Nightmare Intergalactic Logistics",
+      "status": "F",
+      "input_tokens": 2213,
+      "output_tokens": 11816,
+      "total_tokens": 14029,
+      "cost": 0.0037660999999999997,
+      "duration": 63.74957513809204,
+      "judge_report": {
+        "score": 1,
+        "rationale": "순환 참조 감지 누락",
+        "interface_consistency": "Gaps 확인",
+        "requirement_coverage": "5개 요구사항 분석 완료"
+      },
+      "gaps": [
+        "API POST /items/{parentId}/components:순환 참조 감지 및 차단 로직 부재:API 응답에 순환 참조 감지 결과 포함 또는 에러 처리"
+      ]
+    }
+  ]
+}

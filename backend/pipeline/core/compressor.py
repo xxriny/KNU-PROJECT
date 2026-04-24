@@ -1,0 +1,95 @@
+import re, os
+from typing import List, Optional
+from llmlingua import PromptCompressor as LinguaCompressor
+
+class PromptCompressor:
+    """
+    LLMLingua-2 기반 프롬프트 압축 매니저 (Phase 3)
+    도메인 특화 키워드 보존 로직이 포함된 하이브리드 압축을 수행합니다.
+    """
+    
+    _instance = None
+    
+    # 보존해야 할 정규식 패턴 (PM/SA 도메인)
+    PRESERVE_PATTERNS = [
+        r"MUST", r"SHOULD", r"MAY", r"NOT",         # 요구사항 키워드
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", # UUID
+        r"Exception", r"Error", r"Fail", r"Success", # 상태 키워드
+        r"https?://\S+",                            # URL
+        r"/[a-zA-Z0-9/._-]+",                       # 경로
+        r"@[a-zA-Z0-9_-]+",                         # 핸들/태그
+    ]
+
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = super(PromptCompressor, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self, model_name: str = "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank", device: str = "cpu"):
+        if self._initialized:
+            return
+        
+        print(f"--- Initializing PromptCompressor with {model_name} on {device}... ---")
+        try:
+            self.compressor = LinguaCompressor(
+                model_name=model_name,
+                device_map=device,
+                use_llmlingua2=True
+            )
+            self._initialized = True
+            print("DONE: PromptCompressor initialized successfully.")
+        except Exception as e:
+            print(f"FAIL: Failed to initialize PromptCompressor: {e}")
+            self.compressor = None
+
+    def compress_with_preservation(
+        self, 
+        text: str, 
+        target_token_rate: float = 0.5, 
+        extra_preserve: Optional[List[str]] = None
+    ) -> str:
+        """
+        핵심 정보를 보존하며 텍스트를 압축합니다.
+        """
+        if not self.compressor or not text:
+            return text
+
+        # 1. 보존할 키워드 추출
+        patterns = self.PRESERVE_PATTERNS + (extra_preserve or [])
+        
+        try:
+            # LLMLingua-2 API 호출
+            result = self.compressor.compress_prompt(
+                [text],
+                rate=target_token_rate,
+                force_tokens=patterns if patterns else None,
+            )
+            
+            if isinstance(result, list) and len(result) > 0:
+                result = result[0]
+            
+            if isinstance(result, dict):
+                compressed_text = result.get("compressed_prompt", text)
+            else:
+                compressed_text = text
+            
+            # 압축 효율 계산
+            original_len = len(text)
+            compressed_len = len(compressed_text)
+            savings = (1 - compressed_len / original_len) * 100 if original_len > 0 else 0
+            print(f"[PromptCompressor] Compressed: {original_len} -> {compressed_len} chars ({savings:.1f}% saved)")
+            
+            return compressed_text
+        except Exception as e:
+            print(f"[PromptCompressor] Compression failed, returning original text: {e}")
+            return text
+
+# 싱글톤 인스턴스 지연 생성 함수
+_compressor_instance = None
+
+def get_compressor():
+    global _compressor_instance
+    if _compressor_instance is None:
+        _compressor_instance = PromptCompressor()
+    return _compressor_instance

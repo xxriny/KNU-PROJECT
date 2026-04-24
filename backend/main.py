@@ -34,6 +34,8 @@ try:
 except ImportError:
     pass
 
+print(">>> [Python] Loading backend subsystems...", flush=True)
+
 # ── 계층 임포트 ──────────────────────────────────────────
 from transport.rest_handler import rest_router
 from transport.ws_handler import websocket_pipeline
@@ -53,7 +55,7 @@ async def lifespan(app: FastAPI):
 
 # ── FastAPI 앱 생성 ──────────────────────────────────────
 app = FastAPI(
-    title="PM Agent Pipeline Backend",
+    title="NAVIGATOR Backend",
     version=APP_VERSION,
     lifespan=lifespan,
 )
@@ -80,7 +82,9 @@ if _metrics_app is not None:
 # ── Entry Point ──────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
-
+    # ── 초기화 로그 시작 ──
+    print(">>> [Python] Initializing PM Agent Backend subsystems...", flush=True)
+    
     parser = argparse.ArgumentParser(description="PM Agent Pipeline Backend")
     parser.add_argument("--port", type=int, default=8765, help="Server port")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Server host")

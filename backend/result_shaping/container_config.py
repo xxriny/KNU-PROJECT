@@ -62,7 +62,6 @@ CONTAINER_GROUPS: list[dict[str, Any]] = [
         "path_prefixes": [
             "backend/pipeline/domain/pm/nodes/",
             "backend/pipeline/domain/chat/idea_chat/",
-            "backend/pipeline/domain/chat/chat_revision/",
         ],
     },
     {
