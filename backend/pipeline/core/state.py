@@ -118,9 +118,18 @@ class _IdeaFields(TypedDict, total=False):
     suggested_mode: str              # create | update | reverse
 
 
+# ── RAG 파이프라인 필드 ──────────────────────────
+
+class _RAGFields(TypedDict, total=False):
+    rag_chunks: list                 # CodeChunk dict 목록 (code_chunker 산출물)
+    rag_ingest_output: dict          # RAGIngestOutput dict (code_embedding 산출물)
+    rag_query_input: str             # 코드 검색 쿼리 텍스트
+    rag_query_result: list           # RAGQueryResult dict 목록 (code_retriever 산출물)
+
+
 # ── 통합 상태 (하위 호환) ───────────────────────
 
-class PipelineState(_BaseState, _AnalysisFields, _ChatFields, _IdeaFields, total=False):
+class PipelineState(_BaseState, _AnalysisFields, _ChatFields, _IdeaFields, _RAGFields, total=False):
     """LangGraph 파이프라인 공유 상태 — 모든 모드의 합집합.
 
     개별 모드가 사용하는 필드는 _AnalysisFields, _ChatFields, _IdeaFields를 참조.

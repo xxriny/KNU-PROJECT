@@ -16,7 +16,12 @@ from pydantic import BaseModel
 from version import APP_VERSION, DEFAULT_MODEL
 from observability.logger import get_logger
 from pipeline.core.action_type import normalize_action_type
-from pipeline.orchestration.facade import get_analysis_pipeline, get_revision_pipeline, get_idea_pipeline
+from pipeline.orchestration.facade import (
+    get_analysis_pipeline,
+    get_revision_pipeline,
+    get_idea_pipeline,
+    get_rag_ingest_pipeline,
+)
 from orchestration.executor import execute_pipeline
 from orchestration.pipeline_runner import (
     validate_analysis_inputs,
@@ -92,6 +97,18 @@ class ReadFileRequest(BaseModel):
 
 class DeleteSessionRequest(BaseModel):
     pass
+
+
+class RAGIngestRequest(BaseModel):
+    source_dir: str
+    session_id: str
+    version: str = "v1.0"
+
+
+class RAGQueryRequest(BaseModel):
+    query: str
+    session_id: Optional[str] = None
+    n_results: int = 10
 
 
 class HealthResponse(BaseModel):
@@ -241,6 +258,45 @@ async def idea_chat(req: IdeaChatRequest):
         return {"status": "error", "error": str(e)}
 
 
+@rest_router.post("/api/rag/ingest")
+async def rag_ingest(req: RAGIngestRequest):
+    """소스 디렉터리를 청킹·임베딩하여 project_code_knowledge에 저장합니다."""
+    if not req.source_dir or not os.path.isdir(req.source_dir):
+        return {"status": "error", "error": f"유효하지 않은 source_dir: {req.source_dir}"}
+    try:
+        result = execute_pipeline(
+            get_rag_ingest_pipeline(),
+            {
+                "source_dir": req.source_dir,
+                "run_id": req.session_id,
+                "api_key": "",
+                "model": "",
+            },
+            "rag_ingest",
+        )
+        if not result.success:
+            return {"status": "error", "error": result.error}
+        ingest_output = result.data.get("rag_ingest_output", {})
+        return {"status": "ok", **ingest_output}
+    except Exception as e:
+        get_logger().exception("rag_ingest endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/rag/query")
+async def rag_query(req: RAGQueryRequest):
+    """project_code_knowledge에서 유사 코드 청크를 검색합니다."""
+    if not req.query.strip():
+        return {"status": "error", "error": "query가 비어있습니다."}
+    try:
+        from pipeline.domain.rag.nodes.code_retriever import retrieve_project_code
+        results = retrieve_project_code(req.query, session_id=req.session_id, n_results=req.n_results)
+        return {"status": "ok", "results": results}
+    except Exception as e:
+        get_logger().exception("rag_query endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
 @rest_router.delete("/api/session/{run_id}")
 async def delete_session(run_id: str, req: Optional[DeleteSessionRequest] = None):
     if not re.match(r"^\d{8}_\d{6}$", run_id):
@@ -251,10 +307,12 @@ async def delete_session(run_id: str, req: Optional[DeleteSessionRequest] = None
         from pipeline.domain.pm.nodes.pm_db import delete_pm_knowledge
         from pipeline.domain.sa.nodes.sa_db import delete_sa_knowledge
         from pipeline.domain.pm.nodes.stack_db import delete_session_knowledge
-        
+        from pipeline.domain.rag.nodes.project_db import delete_project_knowledge
+
         pm_deleted = delete_pm_knowledge(run_id)
         sa_deleted = delete_sa_knowledge(run_id)
         stack_deleted = delete_session_knowledge(run_id)
+        project_deleted = delete_project_knowledge(run_id)
 
         return {
             "status": "ok",
@@ -262,6 +320,7 @@ async def delete_session(run_id: str, req: Optional[DeleteSessionRequest] = None
             "pm_docs_deleted": pm_deleted,
             "sa_docs_deleted": sa_deleted,
             "stack_docs_deleted": stack_deleted,
+            "project_docs_deleted": project_deleted,
         }
     except Exception as e:
         get_logger().exception(f"delete_session failed for run_id={run_id}")
