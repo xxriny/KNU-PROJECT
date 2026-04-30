@@ -13,6 +13,8 @@ from fastapi import WebSocket
 
 from pipeline.orchestration.facade import (
     get_analysis_pipeline,
+    get_develop_pipeline,
+    get_develop_routing_map,
     get_idea_pipeline,
     get_pm_pipeline,
     get_sa_pipeline,
@@ -217,6 +219,41 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
         result_node="idea_chat",
         save=False,
         result_mutator=lambda shaped: shaped.update({"chat_reply": shaped.get("agent_reply", "")}),
+    )
+
+
+async def run_develop(ws: WebSocket, payload: dict) -> None:
+    api_key = payload.get("api_key", "")
+    model = payload.get("model", DEFAULT_MODEL)
+    previous_result = payload.get("previous_result", {}) or {}
+    source_dir = payload.get("source_dir", "")
+    development_request = payload.get("development_request") or payload.get("idea") or ""
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    state_payload = {
+        **previous_result,
+        "api_key": api_key,
+        "model": model,
+        "run_id": run_id,
+        "source_dir": source_dir,
+        "development_request": development_request,
+        "previous_result": previous_result,
+        "requirements_rtm": previous_result.get("requirements_rtm", []),
+        "components": previous_result.get("components", []),
+        "sa_artifacts": previous_result.get("sa_artifacts", {}),
+        "pm_overview": previous_result.get("pm_overview", {}),
+        "sa_overview": previous_result.get("sa_overview", {}),
+        "project_overview": previous_result.get("project_overview", {}),
+    }
+
+    await _run_pipeline_base(
+        ws,
+        pipeline=get_develop_pipeline(),
+        routing=get_develop_routing_map(),
+        state_payload=state_payload,
+        pipeline_type="develop_plan",
+        result_node="develop_complete",
+        save=True,
     )
 
 

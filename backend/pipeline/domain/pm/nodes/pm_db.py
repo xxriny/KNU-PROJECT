@@ -8,12 +8,15 @@ import chromadb
 from typing import Optional, List, Dict, Any
 from pipeline.core.models.pm_embedding_model import get_pm_embeddings
 from observability.logger import get_logger
-
 from pipeline.core.utils import get_vector_db_client
-from observability.logger import get_logger
 
 # 글로벌 ChromaDB 클라이언트 (싱글톤)
 _collection = None
+logger = get_logger()
+
+
+def _zero_vector(size: int = 1024) -> List[float]:
+    return [0.0] * size
 
 def _get_collection():
     global _collection
@@ -69,6 +72,7 @@ def upsert_pm_artifact(
             vector = get_pm_embeddings(text_to_embed)
         except Exception as e:
             logger.warning(f"[PM_DB] Auto-embedding failed: {e}")
+            vector = _zero_vector()
 
     if vector:
         upsert_args["embeddings"] = [vector]

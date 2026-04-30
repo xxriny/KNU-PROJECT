@@ -140,7 +140,41 @@ class _RAGFields(TypedDict, total=False):
 
 # ── 통합 상태 (하위 호환) ───────────────────────
 
-class PipelineState(_BaseState, _AnalysisFields, _ChatFields, _IdeaFields, _RAGFields, total=False):
+class _DevFields(TypedDict, total=False):
+    development_request: str
+    source_session_id: str
+    develop_goal: str
+    project_rag_context: dict
+    artifact_rag_context: dict
+    develop_main_plan: dict
+    uiux_task_spec: dict
+    backend_task_spec: dict
+    frontend_task_spec: dict
+    uiux_result: dict
+    backend_result: dict
+    frontend_result: dict
+    uiux_qa_result: dict
+    backend_qa_result: dict
+    frontend_qa_result: dict
+    uiux_domain_gate_result: dict
+    backend_domain_gate_result: dict
+    frontend_domain_gate_result: dict
+    global_fe_sync_result: dict
+    integration_qa_result: dict
+    branch_pr_result: dict
+    embedding_result: dict
+    develop_next_action: str
+    develop_loop_count: int
+    uiux_retry_count: int
+    backend_retry_count: int
+    frontend_retry_count: int
+    dev_task_plan: dict
+    dev_impact_output: dict
+    dev_solution_output: dict
+    dev_patch_plan: dict
+
+
+class PipelineState(_BaseState, _AnalysisFields, _ChatFields, _IdeaFields, _RAGFields, _DevFields, total=False):
     """LangGraph 파이프라인 공유 상태 — 모든 모드의 합집합.
 
     개별 모드가 사용하는 필드는 _AnalysisFields, _ChatFields, _IdeaFields를 참조.
