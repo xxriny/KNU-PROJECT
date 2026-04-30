@@ -49,6 +49,21 @@ class ProjectOverview(BaseModel):
     usage_summary: dict[str, Any] = Field(default_factory=dict) # New field for cost/token
 
 
+class DevOverview(BaseModel):
+    goal: str | None = None
+    selected_domains: list[str] = Field(default_factory=list)
+    domain_status: dict[str, str] = Field(default_factory=dict)
+    qa_status: dict[str, str] = Field(default_factory=dict)
+    domain_gate_status: dict[str, str] = Field(default_factory=dict)
+    global_fe_sync_status: str | None = None
+    integration_status: str | None = None
+    branch_pr_status: str | None = None
+    embedding_status: str | None = None
+    next_action: str | None = None
+    merge_ready: bool = False
+    feature_branch_count: int = 0
+
+
 # ─── 제외 키 ──────────────────────────────────────────────
 
 _EXCLUDED_KEYS: frozenset[str] = frozenset({
@@ -327,6 +342,48 @@ def shape_result(raw_result: dict) -> dict:
         "input_tokens": sum(log.get("input", 0) for log in (raw_result.get("accumulated_usage") or [])),
         "output_tokens": sum(log.get("output", 0) for log in (raw_result.get("accumulated_usage") or [])),
     }
+
+    develop_main_plan = sanitized.get("develop_main_plan") or {}
+    uiux_result = sanitized.get("uiux_result") or {}
+    backend_result = sanitized.get("backend_result") or {}
+    frontend_result = sanitized.get("frontend_result") or {}
+    uiux_qa_result = sanitized.get("uiux_qa_result") or {}
+    backend_qa_result = sanitized.get("backend_qa_result") or {}
+    frontend_qa_result = sanitized.get("frontend_qa_result") or {}
+    uiux_domain_gate_result = sanitized.get("uiux_domain_gate_result") or {}
+    backend_domain_gate_result = sanitized.get("backend_domain_gate_result") or {}
+    frontend_domain_gate_result = sanitized.get("frontend_domain_gate_result") or {}
+    global_fe_sync_result = sanitized.get("global_fe_sync_result") or {}
+    integration_qa_result = sanitized.get("integration_qa_result") or {}
+    branch_pr_result = sanitized.get("branch_pr_result") or {}
+    embedding_result = sanitized.get("embedding_result") or {}
+    sanitized["dev_overview"] = DevOverview(
+        goal=sanitized.get("develop_goal") or develop_main_plan.get("goal"),
+        selected_domains=develop_main_plan.get("selected_domains", []) or [],
+        domain_status={
+            "uiux": uiux_result.get("status", ""),
+            "backend": backend_result.get("status", ""),
+            "frontend": frontend_result.get("status", ""),
+        },
+        qa_status={
+            "uiux": uiux_qa_result.get("status", ""),
+            "backend": backend_qa_result.get("status", ""),
+            "frontend": frontend_qa_result.get("status", ""),
+        },
+        domain_gate_status={
+            "uiux": uiux_domain_gate_result.get("status", ""),
+            "backend": backend_domain_gate_result.get("status", ""),
+            "frontend": frontend_domain_gate_result.get("status", ""),
+        },
+        global_fe_sync_status=global_fe_sync_result.get("status"),
+        integration_status=integration_qa_result.get("status"),
+        branch_pr_status=branch_pr_result.get("status"),
+        embedding_status=embedding_result.get("status"),
+        next_action=sanitized.get("develop_next_action"),
+        merge_ready=bool(branch_pr_result.get("merge_ready")),
+        feature_branch_count=len(branch_pr_result.get("feature_branches", []) or []),
+    ).model_dump()
+    sanitized["develop_overview"] = sanitized["dev_overview"]
 
     sanitized["project_overview"] = _build_project_overview(
         metadata=metadata,

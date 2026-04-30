@@ -18,6 +18,7 @@ from observability.logger import get_logger
 from pipeline.core.action_type import normalize_action_type
 from pipeline.orchestration.facade import (
     get_analysis_pipeline,
+    get_develop_pipeline,
     get_idea_pipeline,
     get_rag_ingest_pipeline,
 )
@@ -73,6 +74,14 @@ class AnalysisRequest(BaseModel):
 class IdeaChatRequest(BaseModel):
     message: str
     chat_history: list = []
+    previous_result: dict = {}
+    api_key: str = ""
+    model: str = DEFAULT_MODEL
+
+
+class DevelopRequest(BaseModel):
+    development_request: str = ""
+    source_dir: str = ""
     previous_result: dict = {}
     api_key: str = ""
     model: str = DEFAULT_MODEL
@@ -234,6 +243,34 @@ async def idea_chat(req: IdeaChatRequest):
         ))
     except Exception as e:
         get_logger().exception("idea_chat endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/develop")
+async def develop(req: DevelopRequest):
+    try:
+        previous_result = req.previous_result or {}
+        return _to_response(execute_pipeline(
+            get_develop_pipeline(),
+            {
+                **previous_result,
+                "api_key": req.api_key,
+                "model": req.model,
+                "run_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
+                "source_dir": req.source_dir,
+                "development_request": req.development_request,
+                "previous_result": previous_result,
+                "requirements_rtm": previous_result.get("requirements_rtm", []),
+                "components": previous_result.get("components", []),
+                "sa_artifacts": previous_result.get("sa_artifacts", {}),
+                "pm_overview": previous_result.get("pm_overview", {}),
+                "sa_overview": previous_result.get("sa_overview", {}),
+                "project_overview": previous_result.get("project_overview", {}),
+            },
+            "develop_plan",
+        ))
+    except Exception as e:
+        get_logger().exception("develop endpoint failed")
         return {"status": "error", "error": str(e)}
 
 
