@@ -38,19 +38,7 @@ export default function Sidebar() {
   const [showSettings, setShowSettings] = useState(false);
 
   return (
-    <div className="h-full flex flex-col bg-[var(--bg-secondary)] border-r border-[var(--border)] text-[15px] transition-colors duration-200">
-      {/* ── 헤더 ──────────────────────────── */}
-      <div className="px-4 py-3 border-b border-slate-700/50">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center">
-            <Cpu size={14} className="text-white" />
-          </div>
-          <div>
-            <h1 className={`text-base font-semibold ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>PM Agent</h1>
-            <p className="text-[12px] text-slate-500">Pipeline v2.0</p>
-          </div>
-        </div>
-      </div>
+    <div className="h-full flex flex-col bg-transparent border-r border-[var(--border)] text-[15px] transition-colors duration-300">
 
       {/* ── 스크롤 영역 (프로젝트 트리) ───── */}
       <div className="flex-1 overflow-y-auto">
@@ -64,112 +52,18 @@ export default function Sidebar() {
                 ? projectFolder.split(/[/\\]/).pop()
                 : "프로젝트"}
             </span>
-            <button
-              onClick={selectAndScanFolder}
-              title="폴더 선택"
-              className="p-0.5 hover:text-blue-400 transition-colors rounded"
-            >
-              <FolderOpen size={12} />
-            </button>
           </div>
 
           {fileTree.length === 0 ? (
             <div className="px-3 py-6 text-center">
-              <button
-                onClick={selectAndScanFolder}
-                className="flex flex-col items-center gap-2 mx-auto text-slate-600 hover:text-slate-400 transition-colors"
-              >
-                <FolderOpen size={28} />
-                <p className="text-[15px]">폴더를 선택하세요</p>
-              </button>
+              <div className="flex flex-col items-center gap-2 mx-auto text-slate-600">
+                <p className="text-[15px]">프로젝트 폴더가 없습니다</p>
+              </div>
             </div>
           ) : (
             <FileTreeNode nodes={fileTree} depth={0} />
           )}
         </div>
-      </div>
-      {/* ── 설정 영역 ─────────────────────── */}
-      <div className="border-t border-slate-700/50">
-        <button
-          onClick={() => setShowSettings(!showSettings)}
-          className="w-full flex items-center gap-2 px-4 py-2.5 text-[15px] text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition-colors"
-        >
-          <Settings size={13} />
-          <span>설정</span>
-          <ChevronRight
-            size={12}
-            className={`ml-auto transition-transform ${showSettings ? "rotate-90" : ""}`}
-          />
-        </button>
-
-        {showSettings && (
-          <div className="px-3 pb-3 space-y-2">
-            {/* API Key */}
-            <div>
-              <label className="flex items-center gap-1 text-[12px] text-slate-500 mb-1">
-                <Key size={10} />
-                Gemini API Key
-                {backendHasKey && !apiKey && (
-                  <span className="ml-auto text-[12px] text-green-500 font-medium">.env 사용 중</span>
-                )}
-              </label>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder={backendHasKey ? ".env에서 자동 로드됨" : "API 키 입력..."}
-                className={`w-full px-2.5 py-1.5 text-[15px] bg-slate-800 border rounded-md text-slate-300 placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors ${
-                  backendHasKey && !apiKey
-                    ? "border-green-700/50"
-                    : "border-slate-700"
-                }`}
-              />
-              {backendHasKey && !apiKey && (
-                <p className="text-[12px] text-slate-500 mt-1">
-                  직접 입력 시 .env보다 우선 적용
-                </p>
-              )}
-            </div>
-
-            {/* Model */}
-            <div>
-              <label className="flex items-center gap-1 text-[12px] text-slate-500 mb-1">
-                <Cpu size={10} />
-                모델
-              </label>
-              <select
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className={`w-full px-2.5 py-1.5 text-[15px] border rounded-md focus:outline-none focus:border-blue-500 transition-colors ${
-                  isDarkMode 
-                    ? "bg-slate-800 border-slate-700 text-slate-300" 
-                    : "bg-white border-slate-200 text-slate-700"
-                }`}
-              >
-                {availableModels.map((availableModel) => (
-                  <option key={availableModel} value={availableModel}>
-                    {availableModel}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Theme Toggle */}
-            <div className="pt-2 border-t border-slate-700/30">
-              <button
-                onClick={toggleDarkMode}
-                className={`w-full flex items-center gap-2 px-2.5 py-2 text-[14px] rounded-md transition-all ${
-                  isDarkMode
-                    ? "bg-slate-800/50 text-slate-400 hover:text-yellow-400"
-                    : "bg-slate-200/50 text-slate-600 hover:text-blue-600"
-                }`}
-              >
-                {isDarkMode ? <Sun size={13} /> : <Moon size={13} />}
-                <span>{isDarkMode ? "라이트 모드" : "다크 모드"}</span>
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -209,8 +103,8 @@ function FileTreeItem({ node, depth }) {
         onClick={handleClick}
         className={`w-full flex items-center gap-1 px-2 py-1 text-[15px] rounded transition-colors ${
           isSelected
-            ? "bg-blue-600/20 text-blue-300"
-            : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+            ? "bg-[var(--accent)]/20 text-[var(--accent)] border-r-2 border-[var(--accent)]"
+            : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/5"
         }`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
       >

@@ -19,16 +19,7 @@ _llm_cache_lock = threading.Lock()
 _raw_cache_lock = threading.Lock()
 
 
-def _get_effective_key(api_key: str) -> str:
-    """API 키 유효성 검사 및 환경변수 폴백"""
-    key = (api_key or "").strip()
-    if key in ("", "[.env]", "[env]"):
-        key = os.environ.get("GEMINI_API_KEY", "")
-    if not key:
-        raise ValueError("Gemini API Key가 설정되지 않았습니다.")
-    if not key.isascii():
-        raise ValueError("API 키에 영문자/숫자 외 문자가 포함되어 있습니다.")
-    return key
+
 
 
 def _remember_cache_entry(cache: OrderedDict, key: str, value: Any):
@@ -40,7 +31,8 @@ def _remember_cache_entry(cache: OrderedDict, key: str, value: Any):
 
 def get_gemini_client(api_key: str, model: str = DEFAULT_MODEL, temperature: float = DEFAULT_TEMPERATURE) -> ChatGoogleGenerativeAI:
     """LangChain 기반의 ChatGoogleGenerativeAI 인스턴스 반환 (싱글톤 캐싱)"""
-    effective_key = _get_effective_key(api_key)
+    from pipeline.core.utils import get_effective_key
+    effective_key = get_effective_key(api_key)
     cache_key = f"{effective_key}:{model}:{temperature}"
 
     with _llm_cache_lock:
@@ -59,7 +51,8 @@ def get_gemini_client(api_key: str, model: str = DEFAULT_MODEL, temperature: flo
 
 def get_raw_genai_client(api_key: str) -> genai.Client:
     """Google GenAI SDK 기반의 원시 클라이언트 반환 (싱글톤 캐싱)"""
-    effective_key = _get_effective_key(api_key)
+    from pipeline.core.utils import get_effective_key
+    effective_key = get_effective_key(api_key)
     with _raw_cache_lock:
         if effective_key in _raw_cache:
             _raw_cache.move_to_end(effective_key)

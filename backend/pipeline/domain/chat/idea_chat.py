@@ -10,16 +10,20 @@ from pipeline.core.utils import get_llm, parse_json_safe
 from observability.logger import get_logger
 from version import DEFAULT_MODEL
 
+# RAG Manager (Phase 2)
+from pipeline.core.rag_manager import rag_manager
+
 
 SYSTEM_PROMPT = """당신은 PM(프로젝트 매니저) AI 어시스턴트입니다.
 사용자가 아이디어를 구체화하거나, 이미 만들어진 분석 결과를 이해하고 다음 액션을 결정하도록 도와주세요.
 
 ## 역할
 1. 사용자의 막연한 아이디어를 구체적인 프로젝트 기획으로 발전시키세요.
-2. 적절한 질문을 통해 요구사항을 명확히 하세요.
-3. 기술 스택, 대상 사용자, 핵심 기능 등을 파악하세요.
-4. 아이디어가 충분히 구체화되면 분석을 시작할 수 있다고 안내하세요.
-5. 이전 분석 결과가 주어지면, 그 결과를 설명하거나 개선 방향을 제안하되 사용자가 명시적으로 요청하기 전에는 수정이 적용된 것처럼 말하지 마세요.
+2. 사용자가 프로젝트의 맥락, 기술 스택, 혹은 지적사항(메모)에 대해 물으면 RAG 검색 결과를 바탕으로 정확하게 답변하세요.
+3. 적절한 질문을 통해 요구사항을 명확히 하세요.
+4. 기술 스택, 대상 사용자, 핵심 기능 등을 파악하세요.
+5. 아이디어가 충분히 구체화되면 분석을 시작할 수 있다고 안내하세요.
+6. 이전 분석 결과가 주어지면, 그 결과를 설명하거나 개선 방향을 제안하세요. (더 이상 직접적인 '적용' 모드는 없으므로, 대화를 통해 설계를 다듬는 데 집중하세요.)
 
 ## 응답 형식
 반드시 아래 JSON 형식으로 응답하세요:
@@ -58,10 +62,41 @@ def idea_chat_node(state: PipelineState) -> dict:
         if not user_request:
             return {"error": "메시지가 비어있습니다.", "current_step": "idea_chat"}
 
+        # ── RAG Manager 통합 검색 (Phase 2) ──
+        rag_context = []
+        try:
+            # 1. 산출물 지식 검색 (PM/SA)
+            pm_sa_results = rag_manager.adaptive_search(user_request, context_type="pm", n_results=3)
+            if pm_sa_results:
+                rag_context.append("### 관련 산출물 지식 (RTM/Components/API/DB)")
+                for res in pm_sa_results:
+                    rag_context.append(f"- {res['content'][:1000]}")
+
+            # 2. 기술 스택 지식 검색
+            stack_results = rag_manager.adaptive_search(user_request, context_type="stack", n_results=2)
+            if stack_results:
+                rag_context.append("### 관련 기술 스택 정보")
+                for s in stack_results:
+                    rag_context.append(f"- {s['package_name']} ({s['version_req']}): {s['content'][:500]}")
+
+            # 3. 사용자 메모/지적사항 검색
+            memo_results = rag_manager.adaptive_search(user_request, context_type="memo", n_results=3)
+            if memo_results:
+                rag_context.append("### 사용자 지적사항 및 메모")
+                for res in memo_results:
+                    rag_context.append(f"- {res['content']}")
+        except Exception as rag_err:
+            get_logger().warning(f"RAG search via RAGManager failed: {rag_err}")
+
+        rag_text = "\n".join(rag_context)
+
         # 메시지 구성
         from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
         messages = [SystemMessage(content=SYSTEM_PROMPT)]
+
+        if rag_text:
+            messages.append(SystemMessage(content=f"## 관련 지식 베이스 (RAG)\n{rag_text}"))
 
         if previous_result:
             result_context = {
@@ -87,6 +122,7 @@ def idea_chat_node(state: PipelineState) -> dict:
         # LLM 호출
         llm = get_llm(api_key=api_key, model=model)
         response = llm.invoke(messages)
+            
         raw = response.content if hasattr(response, "content") else str(response)
 
         result = parse_json_safe(raw)

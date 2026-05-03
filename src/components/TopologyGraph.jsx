@@ -12,15 +12,16 @@
  */
 
 import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
-import ReactFlow, {
+import {
+  ReactFlow,
   Background,
   MarkerType,
   Handle,
   Position,
   useNodesState,
   useEdgesState,
-} from "reactflow";
-import "reactflow/dist/style.css";
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 
 // ─── 상수 (v1 CATEGORY_SHAPES / PRIORITY_COLORS 대응) ─────────────────────────
 

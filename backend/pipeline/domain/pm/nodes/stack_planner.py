@@ -13,17 +13,14 @@ from version import DEFAULT_MODEL
 
 logger = get_logger()
 
-STACK_PLANNER_SYSTEM_PROMPT = """# 역할: 기술 경제학자 (YAGNI / 최소 권한 원칙)
-## 목표: 프로젝트 규모(SCALE)에 맞는 최적/최소의 기술 스택 선정.
+STACK_PLANNER_SYSTEM_PROMPT = """# 역할: 기술 경제학자 (YAGNI 원칙)
+## 목표: 프로젝트 규모에 맞는 최적/최소의 기술 스택 선정.
 ## 규칙:
-1. 규모 판단: Tiny | Medium | Enterprise 중 선택.
-2. 오버엔지니어링 금지: 단순 앱에 DB/서버/무거운 상태관리 도입 시 감점.
-3. RAG 준수: 제공된 컨텍스트 내 기술 우선 검색. 없으면 'PENDING_CRAWL'.
-4. 논리적 근거: 왜 더 간단한 대안 대신 이 기술을 택했는지 설명.
-## 예시:
-- 시나리오: "단순 정적 블로그"
-  - ❌ Bad: MSA + Kafka + K8s (YAGNI 위반).
-  - ✅ Good: Next.js + Supabase/SQLite (규모 적합).
+- **YAGNI/Lean**: 불필요한 서버, DB, 복잡한 상태관리를 배제하고 최소한의 도구만 제안하십시오.
+- **다양성**: 특정 프레임워크(예: Next.js) 하나에 모든 기능을 몰아넣지 마십시오. 도메인(Auth, UI, DB, State, API 등)별로 가장 적합한 라이브러리를 개별적으로 매핑하십시오.
+- **Thinking**: 반드시 한국어 핵심 단어 **3개 이내** (예: "경량, 속도, 호환"). 문장 금지.
+- **RAG 준수**: 제공된 컨텍스트 내 기술 우선 검색. 없으면 'PENDING_CRAWL'.
+- **언어**: 반드시 한국어로 작성하십시오.
 """
 
 def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
@@ -56,29 +53,78 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
         }
 
     # 3. LLM 호출
-    user_msg = f"""### [요구사항 기능 목록]
+    feature_ids = [f.get("id") for f in features]
+    logger.info(f"Planning stack for {len(features)} features: {feature_ids[:5]}...")
+
+    user_msg = f"""### [중요: 요구사항 기능 목록 (총 {len(features)}개)]
 {features}
 
 ### [APPROVED_STACK_FROM_RAG]
 {integrated_context}
 
 위 기능들을 구현하기 위해 최적의 기술 스택을 매핑하세요. 
+**주의: 입력된 {len(features)}개의 모든 기능 ID(f_id)에 대해 단 하나도 빠짐없이 매핑 결과를 생성해야 합니다.**
 만약 새로 발견된(NEWLY DISCOVERED) 기술이 있다면 적극적으로 활용하세요.
 """
 
     try:
+        # 3. 1차 LLM 호출
         res = call_structured(
             api_key=sget("api_key", ""),
             model=sget("model", DEFAULT_MODEL),
             schema=StackPlannerOutput,
             system_prompt=STACK_PLANNER_SYSTEM_PROMPT,
             user_msg=user_msg,
+            compress_prompt=True, # Phase 3: Prompt Compression enabled
         )
         out = res.parsed
-        retry_count = res.retry_count
+        total_retries = res.retry_count
+        
+        # 4. 누락 및 중복 체크 (자가 치유 로직)
+        mapped_ids = {item.f_id for item in out.m}
+        missing_ids = set(feature_ids) - mapped_ids
+        
+        if missing_ids:
+            logger.warning(f"Detected {len(missing_ids)} missing mappings: {list(missing_ids)}. Initiating self-healing...")
+            
+            # 누락된 기능들만 추출하여 2차 요청
+            missing_features = [f for f in features if f.get("id") in missing_ids]
+            healing_user_msg = f"""### [누락된 기능 목록]
+{missing_features}
+
+이전 단계에서 위 기능들에 대한 매핑이 누락되었습니다. 
+이 기능들에 대해서만 추가로 기술 스택을 매핑하여 JSON 리스트로 응답하세요.
+"""
+            res_heal = call_structured(
+                api_key=sget("api_key", ""),
+                model=sget("model", DEFAULT_MODEL),
+                schema=StackPlannerOutput,
+                system_prompt=STACK_PLANNER_SYSTEM_PROMPT,
+                user_msg=healing_user_msg,
+                compress_prompt=True, # Phase 3 enabled
+            )
+            out_heal = res_heal.parsed
+            total_retries += res_heal.retry_count
+            
+            # 결과 병합 및 중복 제거
+            combined_mappings = out.m + out_heal.m
+            final_mapping_dict = {}
+            for item in combined_mappings:
+                # 이미 매핑된 ID라면 덮어쓰거나(최신), 처음 나온 거면 유지
+                if item.f_id in feature_ids:
+                    final_mapping_dict[item.f_id] = item
+            
+            out.m = list(final_mapping_dict.values())
+            logger.info(f"Self-healing complete. Final mapping count: {len(out.m)}")
+        else:
+            # 중복 제거 (필수)
+            final_mapping_dict = {item.f_id: item for item in out.m if item.f_id in feature_ids}
+            out.m = list(final_mapping_dict.values())
+            logger.info(f"All features mapped successfully on first attempt.")
+
         thinking_msg = out.th
         
-        # 4. 회귀 로직을 위한 크롤러 입력 생성 (사용자 제안 반영)
+        # 5. 회귀 로직을 위한 크롤러 입력 생성
         pending_items = [item for item in out.m if item.status == "PENDING_CRAWL"]
         next_crawler_inputs = []
         for item in pending_items:
@@ -89,10 +135,11 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
 
         return {
             "stack_planner_output": out.model_dump(),
-            "next_crawler_inputs": next_crawler_inputs, # 이 데이터를 가지고 Crawling 노드로 회귀
+            "next_crawler_inputs": next_crawler_inputs,
             "loop_count": current_loop + 1,
             "stack_rag_context": integrated_context, 
-            "thinking_log": (sget("thinking_log", []) or []) + [{"node": "stack_planner", "thinking": thinking_msg}]
+            "thinking_log": (sget("thinking_log", []) or []) + [{"node": "stack_planner", "thinking": thinking_msg}],
+            "total_retries": sget("total_retries", 0) + total_retries
         }
         
     except Exception as e:
