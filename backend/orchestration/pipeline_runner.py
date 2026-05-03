@@ -13,21 +13,22 @@ from fastapi import WebSocket
 
 from pipeline.orchestration.facade import (
     get_analysis_pipeline,
-    get_revision_pipeline,
     get_idea_pipeline,
     get_pm_pipeline,
     get_sa_pipeline,
     get_scan_pipeline,
+    get_rag_ingest_pipeline,
     get_pipeline_routing_map,
     get_pm_routing_map,
     get_sa_routing_map,
     get_scan_routing_map,
-    get_revision_routing_map,
+    get_rag_routing_map,
     get_idea_chat_routing_map,
 )
 from pipeline.core.action_type import ANALYSIS_ACTION_TYPES, normalize_action_type
 from pipeline.domain.rag.ast_scanner import extract_functions, summarize_for_llm
-from result_shaping.result_shaper import shape_result, deep_sanitize
+from result_shaping.result_shaper import shape_result
+from pipeline.core.utils import to_serializable
 from observability.logger import get_logger
 from observability.metrics import track_node
 from transport.connection_manager import manager
@@ -156,19 +157,23 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
         "run_id": run_id,
     }
 
-    # 1. Project Scan (Stage 1) - AST 분석 등 기초 정보 수집
-    scan_result = await _run_pipeline_base(
-        ws,
-        pipeline=get_scan_pipeline(),
-        routing=get_scan_routing_map(),
-        state_payload=initial_state,
-        pipeline_type="scan_only",
-        save=False,
-        log=log,
-    )
+    # 1. RAG Ingestion (Stage 1) - 코드 청킹 및 벡터 색인
+    #    CREATE 모드는 분석할 기존 코드베이스가 없으므로 RAG 인제스트를 통째로 스킵.
+    if action_type == "CREATE":
+        scan_result = dict(initial_state)
+    else:
+        scan_result = await _run_pipeline_base(
+            ws,
+            pipeline=get_rag_ingest_pipeline(),
+            routing=get_rag_routing_map(),
+            state_payload=initial_state,
+            pipeline_type="rag_ingest",
+            save=False,
+            log=log,
+        )
 
-    if scan_result.get("error"):
-        return
+        if scan_result.get("error"):
+            return
 
     # 2. PM Pipeline (Stage 2) - 요구사항 원자화 및 기획
     pm_result = await _run_pipeline_base(
@@ -191,31 +196,6 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
         routing=get_sa_routing_map(),
         state_payload=pm_result,
         pipeline_type=analysis_pipeline_type(action_type),
-        result_node="complete",
-        save=True,
-        log=log,
-    )
-
-
-async def run_revision(ws: WebSocket, payload: dict) -> None:
-    api_key = payload.get("api_key", "")
-    model = payload.get("model", DEFAULT_MODEL)
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log = get_logger(run_id)
-
-    await _run_pipeline_base(
-        ws,
-        pipeline=get_revision_pipeline(),
-        routing=get_revision_routing_map(),
-        state_payload={
-            "api_key": api_key,
-            "model": model,
-            "user_request": payload.get("user_request", ""),
-            "previous_result": payload.get("previous_result", {}),
-            "chat_history": payload.get("chat_history", []),
-            "run_id": run_id,
-        },
-        pipeline_type="revision",
         result_node="complete",
         save=True,
         log=log,
@@ -279,7 +259,7 @@ async def stream_pipeline_updates(
 
         for node_name, node_result in update.items():
             with track_node(node_name, action_type):
-                ser = deep_sanitize(node_result)
+                ser = to_serializable(node_result)
                 if not isinstance(ser, dict):
                     continue
 
