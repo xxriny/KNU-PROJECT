@@ -1,10 +1,11 @@
 import {
-  House, Activity, Table2, Layers, Globe, Database, StickyNote, FileText,
+  House, Activity, Table2, Layers, Globe, Database, StickyNote, FileText, LayoutDashboard,
 } from "lucide-react";
 
 export const ICON_PANELS = [
   { id: "home", label: "Home", Icon: House, group: null, color: "text-white", bg: "bg-slate-500/10" },
   { id: "progress", label: "Progress", Icon: Activity, group: null, color: "text-yellow-400", bg: "bg-yellow-500/10" },
+  { id: "overview", label: "Overview", Icon: LayoutDashboard, group: null, color: "text-sky-300", bg: "bg-sky-500/10" },
   { id: "memo", label: "Memos", Icon: StickyNote, group: null, color: "text-amber-300", bg: "bg-amber-500/10" },
   { id: "rtm", label: "RTM", Icon: Table2, group: "pm", color: "text-cyan-400", bg: "bg-cyan-500/10" },
   { id: "stack", label: "Stack", Icon: Layers, group: "pm", color: "text-indigo-400", bg: "bg-indigo-500/10" },

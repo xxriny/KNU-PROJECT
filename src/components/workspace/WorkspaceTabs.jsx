@@ -1,5 +1,5 @@
 import React from "react";
-import { House, Activity, StickyNote, ChevronDown, Code2, X } from "lucide-react";
+import { House, Activity, StickyNote, ChevronDown, Code2, X, LayoutDashboard } from "lucide-react";
 import useAppStore from "../../store/useAppStore";
 
 export default function WorkspaceTabs({
@@ -51,6 +51,14 @@ export default function WorkspaceTabs({
         {hasProgress && (
           <TabButton id="progress" activeId={activeOutputId} onClick={() => activateOutputTab("progress")} Icon={Activity} label="Progress" />
         )}
+
+        <TabButton
+          id="overview"
+          activeId={activeOutputId}
+          onClick={() => activateOutputTab("overview")}
+          Icon={LayoutDashboard}
+          label="Overview"
+        />
 
         <TabButton 
           id="memo" 

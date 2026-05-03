@@ -58,6 +58,7 @@ export default function Workspace() {
     switch (activeOutputId) {
       case "home": return <HomeScreen />;
       case "progress": return <PipelineProgress />;
+      case "overview":
       case "memo":
       case "rtm":
       case "context":

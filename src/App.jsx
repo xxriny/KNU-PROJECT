@@ -113,6 +113,7 @@ export default function App() {
     if (isCodeView) return <CodeViewer />;
     
     switch (activeOutputId) {
+      case "overview": return <ResultViewer tabId="overview" />;
       case "progress": return <PipelineProgress />;
       case "home":
       default: return <HomeScreen />;

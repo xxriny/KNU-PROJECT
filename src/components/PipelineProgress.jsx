@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import useAppStore from "../store/useAppStore";
 import {
   Loader2,
@@ -10,23 +10,38 @@ import {
 } from "lucide-react";
 
 const SCAN_STEPS = [
-  { key: "system_scan", label: "프로젝트 분석", desc: "소스 코드 구조 및 프레임워크 스캔" },
+  { key: "system_scan", label: "Project Scan", desc: "프로젝트 구조와 주요 소스 파일을 스캔합니다." },
 ];
 
 const PM_PIPELINE_STEPS = [
-  { key: "requirement_analyzer", label: "요구사항 분석", desc: "아이디어를 원자 단위 요구사항으로 정밀 분석" },
-  { key: "stack_planner", label: "기술 스택 전략", desc: "요구사항별 최적의 라이브러리 및 프레임워크 선정" },
-  { key: "stack_crawling", label: "지능형 지식 탐색", desc: "부족한 기술 지식을 외부 레지스트리에서 자율 검색" },
-  { key: "guardian", label: "기술 정합성 검증", desc: "선정된 스택의 호환성, 보안성 및 품질 최종 검토" },
-  { key: "pm_analysis", label: "통합 분석 및 번들링", desc: "분석 결과 통합 및 최종 PM_BUNDLE 스펙 확정" },
+  { key: "requirement_analyzer", label: "Requirement Analyzer", desc: "아이디어를 요구사항 단위로 구조화합니다." },
+  { key: "stack_planner", label: "Stack Planner", desc: "요구사항에 맞는 기술 스택을 선정합니다." },
+  { key: "stack_crawling", label: "Stack Crawling", desc: "부족한 기술 정보를 보강합니다." },
+  { key: "guardian", label: "Guardian", desc: "선정된 스택의 정합성과 리스크를 검증합니다." },
+  { key: "pm_analysis", label: "PM Analysis", desc: "PM 산출물을 통합하고 결과를 정리합니다." },
 ];
 
 const SA_PIPELINE_STEPS = [
-  { key: "sa_merge_project",    label: "프로젝트 병합",      desc: "PM 산출물과 코드 분석 결과 통합" },
-  { key: "component_scheduler", label: "컴포넌트 설계",      desc: "시스템 컴포넌트 구조 및 역할 정의" },
-  { key: "api_data_modeler",    label: "API & 데이터 모델링", desc: "엔드포인트 및 DB 스키마 설계" },
-  { key: "sa_analysis",         label: "아키텍처 검증 (QA)",  desc: "설계 정합성 분석 및 Gap 탐지" },
-  { key: "sa_embedding",        label: "SA 결과 저장",        desc: "아키텍처 산출물 임베딩 및 영구 저장" },
+  { key: "sa_merge_project", label: "Merge Project", desc: "PM 결과와 코드 분석 결과를 통합합니다." },
+  { key: "component_scheduler", label: "Component Scheduler", desc: "시스템 컴포넌트 구조를 설계합니다." },
+  { key: "api_data_modeler", label: "API / Data Modeler", desc: "API와 데이터 모델을 설계합니다." },
+  { key: "sa_analysis", label: "SA Analysis", desc: "아키텍처 정합성과 갭을 검토합니다." },
+  { key: "sa_embedding", label: "SA Embedding", desc: "SA 산출물을 적재 가능한 형태로 정리합니다." },
+];
+
+const DEVELOP_PIPELINE_STEPS = [
+  { key: "develop_main_agent", label: "Main Agent", desc: "RAG 컨텍스트를 읽고 개발 계획을 수립합니다." },
+  { key: "develop_uiux_agent", label: "UI/UX Agent", desc: "UI/UX 산출물을 생성합니다." },
+  { key: "develop_uiux_qa_agent", label: "UI/UX QA", desc: "UI/UX 산출물을 검토합니다." },
+  { key: "develop_backend_agent", label: "Backend Agent", desc: "백엔드 산출물을 생성합니다." },
+  { key: "develop_backend_qa_agent", label: "Backend QA", desc: "백엔드 산출물을 검토합니다." },
+  { key: "develop_frontend_agent", label: "Frontend Agent", desc: "프런트엔드 산출물을 생성합니다." },
+  { key: "develop_frontend_qa_agent", label: "Frontend QA", desc: "프런트엔드 산출물을 검토합니다." },
+  { key: "develop_global_fe_sync_gate", label: "Global FE Sync", desc: "공유 UI와 프런트 동기화 이슈를 점검합니다." },
+  { key: "develop_integration_qa_gate", label: "Integration QA", desc: "도메인 결과를 통합 관점에서 검증합니다." },
+  { key: "develop_branch_pr_orchestrator", label: "Branch / PR", desc: "브랜치 전략과 PR 초안을 생성합니다." },
+  { key: "develop_embedding", label: "Embedding", desc: "개발 산출물을 artifact RAG에 실제 적재합니다." },
+  { key: "develop_loop_controller", label: "Loop Controller", desc: "재시도 여부를 판단하고 종료합니다." },
 ];
 
 const PIPELINE_STEPS_BY_TYPE = {
@@ -34,13 +49,14 @@ const PIPELINE_STEPS_BY_TYPE = {
   analysis_create: [...SCAN_STEPS, ...PM_PIPELINE_STEPS, ...SA_PIPELINE_STEPS],
   analysis_reverse: [...SCAN_STEPS, ...SA_PIPELINE_STEPS],
   analysis_update: [...SCAN_STEPS, ...PM_PIPELINE_STEPS, ...SA_PIPELINE_STEPS],
+  develop_plan: DEVELOP_PIPELINE_STEPS,
   idea_chat: [
-    { key: "idea_chat", label: "아이디어 탐색", desc: "아이디어를 구체화하고 다음 분석 방향을 제안" },
+    { key: "idea_chat", label: "Idea Chat", desc: "아이디어를 구체화하고 다음 분석 방향을 잡습니다." },
   ],
 };
 
 export default function PipelineProgress() {
-  const { pipelineNodes, thinkingLog, pipelineStatus, pipelineError, pipelineType, isDarkMode } = useAppStore();
+  const { pipelineNodes, thinkingLog, pipelineError, pipelineType, isDarkMode } = useAppStore();
   const logEndRef = useRef(null);
   const steps = PIPELINE_STEPS_BY_TYPE[pipelineType] || PM_PIPELINE_STEPS;
 
@@ -50,7 +66,6 @@ export default function PipelineProgress() {
 
   return (
     <div className="h-full w-full flex bg-transparent text-sm overflow-hidden p-4 gap-4">
-      {/* ── 좌측: 파이프라인 스텝 ──────────── */}
       <div className="w-80 shrink-0 glass-panel rounded-2xl flex flex-col min-h-0 shadow-premium overflow-hidden">
         <div className="p-5 border-b border-white/5 bg-white/5">
           <h3 className="text-[12px] font-bold text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2">
@@ -73,22 +88,17 @@ export default function PipelineProgress() {
           })}
 
           {pipelineError && (
-            <div 
-              className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl"
-            >
+            <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
               <div className="flex items-center gap-2 text-[13px] text-red-400 font-bold mb-1">
                 <AlertCircle size={14} />
-                오류 발생
+                Pipeline Error
               </div>
-              <p className="text-[12px] text-red-300/80 leading-relaxed">
-                {pipelineError}
-              </p>
+              <p className="text-[12px] text-red-300/80 leading-relaxed">{pipelineError}</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* ── 우측: Thinking Log ─────────────── */}
       <div className="flex-1 min-w-0 flex flex-col glass-panel rounded-2xl shadow-premium overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/5">
           <div className="flex items-center gap-3">
@@ -111,16 +121,14 @@ export default function PipelineProgress() {
 
         <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4 custom-scrollbar">
           {thinkingLog.length === 0 ? (
-            <div 
-              className="flex flex-col items-center justify-center h-full space-y-4"
-            >
+            <div className="flex flex-col items-center justify-center h-full space-y-4">
               <div className="relative">
                 <Loader2 size={40} className="text-blue-500 animate-spin" />
                 <Brain size={20} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-purple-400" />
               </div>
               <div className="text-center">
-                <p className="text-lg font-bold text-slate-300">잠시만 기다려 주세요</p>
-                <p className="text-sm text-slate-500">AI 에이전트가 소스 코드를 읽고 설계를 구성하는 중입니다...</p>
+                <p className="text-lg font-bold text-slate-300">에이전트가 작업을 준비 중입니다.</p>
+                <p className="text-sm text-slate-500">실행 중인 노드의 사고 로그가 여기에 표시됩니다.</p>
               </div>
             </div>
           ) : (
@@ -173,9 +181,7 @@ function StepItem({ label, desc, status, isDarkMode }) {
   };
 
   return (
-    <div
-      className={`flex items-start gap-4 p-4 rounded-2xl transition-all border ${statusThemes[status] || statusThemes.pending}`}
-    >
+    <div className={`flex items-start gap-4 p-4 rounded-2xl transition-all border ${statusThemes[status] || statusThemes.pending}`}>
       <div className="mt-1 shrink-0">{icons[status] || icons.pending}</div>
       <div>
         <div className={`text-[14px] font-bold leading-none mb-1.5 ${status === "pending" ? "text-slate-500" : ""}`}>
