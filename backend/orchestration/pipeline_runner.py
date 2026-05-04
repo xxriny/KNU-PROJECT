@@ -158,18 +158,22 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
     }
 
     # 1. RAG Ingestion (Stage 1) - 코드 청킹 및 벡터 색인
-    scan_result = await _run_pipeline_base(
-        ws,
-        pipeline=get_rag_ingest_pipeline(),
-        routing=get_rag_routing_map(),
-        state_payload=initial_state,
-        pipeline_type="rag_ingest",
-        save=False,
-        log=log,
-    )
+    #    CREATE 모드는 분석할 기존 코드베이스가 없으므로 RAG 인제스트를 통째로 스킵.
+    if action_type == "CREATE":
+        scan_result = dict(initial_state)
+    else:
+        scan_result = await _run_pipeline_base(
+            ws,
+            pipeline=get_rag_ingest_pipeline(),
+            routing=get_rag_routing_map(),
+            state_payload=initial_state,
+            pipeline_type="rag_ingest",
+            save=False,
+            log=log,
+        )
 
-    if scan_result.get("error"):
-        return
+        if scan_result.get("error"):
+            return
 
     # 2. PM Pipeline (Stage 2) - 요구사항 원자화 및 기획
     pm_result = await _run_pipeline_base(

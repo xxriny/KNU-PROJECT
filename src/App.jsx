@@ -195,22 +195,12 @@ export default function App() {
               </div>
             ) : null}
             <button
-              onClick={() => {
-                if (showSidebarChat) {
-                  setShowSidebarChat(false);
-                } else {
-                  const newState = !isStudioOpen;
-                  setIsStudioOpen(newState);
-                  if (!newState) setShowSidebarChat(false);
-                }
-              }}
+              onClick={() => setIsStudioOpen((prev) => !prev)}
               className={`transition-all flex items-center justify-center rounded-xl ${isStudioOpen ? "w-10 h-10" : "w-full h-14"
                 } ${isDarkMode ? "hover:bg-white/5 text-slate-400 hover:text-white" : "hover:bg-black/5 text-slate-600"
                 }`}
             >
-              {showSidebarChat ? (
-                <X size={18} />
-              ) : isStudioOpen ? (
+              {isStudioOpen ? (
                 <PanelRightClose size={20} />
               ) : (
                 <PanelRightOpen size={20} />
@@ -220,34 +210,24 @@ export default function App() {
 
           <div className="flex-1 flex flex-col overflow-hidden relative">
             {isStudioOpen ? (
-              <>
-                {showSidebarChat ? (
-                  <div className="flex-1 flex flex-col h-full bg-[#0F1219] absolute inset-0 z-10 shadow-[-10px_0_30px_rgba(0,0,0,0.3)]">
-                    <div className="flex-1 min-h-0 relative">
-                      <ChatPanel />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar pb-24">
-                    <div className="p-4 grid grid-cols-2 gap-3 shrink-0">
-                      {ICON_PANELS.map((panel) => {
-                        const isDisabled = false; // 항상 활성화
-                        const isActive = activeIconPanel === panel.id;
-                        return (
-                          <StudioCard
-                            key={panel.id}
-                            {...panel}
-                            isDarkMode={isDarkMode}
-                            isActive={isActive}
-                            isDisabled={isDisabled}
-                            onClick={() => !isDisabled && handleIconPanel(panel.id)}
-                          />
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </>
+              <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar pb-24">
+                <div className="p-4 grid grid-cols-2 gap-3 shrink-0">
+                  {ICON_PANELS.map((panel) => {
+                    const isDisabled = false; // 항상 활성화
+                    const isActive = activeIconPanel === panel.id;
+                    return (
+                      <StudioCard
+                        key={panel.id}
+                        {...panel}
+                        isDarkMode={isDarkMode}
+                        isActive={isActive}
+                        isDisabled={isDisabled}
+                        onClick={() => !isDisabled && handleIconPanel(panel.id)}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
             ) : (
               <div className="flex-1 flex flex-col items-center py-4 gap-4 w-full overflow-y-auto custom-scrollbar pb-24">
                 <div className="w-10 border-t border-white/5 my-1" />
@@ -278,14 +258,7 @@ export default function App() {
             {!showSidebarChat && (
               <div className="absolute bottom-10 left-0 right-0 flex justify-center pointer-events-none z-50 animate-fade-in">
                 <button
-                  onClick={() => {
-                    if (!isStudioOpen) {
-                      setIsStudioOpen(true);
-                      setShowSidebarChat(true);
-                    } else {
-                      setShowSidebarChat(true);
-                    }
-                  }}
+                  onClick={() => setShowSidebarChat(true)}
                   className="pointer-events-auto flex items-center justify-center w-12 h-12 rounded-full transition-all hover:scale-110 shadow-[0_10px_30_rgba(0,0,0,0.5)] bg-gradient-to-tr from-blue-600 to-indigo-500 text-white"
                   title="AI 어시스턴트"
                 >
@@ -295,6 +268,40 @@ export default function App() {
             )}
           </div>
         </div>
+
+        {showSidebarChat && (
+          <div
+            className={`fixed bottom-16 right-6 z-[60] flex flex-col rounded-2xl border overflow-hidden animate-fade-in
+              w-[340px] h-[500px] max-h-[calc(100vh-7rem)]
+              ${isDarkMode
+                ? "bg-[#0F1219] border-white/10 shadow-[0_20px_60px_rgba(0,0,0,0.55)]"
+                : "bg-white border-[var(--border)] shadow-[0_20px_60px_rgba(15,23,42,0.18)]"}`}
+            role="dialog"
+            aria-label="AI 어시스턴트"
+          >
+            <div className={`h-12 shrink-0 flex items-center justify-between px-4 border-b ${isDarkMode ? "border-white/5" : "border-[var(--border)]"}`}>
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center">
+                  <Bot size={15} className="text-white" />
+                </div>
+                <div className="flex flex-col leading-tight">
+                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.25em]">Assistant</span>
+                  <span className={`text-[13px] font-bold ${isDarkMode ? "text-white" : "text-slate-800"}`}>AI Navigator</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSidebarChat(false)}
+                className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${isDarkMode ? "hover:bg-white/5 text-slate-400 hover:text-white" : "hover:bg-black/5 text-slate-500 hover:text-slate-800"}`}
+                title="닫기"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 flex flex-col">
+              <ChatPanel />
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="app-no-drag shrink-0">

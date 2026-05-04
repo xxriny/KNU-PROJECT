@@ -17,8 +17,13 @@ logger = get_logger()
 
 def code_embedding_node(state: PipelineState) -> Dict[str, Any]:
     sget = make_sget(state)
+    action_type = (sget("action_type", "") or "").strip().upper()
     run_id = sget("run_id", "unknown")
     raw_chunks = sget("rag_chunks", []) or []
+
+    if action_type == "CREATE":
+        output = RAGIngestOutput(session_id=run_id, chunks_ingested=0, status="skipped")
+        return {"rag_ingest_output": output.model_dump()}
 
     logger.info(f"[code_embedding] {len(raw_chunks)}개 청크 임베딩 시작 (model={MODEL_NAME})")
 
@@ -44,7 +49,16 @@ def code_embedding_node(state: PipelineState) -> Dict[str, Any]:
     status = "success" if ingested == len(raw_chunks) else ("partial" if ingested > 0 else "empty")
     output = RAGIngestOutput(session_id=run_id, chunks_ingested=ingested, status=status)
 
-    thinking = f"{ingested}/{len(raw_chunks)}개 청크 임베딩 및 저장 완료 (status={status})"
+    # >>> [EXPERIMENT-RAG-VIS] BEGIN — 추후 원복 시 이 블록을 다음 한 줄로 교체:
+    #     thinking = f"{ingested}/{len(raw_chunks)}개 청크 임베딩 및 저장 완료 (status={status})"
+    from pipeline.domain.rag.nodes.project_db import DB_PATH as _PROJECT_DB_PATH  # [EXPERIMENT-RAG-VIS]
+    _failed = len(raw_chunks) - ingested
+    _avg_chars = int(sum(len(r.get("content_text", "")) for r in raw_chunks) / max(len(raw_chunks), 1))
+    thinking = (
+        f"임베딩 {ingested}/{len(raw_chunks)}개 (status={status}) — 평균 {_avg_chars}자 / 실패 {_failed}건\n"
+        f"  저장소: {_PROJECT_DB_PATH}"
+    )
+    # <<< [EXPERIMENT-RAG-VIS] END
     logger.info(f"[code_embedding] {thinking}")
 
     return {

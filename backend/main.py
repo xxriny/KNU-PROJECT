@@ -14,7 +14,9 @@ Usage:
 """
 
 import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import sys
+
 import argparse
 from contextlib import asynccontextmanager
 
