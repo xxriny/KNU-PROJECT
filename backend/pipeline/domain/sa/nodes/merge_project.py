@@ -85,6 +85,7 @@ def sa_merge_project_node(ctx: NodeContext) -> dict:
         }
     }
     
+    
     thinking_msg = output.thinking or "프로젝트 병합 전략 수립 완료"
     
     return {
