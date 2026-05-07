@@ -10,7 +10,7 @@ load_dotenv()
 class SASystemJudgeOutput(BaseModel):
     score: int = Field(..., description="1-5점 사이의 시스템 통합 점수")
     rationale: str = Field(..., description="시스템 맥락(RAG) 유지 및 설계 정합성 평가")
-    rag_consistency: str = Field(..., description="기존 시스템(system_scan)과의 일관성")
+    rag_consistency: str = Field(..., description="기존 시스템 컨텍스트와의 일관성")
     production_readiness: str = Field(..., description="실제 배포 가능 수준 평가")
     suggestions: str = Field(..., description="아키텍처 고도화 제안")
 
@@ -27,20 +27,20 @@ JUDGE_SYSTEM_PROMPT = """
 결함을 발견하면 점수를 깎기보다, 분석가(SA Analysis)가 그 결함을 정확히 보고했는지에 더 큰 비중을 두어 평가하세요.
 """
 
-def judge_system(scenario_name: str, requirements: list, system_scan: dict, sa_bundle: Dict[str, Any]):
+def judge_system(scenario_name: str, requirements: list, existing_context: dict, sa_bundle: Dict[str, Any]):
     print(f"\n" + "#"*25 + f" [SYSTEM JUDGE] {scenario_name} " + "#"*25)
-    
+
     api_key = os.getenv("GEMINI_API_KEY")
     user_msg = f"""
     [Scenario]
     {scenario_name}
-    
+
     [Requirements]
     {json.dumps(requirements, indent=2, ensure_ascii=False)}
-    
+
     [Existing System Context (RAG)]
-    {json.dumps(system_scan, indent=2, ensure_ascii=False)}
-    
+    {json.dumps(existing_context, indent=2, ensure_ascii=False)}
+
     [Final SA Bundle]
     {json.dumps(sa_bundle, indent=2, ensure_ascii=False)}
     """

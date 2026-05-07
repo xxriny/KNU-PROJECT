@@ -80,6 +80,24 @@ def delete_project_knowledge(session_id: str) -> int:
     return 0
 
 
+def count_session_chunks(session_id: str) -> int:
+    """주어진 session_id에 적재된 코드 청크 수. 0이면 RAG 인덱스 비어 있음."""
+    if not session_id:
+        return 0
+    try:
+        collection = _get_collection()
+        results = collection.get(where={"session_id": session_id}, include=[])
+        return len(results.get("ids", []) or [])
+    except Exception as e:
+        logger.warning(f"[PROJECT_DB] count_session_chunks failed: {e}")
+        return 0
+
+
+def has_session_chunks(session_id: str) -> bool:
+    """주어진 session_id에 청크가 1개라도 있으면 True."""
+    return count_session_chunks(session_id) > 0
+
+
 def query_project_code(
     query_text: str,
     session_id: Optional[str] = None,

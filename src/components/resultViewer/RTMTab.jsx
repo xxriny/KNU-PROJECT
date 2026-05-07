@@ -35,19 +35,25 @@ export default function RTMTab() {
         <tbody>
           {safeRequirementsRtm.map((req, idx) => {
             const fid = req.feature_id || req.REQ_ID || req.id;
+            const label = req.label || "";
             const assignedStacks = stackMap[fid] || [];
-            
+
             return (
               <tr
                 key={fid || idx}
                 className={`border-b transition-colors ${
-                  isDarkMode 
-                    ? "border-slate-800/50 hover:bg-slate-800/30" 
+                  isDarkMode
+                    ? "border-slate-800/50 hover:bg-slate-800/30"
                     : "border-slate-100 hover:bg-white"
                 }`}
               >
-                <td className={`py-2 px-2 font-mono text-[13px] font-bold ${isDarkMode ? "text-blue-400" : "text-blue-700"}`}>
+                <td className={`py-2 px-2 font-mono text-[13px] font-bold whitespace-nowrap ${isDarkMode ? "text-blue-400" : "text-blue-700"}`}>
                   {fid}
+                  {label && (
+                    <span className={`ml-1 font-sans font-normal ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                      [{label}]
+                    </span>
+                  )}
                 </td>
                 <td className={`py-2 px-2 max-w-xs leading-relaxed ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
                   {req.description}

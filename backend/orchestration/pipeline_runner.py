@@ -16,17 +16,17 @@ from pipeline.orchestration.facade import (
     get_idea_pipeline,
     get_pm_pipeline,
     get_sa_pipeline,
-    get_scan_pipeline,
     get_rag_ingest_pipeline,
     get_pipeline_routing_map,
     get_pm_routing_map,
     get_sa_routing_map,
-    get_scan_routing_map,
     get_rag_routing_map,
     get_idea_chat_routing_map,
 )
 from pipeline.core.action_type import ANALYSIS_ACTION_TYPES, normalize_action_type
+from pipeline.core.session import compute_project_session_id
 from pipeline.domain.rag.ast_scanner import extract_functions, summarize_for_llm
+from pipeline.domain.rag.nodes.project_db import count_session_chunks
 from result_shaping.result_shaper import shape_result
 from pipeline.core.utils import to_serializable
 from observability.logger import get_logger
@@ -147,6 +147,28 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
     log = get_logger(run_id)
     log.info("analysis_start", action_type=action_type)
 
+    # ── RAG 인덱스 유무 검사 ──
+    # source_dir 해시를 영속 session_id로 사용해 ChromaDB 청크 적재량을 확인.
+    session_id = compute_project_session_id(source_dir)
+    chunk_count = count_session_chunks(session_id) if session_id else 0
+    has_index = chunk_count > 0
+
+    if action_type in ("UPDATE", "REVERSE_ENGINEER") and source_dir and not has_index:
+        # 이번 분석에서 RAG ingest가 곧 실행될 예정이므로 source_dir만 있으면 통과.
+        # 단, source_dir이 비어 있으면 위 조건이 False가 되어 검사 자체가 면제됨.
+        # source_dir이 있는데 인덱스가 없다는 것은 첫 실행이거나 직전 인덱싱이 실패한 경우.
+        log.info("rag_index_empty_will_ingest", session_id=session_id)
+
+    rag_warnings: list[dict] = []
+    if action_type == "CREATE" and has_index:
+        rag_warnings.append({
+            "code": "CREATE_WITH_EXISTING_INDEX",
+            "message": (
+                f"기존 RAG 인덱스(청크 {chunk_count}개)가 발견되었습니다. "
+                f"CREATE 모드로 신규 분석을 진행합니다 — 기존 인덱스는 건드리지 않습니다."
+            ),
+        })
+
     initial_state = {
         "api_key": api_key,
         "model": model,
@@ -155,6 +177,13 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
         "source_dir": source_dir,
         "action_type": action_type,
         "run_id": run_id,
+        "session_id": session_id,
+        "rag_index_status": {
+            "has_index": has_index,
+            "chunk_count": chunk_count,
+            "session_id": session_id,
+        },
+        "rag_warnings": rag_warnings,
     }
 
     # 1. RAG Ingestion (Stage 1) - 코드 청킹 및 벡터 색인
@@ -173,6 +202,27 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
         )
 
         if scan_result.get("error"):
+            return
+
+        # RAG ingest 후 인덱스 상태 재평가. UPDATE/REVERSE인데 여전히 비어 있으면 분석 중단.
+        post_count = count_session_chunks(session_id) if session_id else 0
+        post_has_index = post_count > 0
+        scan_result["rag_index_status"] = {
+            "has_index": post_has_index,
+            "chunk_count": post_count,
+            "session_id": session_id,
+        }
+        if action_type in ("UPDATE", "REVERSE_ENGINEER") and not post_has_index:
+            await manager.send_json(ws, {
+                "type": "error",
+                "data": {
+                    "message": (
+                        f"{action_type} 모드인데 ChromaDB에 적재된 코드 청크가 없습니다. "
+                        f"source_dir({source_dir or '미지정'})에서 분석 가능한 코드를 찾지 못했거나 "
+                        f"인덱싱이 실패했습니다. 폴더 경로를 확인한 뒤 다시 시도하세요."
+                    )
+                },
+            })
             return
 
     # 2. PM Pipeline (Stage 2) - 요구사항 원자화 및 기획

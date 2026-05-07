@@ -11,10 +11,8 @@ from pipeline.orchestration.graph import (
     get_pipeline_routing_map,
     get_pm_pipeline,
     get_sa_pipeline,
-    get_scan_pipeline,
     get_pm_routing_map,
     get_sa_routing_map,
-    get_scan_routing_map,
 )
 from pipeline.orchestration.aux_graphs import (
     get_idea_pipeline,
@@ -31,10 +29,8 @@ __all__ = [
     "get_pipeline_routing_map",
     "get_pm_pipeline",
     "get_sa_pipeline",
-    "get_scan_pipeline",
     "get_pm_routing_map",
     "get_sa_routing_map",
-    "get_scan_routing_map",
     "get_idea_pipeline",
     "get_idea_chat_routing_map",
     "get_rag_ingest_pipeline",

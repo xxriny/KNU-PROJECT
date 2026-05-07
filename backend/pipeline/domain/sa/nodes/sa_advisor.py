@@ -149,7 +149,7 @@ def _build_rag_context(session_id: str) -> str:
 
 
 def _build_user_message(rtm: list, components: list, apis: list, tables: list, precheck_gaps: list, rag_ctx: str) -> str:
-    p_rtm = "\n".join(f"{safe_get(r, ['id'])}:{safe_get(r, ['desc'])}" for r in rtm)
+    p_rtm = "\n".join(f"{safe_get(r, ['id', 'feature_id'])}:{safe_get(r, ['desc', 'description'])}" for r in rtm)
     p_comp = "\n".join(f"{safe_get(c, ['name', 'nm'])}:{safe_get(c, ['role', 'rl'])}" for c in components)
     p_api = "\n".join(f"{safe_get(a, ['ep'])}|{safe_get(a, ['req', 'rq'])}|{safe_get(a, ['res', 'rs'])}" for a in apis)
     p_db = "\n".join(f"{safe_get(t, ['name', 'nm'])}|{safe_get(t, ['cols', 'cl'])}" for t in tables)

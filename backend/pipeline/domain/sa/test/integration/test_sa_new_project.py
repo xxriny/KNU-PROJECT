@@ -27,11 +27,12 @@ def test_new_project_design():
     
     state = {
         "input_idea": "FastAPI와 React를 사용한 이메일 로그인 기능 구현",
-        "system_scan": {}, # Empty (New)
+        "rag_index_status": {"has_index": False, "chunk_count": 0, "session_id": ""},
         "requirements_rtm": requirements,
         "api_key": "[.env]",
         "model": "gemini-2.5-flash",
-        "run_id": "it_01_new"
+        "run_id": "it_01_new",
+        "action_type": "CREATE",
     }
 
     # Pipeline

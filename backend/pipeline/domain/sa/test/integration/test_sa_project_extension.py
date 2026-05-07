@@ -21,24 +21,22 @@ def test_project_extension():
     """통합 테스트 2: 기존 프로젝트 기능 확장 (Image 28)"""
     scenario_name = "IT-02: Project Extension (Google OAuth)"
     
-    existing_context = {
-        "status": "Pass",
-        "detected_frameworks": ["FastAPI"],
-        "existing_entities": ["User"],
-        "existing_apis": ["POST /api/v1/auth/login"]
-    }
-    
     requirements = [
         {"id": "REQ-201", "desc": "구글 소셜 로그인 추가 연동"}
     ]
-    
+
     state = {
         "input_idea": "기존 이메일 로그인 시스템에 구글 로그인을 추가하고 싶습니다.",
-        "system_scan": existing_context,
+        "rag_index_status": {
+            "has_index": True,
+            "chunk_count": 12,
+            "session_id": "test_existing_session",
+        },
         "requirements_rtm": requirements,
         "api_key": "[.env]",
         "model": "gemini-2.5-flash",
-        "run_id": "it_02_ext"
+        "run_id": "it_02_ext",
+        "action_type": "UPDATE",
     }
 
     # Pipeline

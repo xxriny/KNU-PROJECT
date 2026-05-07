@@ -75,7 +75,9 @@ class _AnalysisFields(TypedDict, total=False):
     context_spec: dict               # {"summary": "...", "key_decisions": [...], ...}
     metadata: dict                   # {"project_name": "...", "action_type": "...", ...}
     clarification_questions: list    # Needs_Clarification 시 질문 목록
-    system_scan: dict                  # 기존 코드 구조 분석 결과
+    session_id: str                  # source_dir 해시 기반 RAG 영속 키 (run_id와 별개)
+    rag_index_status: dict           # {"has_index": bool, "chunk_count": int, "session_id": str}
+    rag_warnings: list               # [{"code": "...", "message": "..."}] 사용자 알림 배너
     sa_phase2: dict                  # 영향도 분석 결과
     sa_phase3: dict                  # 기술 타당성 결과
     sa_phase4: dict                  # 의존성 샌드박스 검증 결과

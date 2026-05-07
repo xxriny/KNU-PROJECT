@@ -10,7 +10,8 @@ import {
 } from "lucide-react";
 
 const SCAN_STEPS = [
-  { key: "system_scan", label: "프로젝트 분석", desc: "소스 코드 구조 및 프레임워크 스캔" },
+  { key: "code_chunker", label: "코드 청킹", desc: "소스 파일을 함수 단위 청크로 분할" },
+  { key: "code_embedding", label: "코드 임베딩", desc: "청크 임베딩 후 ChromaDB 적재" },
 ];
 
 const PM_PIPELINE_STEPS = [
