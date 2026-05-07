@@ -51,7 +51,7 @@ CONTAINER_GROUPS: list[dict[str, Any]] = [
         "id": "sa-pipeline",
         "label": "SA Pipeline",
         "layer": "Application",
-        "description": "시스템 아키텍처 분석 노드 체인 (system_scan ~ sa_phase8, merge_project)",
+        "description": "시스템 아키텍처 분석 노드 체인 (merge_project ~ sa_phase8)",
         "path_prefixes": ["backend/pipeline/domain/sa/nodes/", "backend/pipeline/domain/rag/nodes/"],
     },
     {

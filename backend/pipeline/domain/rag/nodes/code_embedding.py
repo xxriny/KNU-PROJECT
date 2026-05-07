@@ -18,17 +18,18 @@ logger = get_logger()
 def code_embedding_node(state: PipelineState) -> Dict[str, Any]:
     sget = make_sget(state)
     action_type = (sget("action_type", "") or "").strip().upper()
-    run_id = sget("run_id", "unknown")
+    # session_id는 source_dir 해시 기반 영속 키. 없으면 run_id로 폴백.
+    session_id = sget("session_id", "") or sget("run_id", "unknown")
     raw_chunks = sget("rag_chunks", []) or []
 
     if action_type == "CREATE":
-        output = RAGIngestOutput(session_id=run_id, chunks_ingested=0, status="skipped")
+        output = RAGIngestOutput(session_id=session_id, chunks_ingested=0, status="skipped")
         return {"rag_ingest_output": output.model_dump()}
 
     logger.info(f"[code_embedding] {len(raw_chunks)}개 청크 임베딩 시작 (model={MODEL_NAME})")
 
     if not raw_chunks:
-        output = RAGIngestOutput(session_id=run_id, chunks_ingested=0, status="empty")
+        output = RAGIngestOutput(session_id=session_id, chunks_ingested=0, status="empty")
         return {
             "rag_ingest_output": output.model_dump(),
             "thinking_log": (sget("thinking_log", []) or []) + [
@@ -41,13 +42,13 @@ def code_embedding_node(state: PipelineState) -> Dict[str, Any]:
         try:
             chunk = CodeChunk(**raw)
             vector = get_nomic_embeddings(chunk.content_text)
-            upsert_code_chunk(run_id, chunk, vector)
+            upsert_code_chunk(session_id, chunk, vector)
             ingested += 1
         except Exception as e:
             logger.warning(f"[code_embedding] 청크 임베딩 실패 ({raw.get('chunk_id', '?')}): {e}")
 
     status = "success" if ingested == len(raw_chunks) else ("partial" if ingested > 0 else "empty")
-    output = RAGIngestOutput(session_id=run_id, chunks_ingested=ingested, status=status)
+    output = RAGIngestOutput(session_id=session_id, chunks_ingested=ingested, status=status)
 
     # >>> [EXPERIMENT-RAG-VIS] BEGIN — 추후 원복 시 이 블록을 다음 한 줄로 교체:
     #     thinking = f"{ingested}/{len(raw_chunks)}개 청크 임베딩 및 저장 완료 (status={status})"

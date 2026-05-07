@@ -33,6 +33,7 @@ Thumbs.db
 backend/test/chroma_db/
 backend/test/json/*.json
 backend/test/json/*_PROJECT_STATE.md
+DOCS
 
 # Backend auto-generated data (세션 저장 파일, ChromaDB)
 **/chroma_db/

@@ -83,7 +83,8 @@ export const EMPTY_RESULT_FIELDS = {
   sa_reverse_context: null,
   sa_output: null,
   sa_artifacts: null,
-  system_scan: null,
+  rag_index_status: null,
+  rag_warnings: [],
   sa_phase2: null,
   sa_phase3: null,
   sa_phase4: null,
@@ -144,7 +145,7 @@ export function spreadResultData(data) {
     },
     // 핵심 리스트 데이터
     requirements_rtm: rtm.length > 0 ? rtm : validateArray("rtm_fallback", pmData.rtm),
-    tech_stacks: techStacks.length > 0 ? techStacks : validateArray("stack_fallback", pmData.stacks),
+    tech_stacks: techStacks.length > 0 ? techStacks : validateArray("stack_fallback", pmData.tech_stacks || pmData.stacks),
     apis: apis,
     tables: tables,
     components: components,

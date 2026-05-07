@@ -26,6 +26,7 @@ class SAOverview(BaseModel):
     feasibility: dict = Field(default_factory=dict)
     critical_gaps: list[str] = Field(default_factory=list)
     skipped_phases: list[str] = Field(default_factory=list)
+    warnings: list[dict] = Field(default_factory=list)
 
 
 class ProjectOverview(BaseModel):
@@ -64,7 +65,7 @@ _EXCLUDED_KEYS: frozenset[str] = frozenset({
 def _collect_skipped_phases(sanitized: dict[str, Any]) -> list[str]:
     return [
         phase
-        for phase in ("system_scan", "sa_phase2")
+        for phase in ("sa_phase2",)
         if isinstance(sanitized.get(phase), dict)
         and sanitized.get(phase, {}).get("status") == "Skipped"
     ]
@@ -83,11 +84,16 @@ def _build_pm_overview(
     ).model_dump()
 
 
-def _build_sa_overview(sa_advisor: dict, skipped_phases: list[str]) -> dict:
+def _build_sa_overview(
+    sa_advisor: dict,
+    skipped_phases: list[str],
+    warnings: list[dict] | None = None,
+) -> dict:
     return SAOverview(
         feasibility={"status": sa_advisor.get("status", "Pass")},
         critical_gaps=sa_advisor.get("gaps", []),
         skipped_phases=skipped_phases,
+        warnings=warnings or [],
     ).model_dump()
 
 
@@ -119,9 +125,10 @@ def _build_data_flags(
     requirements_rtm: list,
     sanitized: dict[str, Any],
 ) -> dict[str, bool]:
+    rag_status = sanitized.get("rag_index_status") or {}
     return {
         "has_rtm": len(requirements_rtm) > 0,
-        "has_phase1_scan": isinstance(sanitized.get("system_scan"), dict),
+        "has_rag_index": bool(rag_status.get("has_index")),
         "has_sa_artifacts": isinstance(sanitized.get("sa_artifacts"), dict),
     }
 
@@ -208,8 +215,15 @@ def shape_result(raw_result: dict) -> dict:
     merged_plan = merged_project.get("plan") or {}
 
     # ── Modular Data Aliasing (Prioritize pre-expanded sa_output) ──
-    # 0. PM Stacks
-    sanitized["tech_stacks"] = pm_data.get("stacks") or sanitized.get("stacks") or []
+    # 0. PM Stacks — pm_embedding._assemble_pm_bundle가 'tech_stacks' 키로 저장.
+    # 'stacks'는 구버전 폴백.
+    sanitized["tech_stacks"] = (
+        pm_data.get("tech_stacks")
+        or pm_data.get("stacks")
+        or sanitized.get("tech_stacks")
+        or sanitized.get("stacks")
+        or []
+    )
     
     extracted_rtm = (
         merged_plan.get("requirements_rtm") or 
@@ -282,15 +296,14 @@ def shape_result(raw_result: dict) -> dict:
     sanitized["sa_output"] = sa_output_raw # UI 탭 활성화(hasSaData)를 위해 필수
 
     skipped_phases = _collect_skipped_phases(sanitized)
-
-    skipped_phases = _collect_skipped_phases(sanitized)
+    rag_warnings = sanitized.get("rag_warnings") or []
 
     sanitized["pm_overview"] = _build_pm_overview(
         metadata=metadata,
         context_spec=context_spec,
         requirements_rtm=requirements_rtm,
     )
-    sanitized["sa_overview"] = _build_sa_overview(sa_advisor, skipped_phases)
+    sanitized["sa_overview"] = _build_sa_overview(sa_advisor, skipped_phases, rag_warnings)
     sanitized["sa_artifacts"] = compile_sa_artifacts(sanitized)
 
     summary_text, summary_source = _resolve_summary(context_spec, sa_advisor)
