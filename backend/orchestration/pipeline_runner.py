@@ -256,7 +256,7 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
     api_key = payload.get("api_key", "")
     model = payload.get("model", DEFAULT_MODEL)
 
-    await _run_pipeline_base(
+    result = await _run_pipeline_base(
         ws,
         pipeline=get_idea_pipeline(),
         routing=get_idea_chat_routing_map(),
@@ -270,8 +270,23 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
         pipeline_type="idea_chat",
         result_node="idea_chat",
         save=False,
-        result_mutator=lambda shaped: shaped.update({"chat_reply": shaped.get("agent_reply", "")}),
     )
+
+    if result.get("error"):
+        return
+
+    await manager.send_json(ws, {
+        "type": "result",
+        "node": "idea_chat",
+        "data": {
+            "chat_reply": result.get("agent_reply", ""),
+            "chat_history": result.get("chat_history", []),
+            "idea_ready": result.get("idea_ready", False),
+            "idea_summary": result.get("idea_summary", ""),
+            "suggested_mode": result.get("suggested_mode", "create"),
+            "pipeline_type": "idea_chat",
+        },
+    })
 
 
 # ─── 스트리밍 ─────────────────────────────────────────────

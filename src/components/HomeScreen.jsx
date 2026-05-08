@@ -34,6 +34,7 @@ const MODES = [
 export default function HomeScreen() {
   const {
     startAnalysis,
+    activateOutputTab,
     apiKey,
     model,
     selectedMode,
@@ -55,9 +56,11 @@ export default function HomeScreen() {
   const canSubmit = isReverseMode ? Boolean(projectFolder) : Boolean(trimmedInput);
 
   const handleSubmit = () => {
-    if (isReverseMode && !projectFolder) return;
-    if (!isReverseMode && !trimmedInput) return;
+    if (!canSubmit) return;
+    activateOutputTab("progress");
     startAnalysis(trimmedInput, contextText.trim(), apiKey, model, selectedMode, projectTitle);
+    setInputText("");
+    setContextText("");
   };
 
   const handleKeyDown = (e) => {

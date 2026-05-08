@@ -168,6 +168,8 @@ export const createSessionSlice = (set, get) => ({
   },
 
   setChatInput: (text) => set({ chatInput: text }),
+  addChatMessage: (role, content) =>
+    set((s) => ({ chatHistory: [...s.chatHistory, { role, content }] })),
   clearChat: () => set({ chatHistory: [], chatInput: "" }),
 
   updateSessionName: (id, name) => {
