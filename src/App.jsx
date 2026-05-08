@@ -191,7 +191,7 @@ export default function App() {
             {isStudioOpen ? (
               <div className="flex flex-col">
                 <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">Workbench</span>
-                <h3 className={`text-[15px] font-black tracking-tight ${isDarkMode ? "text-gradient" : "text-blue-600"}`}>스튜디오</h3>
+                <h3 className={`text-[15px] font-black tracking-tight ${isDarkMode ? "text-gradient" : "text-blue-600"}`}>STUDIO</h3>
               </div>
             ) : null}
             <button

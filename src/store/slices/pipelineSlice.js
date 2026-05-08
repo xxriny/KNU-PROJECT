@@ -93,10 +93,10 @@ export const createPipelineSlice = (set, get) => ({
     set(nextResultData);
   },
 
-  startAnalysis: (idea, context = "", apiKey = "", model = "gemini-2.5-flash", selectedMode = "create") => {
+  startAnalysis: (idea, context = "", apiKey = "", model = "gemini-2.5-flash", selectedMode = "create", initialTitle = null) => {
     const normalizedMode = normalizeMode(selectedMode);
     const sourceDir = get().projectFolder || "";
-    get().createSession();
+    get().createSession(initialTitle);
     
     // 분석 시작 시 기존 메모(userComments)는 유지하고, 
     // 결과 필드는 running 상태에 맞춰 필요한 것만 초기화합니다.

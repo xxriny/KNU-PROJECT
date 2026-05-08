@@ -8,13 +8,13 @@ export const createSessionSlice = (set, get) => ({
   chatHistory: [],
   chatInput: "",
 
-  createSession: () => {
+  createSession: (initialTitle = null) => {
     const state = get();
     const id = Date.now().toString();
     const now = new Date();
     const session = {
       id,
-      name: `세션 ${now.toLocaleDateString("ko")} ${now.toLocaleTimeString("ko", { hour: "2-digit", minute: "2-digit" })}`,
+      name: initialTitle && initialTitle !== "새 프로젝트" ? initialTitle : `세션 ${now.toLocaleDateString("ko")} ${now.toLocaleTimeString("ko", { hour: "2-digit", minute: "2-digit" })}`,
       createdAt: now.getTime(),
       projectFolder: state.projectFolder,
       fileTree: state.fileTree,
@@ -169,4 +169,12 @@ export const createSessionSlice = (set, get) => ({
 
   setChatInput: (text) => set({ chatInput: text }),
   clearChat: () => set({ chatHistory: [], chatInput: "" }),
+
+  updateSessionName: (id, name) => {
+    set((state) => {
+      const updated = state.sessions.map((s) => (s.id === id ? { ...s, name } : s));
+      persistSessions(updated);
+      return { sessions: updated };
+    });
+  },
 });
