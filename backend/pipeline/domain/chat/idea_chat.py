@@ -14,6 +14,25 @@ from version import DEFAULT_MODEL
 from pipeline.core.rag_manager import rag_manager
 
 
+def _extract_text(response) -> str:
+    """LangChain AIMessage.content를 문자열로 정규화.
+    신모델(gemini-3.1+)은 content를 [{"type":"text","text":"..."}, ...] 리스트로 반환할 수 있음."""
+    content = response.content if hasattr(response, "content") else response
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for p in content:
+            if isinstance(p, str):
+                parts.append(p)
+            elif isinstance(p, dict):
+                text = p.get("text") or p.get("content") or ""
+                if isinstance(text, str) and text:
+                    parts.append(text)
+        return "".join(parts)
+    return str(content)
+
+
 SYSTEM_PROMPT = """당신은 PM(프로젝트 매니저) AI 어시스턴트입니다.
 사용자가 아이디어를 구체화하거나, 이미 만들어진 분석 결과를 이해하고 다음 액션을 결정하도록 도와주세요.
 
@@ -123,7 +142,7 @@ def idea_chat_node(state: PipelineState) -> dict:
         llm = get_llm(api_key=api_key, model=model)
         response = llm.invoke(messages)
             
-        raw = response.content if hasattr(response, "content") else str(response)
+        raw = _extract_text(response)
 
         result = parse_json_safe(raw)
 

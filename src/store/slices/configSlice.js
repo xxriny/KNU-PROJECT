@@ -3,9 +3,9 @@
  */
 export const createConfigSlice = (set, get) => ({
   apiKey: "",
-  model: "gemini-2.5-flash",
+  model: "gemini-3.1-flash-lite-preview",
   backendHasKey: false,
-  availableModels: ["gemini-2.5-flash"],
+  availableModels: ["gemini-3.1-flash-lite-preview"],
 
   setApiKey: (key) => set({ apiKey: key }),
   setModel: (model) => set({ model }),
@@ -17,7 +17,7 @@ export const createConfigSlice = (set, get) => ({
       const cfg = await res.json();
       const nextAvailableModels = Array.isArray(cfg.available_models) && cfg.available_models.length > 0
         ? cfg.available_models
-        : ["gemini-2.5-flash"];
+        : ["gemini-3.1-flash-lite-preview"];
       const currentModel = get().model;
       if (cfg.has_api_key) set({ backendHasKey: true });
       set({
