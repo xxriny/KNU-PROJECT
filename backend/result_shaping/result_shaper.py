@@ -56,8 +56,18 @@ class DevOverview(BaseModel):
     qa_status: dict[str, str] = Field(default_factory=dict)
     domain_gate_status: dict[str, str] = Field(default_factory=dict)
     global_fe_sync_status: str | None = None
+    fullstack_runtime_status: str | None = None
     integration_status: str | None = None
     branch_pr_status: str | None = None
+    backend_codegen_status: str | None = None
+    backend_codegen_verification_status: str | None = None
+    backend_codegen_repair_status: str | None = None
+    backend_codegen_reverify_status: str | None = None
+    frontend_codegen_status: str | None = None
+    frontend_codegen_verification_status: str | None = None
+    frontend_codegen_repair_status: str | None = None
+    frontend_codegen_reverify_status: str | None = None
+    uiux_artifact_status: str | None = None
     embedding_status: str | None = None
     next_action: str | None = None
     merge_ready: bool = False
@@ -344,9 +354,14 @@ def shape_result(raw_result: dict) -> dict:
     }
 
     develop_main_plan = sanitized.get("develop_main_plan") or {}
+    uiux_artifact = sanitized.get("uiux_artifact") or {}
     uiux_result = sanitized.get("uiux_result") or {}
     backend_result = sanitized.get("backend_result") or {}
     frontend_result = sanitized.get("frontend_result") or {}
+    frontend_codegen_result = sanitized.get("frontend_codegen_result") or {}
+    frontend_codegen_verification = sanitized.get("frontend_codegen_verification") or {}
+    frontend_codegen_repair_result = sanitized.get("frontend_codegen_repair_result") or {}
+    frontend_codegen_reverify_result = sanitized.get("frontend_codegen_reverify_result") or {}
     uiux_qa_result = sanitized.get("uiux_qa_result") or {}
     backend_qa_result = sanitized.get("backend_qa_result") or {}
     frontend_qa_result = sanitized.get("frontend_qa_result") or {}
@@ -354,8 +369,13 @@ def shape_result(raw_result: dict) -> dict:
     backend_domain_gate_result = sanitized.get("backend_domain_gate_result") or {}
     frontend_domain_gate_result = sanitized.get("frontend_domain_gate_result") or {}
     global_fe_sync_result = sanitized.get("global_fe_sync_result") or {}
+    fullstack_runtime_verification = sanitized.get("fullstack_runtime_verification") or {}
     integration_qa_result = sanitized.get("integration_qa_result") or {}
     branch_pr_result = sanitized.get("branch_pr_result") or {}
+    backend_codegen_result = sanitized.get("backend_codegen_result") or {}
+    backend_codegen_verification = sanitized.get("backend_codegen_verification") or {}
+    backend_codegen_repair_result = sanitized.get("backend_codegen_repair_result") or {}
+    backend_codegen_reverify_result = sanitized.get("backend_codegen_reverify_result") or {}
     embedding_result = sanitized.get("embedding_result") or {}
     sanitized["dev_overview"] = DevOverview(
         goal=sanitized.get("develop_goal") or develop_main_plan.get("goal"),
@@ -376,8 +396,18 @@ def shape_result(raw_result: dict) -> dict:
             "frontend": frontend_domain_gate_result.get("status", ""),
         },
         global_fe_sync_status=global_fe_sync_result.get("status"),
+        fullstack_runtime_status=fullstack_runtime_verification.get("status"),
         integration_status=integration_qa_result.get("status"),
         branch_pr_status=branch_pr_result.get("status"),
+        backend_codegen_status=backend_codegen_result.get("status"),
+        backend_codegen_verification_status=backend_codegen_verification.get("status"),
+        backend_codegen_repair_status=backend_codegen_repair_result.get("status"),
+        backend_codegen_reverify_status=backend_codegen_reverify_result.get("status"),
+        frontend_codegen_status=frontend_codegen_result.get("status"),
+        frontend_codegen_verification_status=frontend_codegen_verification.get("status"),
+        frontend_codegen_repair_status=frontend_codegen_repair_result.get("status"),
+        frontend_codegen_reverify_status=frontend_codegen_reverify_result.get("status"),
+        uiux_artifact_status=uiux_artifact.get("status"),
         embedding_status=embedding_result.get("status"),
         next_action=sanitized.get("develop_next_action"),
         merge_ready=bool(branch_pr_result.get("merge_ready")),

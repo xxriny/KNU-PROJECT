@@ -143,6 +143,22 @@ class _RAGFields(TypedDict, total=False):
 class _DevFields(TypedDict, total=False):
     development_request: str
     source_session_id: str
+    enable_backend_codegen: bool
+    backend_codegen_language: str
+    backend_codegen_framework: str
+    backend_codegen_mode: str
+    enable_frontend_codegen: bool
+    frontend_codegen_language: str
+    frontend_codegen_framework: str
+    frontend_codegen_mode: str
+    enable_dependency_install: bool
+    components: list
+    apis: list
+    tables: list
+    project_overview: dict
+    pm_overview: dict
+    sa_overview: dict
+    sa_artifacts: dict
     develop_goal: str
     project_rag_context: dict
     artifact_rag_context: dict
@@ -151,15 +167,25 @@ class _DevFields(TypedDict, total=False):
     backend_task_spec: dict
     frontend_task_spec: dict
     uiux_result: dict
+    uiux_artifact: dict
     backend_result: dict
     frontend_result: dict
+    frontend_codegen_result: dict
+    frontend_codegen_verification: dict
+    frontend_codegen_repair_result: dict
+    frontend_codegen_reverify_result: dict
     uiux_qa_result: dict
     backend_qa_result: dict
     frontend_qa_result: dict
     uiux_domain_gate_result: dict
     backend_domain_gate_result: dict
+    backend_codegen_result: dict
+    backend_codegen_verification: dict
+    backend_codegen_repair_result: dict
+    backend_codegen_reverify_result: dict
     frontend_domain_gate_result: dict
     global_fe_sync_result: dict
+    fullstack_runtime_verification: dict
     integration_qa_result: dict
     branch_pr_result: dict
     embedding_result: dict
