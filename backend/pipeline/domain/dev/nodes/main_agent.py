@@ -133,6 +133,91 @@ SYSTEM_PROMPT = """# 역할: Develop Main Agent Planner
 """
 
 
+LEGACY_SYSTEM_PROMPT = SYSTEM_PROMPT
+SYSTEM_PROMPT = """
+당신은 '개발 오케스트레이션 총괄자'입니다. PM/SA 산출물과 사용자 요청을 기준으로 이번 DEV 사이클의 실행 도메인과 작업 분배를 결정하십시오.
+
+[1. 도메인 선택 (MANDATORY)]
+- selected_domains는 uiux, backend, frontend 중 필요한 도메인만 포함하십시오.
+- 전체 앱/fullstack/서비스 요청이면 uiux, backend, frontend를 모두 선택하십시오.
+- backend/API/server/DB 요청이면 backend를 선택하십시오.
+- frontend/screen/React/UI 요청이면 frontend를 선택하고, UIUX handoff가 필요하므로 uiux도 함께 선택하십시오.
+- design/UIUX/user flow/screen design 요청이면 uiux를 선택하십시오.
+- 선택하지 않은 도메인의 task_spec을 억지로 만들지 마십시오.
+
+[2. PM/SA Trace 규칙]
+- 모든 task_spec.requirement_ids는 PM requirement_id를 기준으로 작성하십시오.
+- backend task는 SA apis/tables를 target_components에 반영하십시오.
+- frontend task는 UIUX/SA component와 API dependency를 반영하십시오.
+- uiux task는 화면, 사용자 흐름, 접근성, frontend handoff를 만들 수 있어야 합니다.
+
+[3. Branch 전략]
+- branch_strategy.base_branch 기본값은 develop입니다.
+- domain_branches는 selected_domains에 포함된 도메인만 생성하십시오.
+- branch명은 feature/{goal-slug}-{domain} 형태를 우선 사용하십시오.
+
+[4. 출력 규격(JSON)]
+{
+  "thinking": "한국어 핵심어 5개 이내",
+  "goal": "개발 목표",
+  "selected_domains": ["uiux|backend|frontend"],
+  "branch_strategy": {
+    "gitflow": "git-flow",
+    "base_branch": "develop",
+    "epic_branch": "feature/...",
+    "domain_branches": [{"domain": "backend", "branch": "feature/..."}]
+  },
+  "task_specs": [{
+    "domain": "uiux|backend|frontend",
+    "goal": "도메인 목표",
+    "requirement_ids": ["REQ_ID"],
+    "focus": ["핵심 작업"],
+    "inputs": ["참조 산출물"],
+    "target_components": ["대상"],
+    "acceptance_criteria": ["검증 기준"]
+  }]
+}
+"""
+
+
+def _infer_selected_domains(ctx: NodeContext, goal: str) -> list[str]:
+    request = " ".join([
+        str(goal or ""),
+        str(ctx.sget("development_request", "") or ""),
+    ]).lower()
+    explicit_backend = any(token in request for token in ["backend", "back-end", "api", "server", "database", "db", "백엔드", "서버", "데이터베이스"])
+    explicit_frontend = any(token in request for token in ["frontend", "front-end", "react", "vite", "ui", "screen", "page", "프론트", "화면", "페이지"])
+    explicit_uiux = any(token in request for token in ["uiux", "ui/ux", "ux", "design", "handoff", "디자인", "사용자 흐름", "화면 설계"])
+    fullstack = any(token in request for token in ["fullstack", "full-stack", "전체 앱", "전체", "앱", "서비스"])
+
+    selected: list[str] = []
+    if fullstack:
+        selected = ["uiux", "backend", "frontend"]
+    else:
+        if explicit_uiux:
+            selected.append("uiux")
+        if explicit_backend or ctx.sget("enable_backend_codegen", False):
+            selected.append("backend")
+        if explicit_frontend or ctx.sget("enable_frontend_codegen", False):
+            if "uiux" not in selected:
+                selected.append("uiux")
+            selected.append("frontend")
+
+    if not selected:
+        selected = ["uiux", "backend", "frontend"]
+    return [domain for domain in ["uiux", "backend", "frontend"] if domain in set(selected)]
+
+
+def _filter_branch_strategy(branch_strategy: dict, selected_domains: list[str]) -> dict:
+    selected = set(selected_domains)
+    filtered = dict(branch_strategy or {})
+    filtered["domain_branches"] = [
+        item for item in (filtered.get("domain_branches") or [])
+        if item.get("domain") in selected
+    ]
+    return filtered
+
+
 def _truncate_preview(value, limit: int = 220) -> str:
     if isinstance(value, (dict, list)):
         text = json.dumps(value, ensure_ascii=False)
@@ -298,7 +383,7 @@ def develop_main_agent_node(ctx: NodeContext) -> dict:
         ],
     }
 
-    selected_domains = ["uiux", "backend", "frontend"]
+    selected_domains = _infer_selected_domains(ctx, goal)
     planned_goal = goal
     branch_strategy = fallback_branch_strategy
     task_specs = fallback_task_specs
@@ -319,6 +404,9 @@ def develop_main_agent_node(ctx: NodeContext) -> dict:
         thinking = out.thinking or thinking
         planned_goal = out.goal or goal
         selected_domains = out.selected_domains or selected_domains
+        selected_domains = [domain for domain in ["uiux", "backend", "frontend"] if domain in set(selected_domains)]
+        if "frontend" in selected_domains and "uiux" not in selected_domains:
+            selected_domains.insert(0, "uiux")
         branch_strategy = out.branch_strategy.model_dump()
         task_specs = {
             item.domain: item.model_dump()
@@ -337,6 +425,8 @@ def develop_main_agent_node(ctx: NodeContext) -> dict:
             branch_strategy["base_branch"] = "develop"
         if not branch_strategy.get("gitflow"):
             branch_strategy["gitflow"] = "git-flow"
+
+    branch_strategy = _filter_branch_strategy(branch_strategy, selected_domains)
 
     return {
         "develop_goal": planned_goal,

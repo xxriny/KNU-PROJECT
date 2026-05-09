@@ -30,12 +30,12 @@ def get_components(state_get) -> list[dict[str, Any]]:
 
 def get_apis(state_get) -> list[dict[str, Any]]:
     previous = _previous_result(state_get)
-    return previous.get("apis", []) or []
+    return state_get("apis", []) or previous.get("apis", []) or []
 
 
 def get_tables(state_get) -> list[dict[str, Any]]:
     previous = _previous_result(state_get)
-    return previous.get("tables", []) or []
+    return state_get("tables", []) or previous.get("tables", []) or []
 
 
 def get_goal(state_get) -> str:
