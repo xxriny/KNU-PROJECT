@@ -85,6 +85,15 @@ class DevelopRequest(BaseModel):
     previous_result: dict = {}
     api_key: str = ""
     model: str = DEFAULT_MODEL
+    enable_backend_codegen: bool = False
+    backend_codegen_language: str = ""
+    backend_codegen_framework: str = ""
+    backend_codegen_mode: str = "llm"
+    enable_frontend_codegen: bool = False
+    frontend_codegen_language: str = ""
+    frontend_codegen_framework: str = ""
+    frontend_codegen_mode: str = "template"
+    enable_dependency_install: bool = False
 
 
 class ScanRequest(BaseModel):
@@ -259,6 +268,15 @@ async def develop(req: DevelopRequest):
                 "run_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
                 "source_dir": req.source_dir,
                 "development_request": req.development_request,
+                "enable_backend_codegen": req.enable_backend_codegen,
+                "backend_codegen_language": req.backend_codegen_language,
+                "backend_codegen_framework": req.backend_codegen_framework,
+                "backend_codegen_mode": req.backend_codegen_mode,
+                "enable_frontend_codegen": req.enable_frontend_codegen,
+                "frontend_codegen_language": req.frontend_codegen_language,
+                "frontend_codegen_framework": req.frontend_codegen_framework,
+                "frontend_codegen_mode": req.frontend_codegen_mode,
+                "enable_dependency_install": req.enable_dependency_install,
                 "previous_result": previous_result,
                 "requirements_rtm": previous_result.get("requirements_rtm", []),
                 "components": previous_result.get("components", []),
