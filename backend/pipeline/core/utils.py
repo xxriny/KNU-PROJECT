@@ -7,6 +7,8 @@ PM Agent Pipeline — 유틸리티 v6.3 (FastAPI 구조 적용)
 - _get_effective_key() 헬퍼 추가
 """
 
+from __future__ import annotations
+
 import json, re, os, threading
 from pathlib import Path
 from contextvars import ContextVar
@@ -30,6 +32,113 @@ logger = get_logger()
 _JSON_BLOCK_RE = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL)
 _JSON_FALLBACK_RE = re.compile(r"(\{.*)", re.DOTALL)
 _THINKING_RE = re.compile(r"<thinking>(.*?)</thinking>", re.DOTALL)
+
+
+def _json_from_text(value: str) -> dict | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    block = _JSON_BLOCK_RE.search(text)
+    if block:
+        text = block.group(1).strip()
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        fallback = _JSON_FALLBACK_RE.search(text)
+        if not fallback:
+            return None
+        try:
+            parsed = json.loads(fallback.group(1).strip())
+            return parsed if isinstance(parsed, dict) else None
+        except json.JSONDecodeError:
+            return None
+
+
+def _raw_structured_candidates(raw: Any) -> list[Any]:
+    candidates: list[Any] = []
+    if raw is None:
+        return candidates
+
+    content = getattr(raw, "content", None)
+    if content:
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict):
+                    candidates.append(item.get("text") or item.get("content") or item)
+                else:
+                    candidates.append(item)
+        else:
+            candidates.append(content)
+
+    for tool_call in getattr(raw, "tool_calls", None) or []:
+        if isinstance(tool_call, dict):
+            candidates.append(tool_call.get("args") or tool_call.get("arguments"))
+
+    additional = getattr(raw, "additional_kwargs", None) or {}
+    for tool_call in additional.get("tool_calls") or []:
+        if not isinstance(tool_call, dict):
+            continue
+        function = tool_call.get("function") or {}
+        candidates.append(function.get("arguments"))
+
+    return candidates
+
+
+def _parse_raw_structured_fallback(schema: Type[T], raw: Any) -> T | None:
+    for candidate in _raw_structured_candidates(raw):
+        data = candidate if isinstance(candidate, dict) else _json_from_text(str(candidate or ""))
+        if not data:
+            continue
+        try:
+            return schema.model_validate(data)
+        except ValidationError:
+            continue
+    return None
+
+
+def _call_raw_structured_fallback(
+    api_key: str,
+    model: str,
+    schema: Type[T],
+    system_prompt: str,
+    user_msg: str,
+    temperature: float,
+) -> LLMResult[T] | None:
+    try:
+        from google.genai import types
+
+        client = get_raw_genai_client(api_key)
+        response = client.models.generate_content(
+            model=model,
+            contents=f"{system_prompt}\n\n{user_msg}",
+            config=types.GenerateContentConfig(
+                temperature=temperature,
+                response_mime_type="application/json",
+                response_schema=schema.model_json_schema() if hasattr(schema, "model_json_schema") else None,
+            ),
+        )
+        data = _json_from_text(getattr(response, "text", "") or "")
+        if not data:
+            return None
+        parsed = schema.model_validate(data)
+        usage_meta = getattr(response, "usage_metadata", None)
+        usage = {
+            "input_tokens": getattr(usage_meta, "prompt_token_count", 0) or 0,
+            "output_tokens": getattr(usage_meta, "candidates_token_count", 0) or 0,
+            "total_tokens": getattr(usage_meta, "total_token_count", 0) or 0,
+        }
+        cost = calculate_cost(model, usage["input_tokens"], usage["output_tokens"])
+        return LLMResult(
+            parsed=parsed,
+            usage=usage,
+            cost=cost,
+            thinking=getattr(parsed, "thinking", ""),
+            retry_count=0,
+        )
+    except Exception as exc:  # noqa: BLE001 - fallback failure should preserve original structured error.
+        logger.warning(f"[StructuredFallback] Raw JSON fallback failed: {exc}")
+        return None
 
 def create_context_cache(api_key: str, model: str, system_instruction: str, contents: list, ttl_seconds: int = 3600) -> str:
     """Vertex AI Context Cache 리소스 생성 후 cache_name 반환"""
@@ -211,7 +320,31 @@ def call_structured(
         raw = None
 
     if parsed is None:
-        raise RuntimeError("Structured output parsed result is None")
+        # Temporary Vertex AI compatibility fallback.
+        # See backend/DOCS/temporary_vertex_structured_output_fallback.md before reverting.
+        parsed = _parse_raw_structured_fallback(schema, raw)
+        if parsed is None:
+            fallback_result = _call_raw_structured_fallback(
+                api_key=api_key,
+                model=model,
+                schema=schema,
+                system_prompt=system_prompt,
+                user_msg=user_msg,
+                temperature=temperature,
+            )
+            if fallback_result is None:
+                raise RuntimeError("Structured output parsed result is None")
+            current_log = active_usage_log.get().copy()
+            current_log.append({
+                "model": model,
+                "input": fallback_result.usage.get("input_tokens", 0),
+                "output": fallback_result.usage.get("output_tokens", 0),
+                "cost": fallback_result.cost,
+                "cache_hit": False,
+                "savings": 0.0,
+            })
+            active_usage_log.set(current_log)
+            return fallback_result
 
     usage_meta = getattr(raw, "usage_metadata", None) or {}
     usage = {
