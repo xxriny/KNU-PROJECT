@@ -20,13 +20,11 @@ def run_experiment(use_judge=True):
     # 1. ?쒕굹由ъ삤 ?ㅼ젙 (湲곗〈 濡쒓렇?몄뿉 OAuth 異붽?)
     state = {
         "input_idea": "湲곗〈 ?대찓??濡쒓렇?몄뿉 OAuth 異붽?",
-        "system_scan": {
-            "status": "Pass", 
-            "detected_frameworks": ["FastAPI", "SQLAlchemy"]
-        },
+        "rag_index_status": {"has_index": False, "chunk_count": 0, "session_id": ""},
         "requirements_rtm": [{"id": "REQ-002", "desc": "Google OAuth ?곕룞"}],
-        "api_key": "[.env]", 
-        "model": "gemini-2.5-flash"
+        "api_key": "[.env]",
+        "model": "gemini-2.5-flash",
+        "action_type": "UPDATE",
     }
 
     # 2. ?몃뱶 ?ㅽ뻾 (?ㅼ젣 紐⑤뜽 ?몄텧)

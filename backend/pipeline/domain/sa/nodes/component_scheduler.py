@@ -32,7 +32,7 @@ SYSTEM_PROMPT = """
 def _build_user_message(merged_project: dict) -> str:
     plan = merged_project.get("plan", {})
     rtm = plan.get("requirements_rtm", [])
-    p_rtm = "\n".join(f"{r.get('id')}:{r.get('desc')}" for r in rtm)
+    p_rtm = "\n".join(f"{r.get('feature_id', r.get('id'))}:{r.get('description', r.get('desc'))}" for r in rtm)
     return f"Strategy: {merged_project.get('merge_strategy', '')}\nRTM:\n{p_rtm}"
 
 
@@ -49,7 +49,7 @@ def component_scheduler_node(ctx: NodeContext) -> dict:
     cache_name = cache_manager.get_google_cache(run_id)
     if not cache_name:
         plan = merged_project.get("plan", {})
-        rtm_text = "\n".join(f"{r.get('id')}:{r.get('desc')}" for r in plan.get("requirements_rtm", []))
+        rtm_text = "\n".join(f"{r.get('feature_id', r.get('id'))}:{r.get('description', r.get('desc'))}" for r in plan.get("requirements_rtm", []))
         cache_name = create_context_cache(
             api_key=ctx.api_key, model=ctx.model,
             system_instruction=SYSTEM_PROMPT, contents=[rtm_text]

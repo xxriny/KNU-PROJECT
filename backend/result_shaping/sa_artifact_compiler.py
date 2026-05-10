@@ -6,6 +6,7 @@ LLM 추가 호출 없이 SA phase 결과를 시각화 친화적인 산출물로 
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from result_shaping.container_config import (
@@ -17,15 +18,33 @@ from result_shaping.container_config import (
 )
 
 
+def _load_inventory_for_diagram(result: dict[str, Any]) -> tuple[list, list]:
+    """결과 셰이핑 시점에 source_dir을 직접 스캔해 file_inventory와 detected_frameworks를 만든다.
+
+    source_dir이 없거나 유효하지 않으면 빈 결과를 돌려준다(다운스트림 폴백 경로가 동작).
+    """
+    source_dir = (result.get("source_dir") or "").strip()
+    if not source_dir or not os.path.isdir(source_dir):
+        return [], []
+    try:
+        from pipeline.domain.rag.ast_scanner import extract_file_inventory
+        from pipeline.domain.rag.framework_detector import detect_framework_evidence
+        inventory = extract_file_inventory(source_dir, max_files=600)
+        detected, _evidence, _coverage = detect_framework_evidence(source_dir)
+        return inventory, detected
+    except Exception:
+        return [], []
+
+
 def compile_sa_artifacts(result: dict[str, Any]) -> dict[str, Any]:
-    system_scan = result.get("system_scan") or {}
     sa_phase3 = result.get("sa_phase3") or {}
     sa_phase5 = result.get("sa_phase5") or {}
     sa_phase6 = result.get("sa_phase6") or {}
     sa_phase7 = result.get("sa_phase7") or {}
     sa_phase8 = result.get("sa_phase8") or {}
 
-    container_diagram_spec = _build_container_diagram_spec(system_scan, sa_phase5)
+    file_inventory, detected_frameworks = _load_inventory_for_diagram(result)
+    container_diagram_spec = _build_container_diagram_spec(file_inventory, detected_frameworks, sa_phase5)
     flowchart_spec = _build_flowchart_spec(sa_phase8)
     uml_component_spec = _build_uml_component_spec(sa_phase5, sa_phase7, sa_phase8)
     interface_definition_doc = _build_interface_definition_doc(sa_phase7)
@@ -204,12 +223,13 @@ def _normalize_layer_name(layer: str) -> str:
 
 
 def _build_container_diagram_spec(
-    system_scan: dict[str, Any],
+    file_inventory: list,
+    detected_frameworks: list,
     sa_phase5: dict[str, Any],
 ) -> dict[str, Any]:
     """파일 인벤토리를 논리 컨테이너로 그룹화한 Container-level 시스템 다이어그램 생성."""
-    file_inventory = system_scan.get("file_inventory") or []
-    detected_frameworks = system_scan.get("detected_frameworks") or []
+    file_inventory = file_inventory or []
+    detected_frameworks = detected_frameworks or []
     mapped_requirements = sa_phase5.get("mapped_requirements") or []
 
     # 1. 파일별 컨테이너 소속 집계 + raw imports 수집

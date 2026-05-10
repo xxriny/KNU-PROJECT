@@ -21,7 +21,7 @@ const MODES = [
   },
   {
     key: "reverse",
-    label: "역공학",
+    label: "재분석",
     desc: "기존 시스템에서 RTM을 역추출",
     icon: ScanSearch,
     color: "from-purple-500 to-pink-500",
@@ -34,6 +34,7 @@ const MODES = [
 export default function HomeScreen() {
   const {
     startAnalysis,
+    activateOutputTab,
     apiKey,
     model,
     selectedMode,
@@ -55,9 +56,11 @@ export default function HomeScreen() {
   const canSubmit = isReverseMode ? Boolean(projectFolder) : Boolean(trimmedInput);
 
   const handleSubmit = () => {
-    if (isReverseMode && !projectFolder) return;
-    if (!isReverseMode && !trimmedInput) return;
-    startAnalysis(trimmedInput, contextText.trim(), apiKey, model, selectedMode);
+    if (!canSubmit) return;
+    activateOutputTab("progress");
+    startAnalysis(trimmedInput, contextText.trim(), apiKey, model, selectedMode, projectTitle);
+    setInputText("");
+    setContextText("");
   };
 
   const handleKeyDown = (e) => {

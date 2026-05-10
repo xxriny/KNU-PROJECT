@@ -19,7 +19,7 @@ class CodeChunk(BaseModel):
 class RAGIngestOutput(BaseModel):
     session_id: str
     chunks_ingested: int
-    status: str          # "success" | "partial" | "empty"
+    status: str          # "success" | "partial" | "empty" | "skipped"
 
 
 class RAGQueryResult(BaseModel):
