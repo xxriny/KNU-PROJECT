@@ -256,6 +256,10 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
     api_key = payload.get("api_key", "")
     model = payload.get("model", DEFAULT_MODEL)
 
+    # 채팅에서 만들어진 메모를 묶어두는 session_id.
+    # 프론트가 currentSessionId를 보내면 그걸 쓰고, 없으면 chat_global 폴백.
+    chat_session_id = (payload.get("session_id") or "chat_global").strip() or "chat_global"
+
     result = await _run_pipeline_base(
         ws,
         pipeline=get_idea_pipeline(),
@@ -275,6 +279,46 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
     if result.get("error"):
         return
 
+    # 진단: aggregated state에 어떤 키들이 도달했는지 확인
+    # (이전 회귀: notes_to_add가 PipelineState 스키마 누락으로 LangGraph가 drop)
+    get_logger().info(
+        f"[idea_chat] aggregated keys: {sorted(result.keys())}, "
+        f"notes_to_add type={type(result.get('notes_to_add')).__name__}"
+    )
+
+    # ── 채팅 의도로 만들어진 메모를 백엔드에서 직접 영속화 ──
+    # 프론트의 addComment 호출에 의존하지 않고 ChromaDB(memo_db)에 즉시 저장한다.
+    # 이렇게 하면 프론트 코드 상태(HMR 누락, 옛 코드 등)와 무관하게 메모가 보존되며,
+    # 다음에 MemoManager가 syncMemos를 호출하면 자동으로 화면에 등장한다.
+    raw_notes = result.get("notes_to_add") or []
+    persisted_notes: list = []
+    if raw_notes:
+        try:
+            from pipeline.domain.pm.nodes.memo_db import add_memo
+            for note in raw_notes:
+                if not isinstance(note, dict):
+                    continue
+                text = str(note.get("text") or "").strip()
+                section = str(note.get("section") or "Idea Chat").strip() or "Idea Chat"
+                if not text:
+                    continue
+                try:
+                    memo_id = add_memo(
+                        session_id=chat_session_id,
+                        memo_text=text,
+                        selected_text="",
+                        section=section,
+                    )
+                    persisted_notes.append({"id": memo_id, "text": text, "section": section})
+                except Exception as memo_err:
+                    get_logger().warning(f"[idea_chat] memo_db 영속화 실패: {memo_err}")
+            get_logger().info(
+                f"[idea_chat] 채팅 메모 {len(persisted_notes)}/{len(raw_notes)}건 영속화 "
+                f"(session_id={chat_session_id})"
+            )
+        except Exception as import_err:
+            get_logger().warning(f"[idea_chat] memo_db import 실패: {import_err}")
+
     await manager.send_json(ws, {
         "type": "result",
         "node": "idea_chat",
@@ -284,6 +328,7 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
             "idea_ready": result.get("idea_ready", False),
             "idea_summary": result.get("idea_summary", ""),
             "suggested_mode": result.get("suggested_mode", "create"),
+            "notes_to_add": persisted_notes,  # 백엔드가 부여한 진짜 ID 포함
             "pipeline_type": "idea_chat",
         },
     })
