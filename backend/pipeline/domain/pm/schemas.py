@@ -7,12 +7,13 @@ class AtomicRequirement(BaseModel):
     description: str = Field(description="기능 설명 (한국어)")
 
 class RequirementFeature(BaseModel):
-    id: str = Field(description="FEAT_XXX")
+    id: str = Field(description="FEAT_001 형식 (FEAT_ + 3자리 숫자, 예: FEAT_001 / FEAT_002 / FEAT_003)")
     cat: str = Field(description="Category (Frontend, Backend, etc)")
     desc: str = Field(description="Atomic feature description")
     pri: str = Field(description="MoSCoW priority")
-    deps: List[str] = Field(default_factory=list, description="Dependency FEAT_IDs")
+    deps: List[str] = Field(default_factory=list, description="Dependency FEAT_IDs (FEAT_001 형식)")
     tc: str = Field(description="Acceptance criteria / Test criteria")
+    label: str = Field(default="", description="짧은 한국어 라벨 (예: '청킹', '인덱싱'). ID에 섞어 쓰지 말고 이 필드에 분리해 작성")
 
 class RequirementAnalyzerOutput(BaseModel):
     th: str = Field(default="", description="Thinking process")
@@ -130,12 +131,13 @@ class StackPlannerOutput(BaseModel):
 
 # ── PM Analysis 산출물 (PM_BUNDLE) ─────────────────────────
 class RTMItem(BaseModel):
-    feature_id: str = Field(description="요구사항 ID (FEAT_XXX)")
+    feature_id: str = Field(description="요구사항 ID (FEAT_001 형식)")
     category: str = Field(description="카테고리: Frontend, Backend, ...")
     description: str = Field(description="원자 단위 기능 설명")
     priority: str = Field(description="Must-have | Should-have | Could-have | Won't-have")
     dependencies: List[str] = Field(default_factory=list, description="의존하는 FEAT_ID 목록")
     test_criteria: str = Field(default="", description="수락 기준")
+    label: str = Field(default="", description="짧은 한국어 라벨 (예: '청킹', '인덱싱')")
 
 class TechStackItem(BaseModel):
     f_id: str = Field(description="Feature ID")

@@ -37,7 +37,7 @@ SYSTEM_PROMPT = """
 
 
 def _build_user_message(components: list, rtm: list) -> str:
-    p_rtm = "\n".join(f"{r.get('id')}:{r.get('desc')}" for r in rtm)
+    p_rtm = "\n".join(f"{r.get('feature_id', r.get('id'))}:{r.get('description', r.get('desc'))}" for r in rtm)
 
     def _g(obj, k):
         """dict/Pydantic 겸용 필드 추출"""

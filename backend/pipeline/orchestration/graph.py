@@ -10,8 +10,6 @@ from pipeline.core.state import PipelineState
 from pipeline.core.utils import active_usage_log
 
 # Node Chain Definitions
-_SCAN_CHAIN = ("code_chunker", "code_embedding")
-
 _PM_CHAIN = (
     "requirement_analyzer",
     "stack_retriever",
@@ -59,12 +57,13 @@ def _route_stack_planning(state: PipelineState) -> str:
         return "finish"
 
     # 3. PENDING_CRAWL 존재 여부 체크
+    # StackPlannerOutput 스키마의 매핑 필드는 'm' (alias 없음). 'stack_mapping'은 구버전 폴백.
     planner_output = state.get("stack_planner_output", {})
-    mappings = planner_output.get("stack_mapping", [])
-    
-    if any(m.get("status") == "PENDING_CRAWL" for m in mappings):
+    mappings = planner_output.get("m") or planner_output.get("stack_mapping") or []
+
+    if any(item.get("status") == "PENDING_CRAWL" for item in mappings):
         return "loop"
-        
+
     return "finish"
 
 
@@ -89,15 +88,6 @@ def _route_sa_analysis(state: PipelineState) -> str:
 
 def _chain_to_next_nodes(chain: tuple[str, ...]) -> dict[str, list[str]]:
     return {node: ([chain[i + 1]] if i + 1 < len(chain) else []) for i, node in enumerate(chain)}
-
-
-def _build_scan_pipeline():
-    from pipeline.domain.rag.nodes.system_scanner import system_scan_node
-    workflow = StateGraph(PipelineState)
-    workflow.add_node("system_scan", system_scan_node)
-    workflow.add_edge(START, "system_scan")
-    workflow.add_edge("system_scan", END)
-    return workflow.compile()
 
 
 def _build_pm_pipeline():
@@ -178,24 +168,12 @@ def _build_sa_pipeline():
     return workflow.compile()
 
 
-def get_scan_pipeline():
-    return _PipelineRegistry.get_or_build("scan_pipeline", _build_scan_pipeline)
-
-
 def get_pm_pipeline():
     return _PipelineRegistry.get_or_build("pm_pipeline", _build_pm_pipeline)
 
 
 def get_sa_pipeline():
     return _PipelineRegistry.get_or_build("sa_pipeline", _build_sa_pipeline)
-
-
-def get_scan_routing_map() -> dict:
-    return {
-        "first_node": _SCAN_CHAIN[0],
-        "next_nodes": {},
-        "start_message": "프로젝트 코드 분석 시작...",
-    }
 
 
 def get_pm_routing_map() -> dict:
@@ -257,13 +235,14 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     workflow.add_edge("sa_unified_modeler", "sa_advisor")
     workflow.add_edge("sa_advisor", "sa_embedding")
     workflow.add_edge("sa_embedding", END)
-    
+
     return workflow.compile()
 
 
 def get_pipeline_routing_map(action_type: str = "CREATE") -> dict:
     """Compatibility shim."""
-    chain = _SCAN_CHAIN + _PM_CHAIN + _SA_CHAIN
+    # 전체 분석 파이프라인은 RAG ingest → PM → SA 순서로 노드를 나열한다.
+    chain = ("code_chunker", "code_embedding") + _PM_CHAIN + _SA_CHAIN
     return {
         "first_node": chain[0],
         "next_nodes": _chain_to_next_nodes(chain),

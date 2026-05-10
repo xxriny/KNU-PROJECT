@@ -93,10 +93,10 @@ export const createPipelineSlice = (set, get) => ({
     set(nextResultData);
   },
 
-  startAnalysis: (idea, context = "", apiKey = "", model = "gemini-2.5-flash", selectedMode = "create") => {
+  startAnalysis: (idea, context = "", apiKey = "", model = "gemini-3.1-flash-lite-preview", selectedMode = "create", initialTitle = null) => {
     const normalizedMode = normalizeMode(selectedMode);
     const sourceDir = get().projectFolder || "";
-    get().createSession();
+    get().createSession(initialTitle);
     
     // 분석 시작 시 기존 메모(userComments)는 유지하고, 
     // 결과 필드는 running 상태에 맞춰 필요한 것만 초기화합니다.
@@ -118,6 +118,28 @@ export const createPipelineSlice = (set, get) => ({
       idea, context, api_key: apiKey, model,
       action_type: MODE_TO_ACTION_TYPE[normalizedMode],
       source_dir: sourceDir,
+    });
+  },
+
+  sendIdeaChat: (message, apiKey, model) => {
+    const text = (message || "").trim();
+    if (!text) return;
+
+    // chatHistory가 이미 사용자 메시지를 포함한 상태로 호출되므로,
+    // 백엔드가 user_request를 다시 history에 append하지 않도록 마지막 user 메시지를 제외
+    const all = get().chatHistory;
+    const last = all[all.length - 1];
+    const history =
+      last && last.role === "user" && last.content === text
+        ? all.slice(0, -1)
+        : all;
+
+    get().sendWsMessage("idea_chat", {
+      message: text,
+      chat_history: history,
+      previous_result: get().resultData || {},
+      api_key: apiKey || "",
+      model: model || "gemini-3.1-flash-lite-preview",
     });
   },
 

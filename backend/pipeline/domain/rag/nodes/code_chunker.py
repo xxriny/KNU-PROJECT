@@ -175,9 +175,13 @@ def _process_file(
 
 def code_chunker_node(state: PipelineState) -> Dict[str, Any]:
     sget = make_sget(state)
+    action_type = (sget("action_type", "") or "").strip().upper()
     source_dir = sget("source_dir", "")
     run_id = sget("run_id", "unknown")
     version = "v1.0"
+
+    if action_type == "CREATE":
+        return {"rag_chunks": []}
 
     logger.info(f"[code_chunker] source_dir={source_dir!r}")
 
@@ -202,7 +206,19 @@ def code_chunker_node(state: PipelineState) -> Dict[str, Any]:
             chunks = _process_file(full_path, rel_path, run_id, version)
             all_chunks.extend(chunks)
 
-    thinking = f"총 {len(all_chunks)}개 코드 청크 추출 완료 (source_dir: {source_dir})"
+    # >>> [EXPERIMENT-RAG-VIS] BEGIN — 추후 원복 시 이 블록을 다음 한 줄로 교체:
+    #     thinking = f"총 {len(all_chunks)}개 코드 청크 추출 완료 (source_dir: {source_dir})"
+    from collections import Counter as _Counter  # [EXPERIMENT-RAG-VIS]
+    _lang_counts = _Counter(c.lang for c in all_chunks)
+    _files = sorted({c.file_path for c in all_chunks})
+    _lang_summary = ", ".join(f"{k}={v}" for k, v in _lang_counts.most_common()) or "없음"
+    _sample_files = ", ".join(_files[:3]) if _files else "(없음)"
+    thinking = (
+        f"총 {len(all_chunks)}개 청크 / {len(_files)}개 파일 추출 (source_dir: {source_dir})\n"
+        f"  lang: {_lang_summary}\n"
+        f"  sample files: {_sample_files}"
+    )
+    # <<< [EXPERIMENT-RAG-VIS] END
     logger.info(f"[code_chunker] {thinking}")
 
     return {
