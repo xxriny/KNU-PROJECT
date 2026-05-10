@@ -13,6 +13,7 @@ class CodeChunk(BaseModel):
     file_path: str
     func_name: str       # 함수/클래스명; 슬라이딩 윈도우 청크는 "FILE_CHUNK_{n}"
     content_text: str    # 실제 코드 본문 (최대 6000자)
+    docstring: str = ""  # 함수/클래스 독스트링 (요약용)
     lang: str            # "python" | "javascript" | "unknown"
 
 

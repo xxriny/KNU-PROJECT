@@ -5,9 +5,10 @@ PM Agent Pipeline — 유틸리티 v6.3 (FastAPI 구조 적용)
 - api_key 빈 문자열 시 환경변수 GEMINI_API_KEY 자동 폴백
 - 모델 기본값 gemini-2.5-flash 통일
 - _get_effective_key() 헬퍼 추가
+- 재시도 로직에 지수 백오프 및 Jitter 추가 (Rate Limit 대응)
 """
 
-import json, re, os, threading
+import json, re, os, threading, time, random
 from pathlib import Path
 from contextvars import ContextVar
 from collections import OrderedDict
@@ -101,31 +102,40 @@ def get_llm(api_key: str, model: str = DEFAULT_MODEL, temperature: float = DEFAU
 
 
 def _retry_loop(structured_llm, messages: list, max_retries: int, label: str):
-    """공통 Self-Correction 재시도 루프. 성공 시 raw invoke 결과 반환."""
+    """공통 Self-Correction 및 Rate-Limit 대응 재시도 루프."""
     messages = list(messages)
     last_error = None
+    
     for attempt in range(max_retries):
         result = None
         try:
             result = structured_llm.invoke(messages)
             return result, attempt # 결과와 시도 횟수(0-based) 반환
-        except ValidationError as e:
-            last_error = e
-            error_msg = str(e)
         except Exception as e:
             last_error = e
             error_msg = str(e)
+            
+            if attempt < max_retries - 1:
+                # Rate Limit 대응 지수 백오프
+                if "429" in error_msg:
+                    wait_time = (10 * (attempt + 1)) + random.uniform(2, 5)
+                else:
+                    wait_time = (2 ** (attempt + 1)) + random.uniform(0, 1)
+                
+                logger.warning(f"[{label}] Attempt {attempt+1} failed: {error_msg[:100]}. Retrying in {wait_time:.2f}s...")
+                time.sleep(wait_time)
 
-        bad_output = str(result) if result is not None else "Unknown output format or invocation error"
-        messages.append(AIMessage(content=bad_output))
-        messages.append(HumanMessage(content=(
-            f"Your previous response caused a validation error:\n"
-            f"```\n{error_msg}\n```\n\n"
-            f"Please fix the output to strictly match the required JSON schema. "
-            f"All required fields must be present and no extra fields are allowed.\n\n"
-            f"Retry attempt {attempt + 2}/{max_retries}. "
-            f"Return ONLY the corrected JSON output."
-        )))
+                bad_output = str(result) if result is not None else "Unknown output format or invocation error"
+                messages.append(AIMessage(content=bad_output))
+                messages.append(HumanMessage(content=(
+                    f"Your previous response caused an error:\n"
+                    f"```\n{error_msg}\n```\n\n"
+                    f"Please fix the output to strictly match the required JSON schema. "
+                    f"All required fields must be present and no extra fields are allowed.\n\n"
+                    f"Retry attempt {attempt + 2}/{max_retries}. "
+                    f"Return ONLY the corrected JSON output."
+                )))
+                continue
 
     raise RuntimeError(
         f"{label} failed after {max_retries} attempts. Last error: {last_error}"

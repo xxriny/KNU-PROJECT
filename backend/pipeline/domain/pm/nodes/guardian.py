@@ -12,23 +12,38 @@ from pydantic import BaseModel, Field
 from pipeline.core.state import PipelineState, make_sget
 from pipeline.core.utils import call_structured_with_usage
 from pipeline.domain.pm.schemas import StackSourceData, GuardianOutput
+from pipeline.domain.rag.nodes.project_db import get_session_inventory
 from observability.logger import get_logger
 from version import DEFAULT_MODEL
 
 logger = get_logger()
 
 class SemanticCheckResult(BaseModel):
-    is_malicious: bool = Field(description="악의적이거나 타이포스쿼팅 의심 여부")
+    is_malicious: bool = Field(description="악의적이거나 부적절한 패키지 여부")
     reason: str = Field(description="판단 근거 (한국어)")
     confidence: float = Field(description="판단 신뢰도 (0.0~1.0)")
 
-SEMANTIC_CHECK_PROMPT = """당신은 오픈소스 보안 전문가입니다. 
-제공된 기술 스택의 메타데이터를 분석하여 다음 사항을 판단하세요.
+SEMANTIC_CHECK_PROMPT = """# 역할: 오픈소스 보안 아키텍트 및 감사관 (Security Auditor)
 
-1. 타이포스쿼팅(Typosquatting): 유명 패키지(예: react, lodash, zustand)의 이름을 교묘하게 바꾼 가짜 패키지인지 확인하세요. (예: reackt, zunstand 등)
-2. 악성 코드 징조: 설명이 너무 부실하거나, 기술적인 내용 대신 의심스러운 광고나 무의미한 텍스트만 있는지 확인하세요.
+## 개요
+제안된 기술 스택의 메타데이터와 현재 프로젝트의 구조(<project_inventory>)를 분석하여, 해당 기술의 안전성과 프로젝트 적합성을 최종 승인합니다.
 
-반드시 엄격하게 판단하여 조금이라도 의심스러우면 is_malicious를 true로 설정하세요.
+## 심층 검증 가이드라인
+
+### 1. 보안 및 진위 여부 (Integrity)
+- **타이포스쿼팅(Typosquatting)**: 유명 패키지(react, lodash, flask 등)의 이름을 교묘하게 변형하여 악성 코드를 배포하는 가짜 패키지인지 철저히 조사하십시오.
+- **악성 징후**: 설명이 모호하거나, 기술적 내용 없이 광고성 문구만 가득하거나, URL이 의심스러운 경우 즉시 반려하십시오.
+
+### 2. 프로젝트 정합성 (Architectural Fit)
+- **기존 스택과의 조화**: <project_inventory>를 참고하여, 이미 프로젝트에서 사용 중인 기술과 중복되거나 기술적 일관성을 해치는 도구인지 확인하십시오.
+- **도메인 적합성**: 프로젝트의 성격(Web, Data, AI 등)에 맞는 기술인지, 너무 무겁거나 혹은 너무 빈약한 라이브러리는 아닌지 평가하십시오.
+
+### 3. 커뮤니티 및 안정성
+- 스타 수, 버전 정보, 업데이트 이력을 종합하여 실제 실무에서 사용 가능한 수준의 안정성을 갖췄는지 판단하십시오.
+
+## 출력 규약
+- 반드시 엄격한 잣대를 적용하십시오. 조금이라도 보안 위협이나 정합성 문제가 의심되면 `is_malicious`를 `true`로 설정하고 상세한 사유를 기술하십시오.
+- 모든 판단 근거는 전문적인 한국어로 작성하십시오.
 """
 
 def merge_sources(results: List[StackSourceData]) -> Optional[StackSourceData]:
@@ -78,7 +93,6 @@ def rule_based_filter(data: StackSourceData) -> tuple[bool, Optional[str]]:
         return False, f"제한적인 라이선스({data.license})를 사용하고 있습니다."
     
     # 2. 업데이트 지연 체크 (최근 1년 내 업데이트 여부)
-    # 날짜 형식이 다양할 수 있어 간단한 체크만 수행 가능할 경우 우선 패스하거나, ISO 형식일 때만 체크
     if data.last_updated != "unknown":
         try:
             # GitHub/NPM 날짜 처리 (예: 2024-04-14T...)
@@ -94,9 +108,26 @@ def rule_based_filter(data: StackSourceData) -> tuple[bool, Optional[str]]:
         
     return True, None
 
-def llm_semantic_check(api_key: str, model: str, data: StackSourceData) -> tuple[bool, str]:
-    """LLM을 이용한 시맨틱 보안 검증"""
-    user_msg = f"Package Name: {data.name}\nDescription: {data.description}\nURL: {data.url}"
+def llm_semantic_check(api_key: str, model: str, data: StackSourceData, inventory: dict) -> tuple[bool, str]:
+    """LLM을 이용한 시맨틱 보안 및 적합성 검증"""
+    inventory_str = ""
+    if inventory:
+        lines = ["<project_inventory>"]
+        for p, items in sorted(inventory.items()):
+            lines.append(f"- {p}: {[it.get('name') for it in items[:5]]}")
+        lines.append("</project_inventory>")
+        inventory_str = "\n".join(lines)
+
+    user_msg = f"""{inventory_str}
+
+### [검증 대상 기술 정보]
+- Name: {data.name}
+- Version: {data.version}
+- Description: {data.description}
+- URL: {data.url}
+
+위 기술이 프로젝트에 안전하고 적합한지 보안 전문가로서 판단하십시오.
+"""
     
     try:
         out, _ = call_structured_with_usage(
@@ -105,31 +136,34 @@ def llm_semantic_check(api_key: str, model: str, data: StackSourceData) -> tuple
             schema=SemanticCheckResult,
             system_prompt=SEMANTIC_CHECK_PROMPT,
             user_msg=user_msg,
-            temperature=0.1
+            temperature=0.1,
+            compress_prompt=False
         )
         
         if out.is_malicious:
-            return False, f"AI 보안 검증 탈락: {out.reason}"
-        return True, "AI 보안 검증 통과"
+            return False, f"보안 및 적합성 검증 탈락: {out.reason}"
+        return True, f"보안 검증 통과: {out.reason}"
     except Exception as e:
         logger.error(f"Semantic Check failed: {e}")
-        return True, "AI 보안 검증 스킵 (시스템 오류)"
+        return True, "보안 검증 시스템 일시 오류로 스킵"
 
 def guardian_node(state: PipelineState) -> Dict[str, Any]:
     sget = make_sget(state)
-    logger.info("Starting guardian_node")
+    logger.info("=== [Node Entry] guardian_node ===")
     
     crawler_output = sget("stack_crawler_output", {})
     results_raw = crawler_output.get("results", [])
     results = [StackSourceData(**r) for r in results_raw]
+    action_type = sget("action_type", "CREATE")
+    run_id = sget("run_id", sget("session_id", "guardian_session"))
     
     if not results:
         return {
             "guardian_output": {
                 "status": "REJECTED",
                 "final_data": None,
-                "rejection_reason": "수집된 기술 스택 정보가 없습니다.",
-                "thinking": "크롤링 결과가 비어있어 분석을 중단함."
+                "rejection_reason": "수집된 기술 정보가 없습니다.",
+                "thinking": "데이터 부재로 인한 자동 거절"
             }
         }
 
@@ -137,8 +171,6 @@ def guardian_node(state: PipelineState) -> Dict[str, Any]:
     merged = merge_sources(results)
     if not merged:
         return {"guardian_output": {"status": "REJECTED", "rejection_reason": "병합 실패"}}
-
-    thinking_steps = ["여러 소스의 데이터를 병합 완료 (NPM 버전 + GitHub Stars 등)"]
 
     # 2. 규칙 기반 필터 (Rule-based)
     is_safe, reason = rule_based_filter(merged)

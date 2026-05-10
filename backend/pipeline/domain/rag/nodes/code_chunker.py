@@ -94,6 +94,9 @@ def _extract_python(source: str, file_path: str, session_id: str, version: str) 
         func_counts[name] = func_counts.get(name, 0) + 1
         disc = str(func_counts[name]) if func_counts[name] > 1 else ""
         
+        # 독스트링 추출
+        ds = ast.get_docstring(node) or ""
+        
         chunks.append(CodeChunk(
             chunk_id=_chunk_id(session_id, file_path, name, disc),
             session_id=session_id,
@@ -101,6 +104,7 @@ def _extract_python(source: str, file_path: str, session_id: str, version: str) 
             file_path=file_path,
             func_name=name,
             content_text=body[:_MAX_CHUNK_CHARS],
+            docstring=ds[:500],  # 인벤토리용으로 요약
             lang="python",
         ))
 
@@ -135,6 +139,21 @@ def _extract_js(source: str, file_path: str, session_id: str, version: str) -> L
         func_counts[func_name] = func_counts.get(func_name, 0) + 1
         disc = str(func_counts[func_name]) if func_counts[func_name] > 1 else ""
 
+        # JS 독스트링 (함수 바로 위 주석 추출 시도)
+        ds = ""
+        if sl > 0:
+            prev_line = lines[sl-1].strip()
+            if "*/" in prev_line or prev_line.startswith("//"):
+                # 간단하게 이전 3라인 정도 탐색
+                ds_lines = []
+                for j in range(sl-1, max(-1, sl-4), -1):
+                    line = lines[j].strip()
+                    if line.startswith("//") or line.startswith("/*") or line.startswith("*") or line.endswith("*/"):
+                        ds_lines.insert(0, line.strip("/* ").strip("*/").strip("//").strip())
+                    else:
+                        break
+                ds = " ".join(ds_lines)
+
         chunks.append(CodeChunk(
             chunk_id=_chunk_id(session_id, file_path, func_name, disc),
             session_id=session_id,
@@ -142,6 +161,7 @@ def _extract_js(source: str, file_path: str, session_id: str, version: str) -> L
             file_path=file_path,
             func_name=func_name,
             content_text=body,
+            docstring=ds[:500],
             lang="javascript",
         ))
 

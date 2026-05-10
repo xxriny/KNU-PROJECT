@@ -131,16 +131,7 @@ function ERDCanvas({ tables }) {
     }));
   }, [addHistory]);
 
-  useEffect(() => {
-    const saved = localStorage.getItem('erd-chen-edit-backup-v2');
-    if (saved) {
-      const { nodes: sn, edges: se, history: sh } = JSON.parse(saved);
-      setNodes(sn.map(n => ({ ...n, data: { ...n.data, onRename }})));
-      setEdges(se);
-      setHistory(sh || []);
-      return;
-    }
-
+  const generateInitialLayout = useCallback(() => {
     const tableArray = Array.isArray(tables) ? tables : Object.values(tables || {});
     if (tableArray.length === 0) return;
 
@@ -216,8 +207,20 @@ function ERDCanvas({ tables }) {
 
     setNodes(newNodes);
     setEdges(newEdges);
-    addHistory("AI가 최적의 ER 다이어그램 초안을 생성했습니다.");
+    addHistory("다이어그램을 초기 AI 생성 상태로 리셋했습니다.");
   }, [tables, onRename, isDarkMode, addHistory]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('erd-chen-edit-backup-v2');
+    if (saved) {
+      const { nodes: sn, edges: se, history: sh } = JSON.parse(saved);
+      setNodes(sn.map(n => ({ ...n, data: { ...n.data, onRename }})));
+      setEdges(se);
+      setHistory(sh || []);
+    } else {
+      generateInitialLayout();
+    }
+  }, [tables, generateInitialLayout, onRename]);
 
   const onNodesChange = useCallback((changes) => {
     setNodes((nds) => applyNodeChanges(changes, nds));
@@ -239,7 +242,7 @@ function ERDCanvas({ tables }) {
       <div className="absolute top-6 right-6 z-50 flex gap-2">
         <button onClick={() => setShowHistory(!showHistory)} className={`p-2 rounded-xl border-2 flex items-center gap-2 text-xs font-bold transition-all ${isDarkMode ? "bg-[#0f172a] border-slate-700 text-slate-300 hover:border-indigo-500" : "bg-white border-slate-200 text-slate-600 hover:border-black"}`}><History size={14} /> {showHistory ? "닫기" : "이력"}</button>
         <button onClick={() => { localStorage.setItem('erd-chen-edit-backup-v2', JSON.stringify({ ...toObject(), history })); alert('저장되었습니다.'); }} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl shadow-lg flex items-center gap-2 text-xs font-bold"><Save size={14} /> 저장</button>
-        <button onClick={() => { if (window.confirm('초기화할까요?')) { localStorage.removeItem('erd-chen-edit-backup-v2'); window.location.reload(); } }} className={`p-2 rounded-xl border-2 flex items-center gap-2 text-xs font-bold transition-all ${isDarkMode ? "bg-[#0f172a] border-slate-700 text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}><RotateCcw size={14} /> 초기화</button>
+        <button onClick={() => { if (window.confirm('편집 내용을 모두 지우고 초기 상태로 되돌릴까요?')) { localStorage.removeItem('erd-chen-edit-backup-v2'); generateInitialLayout(); } }} className={`p-2 rounded-xl border-2 flex items-center gap-2 text-xs font-bold transition-all ${isDarkMode ? "bg-[#0f172a] border-slate-700 text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}><RotateCcw size={14} /> 초기화</button>
       </div>
 
       {showHistory && (

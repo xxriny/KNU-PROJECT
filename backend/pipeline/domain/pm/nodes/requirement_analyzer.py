@@ -11,7 +11,7 @@ from typing import Dict, Any, List
 from pipeline.core.state import PipelineState, make_sget
 from pipeline.core.utils import call_structured
 from pipeline.domain.pm.schemas import RequirementAnalyzerOutput
-from pipeline.domain.rag.nodes.project_db import query_project_code
+from pipeline.domain.rag.nodes.project_db import query_project_code, get_session_inventory
 from observability.logger import get_logger
 from version import DEFAULT_MODEL
 
@@ -54,65 +54,81 @@ def _normalize_feature_ids(features: List[Dict[str, Any]]) -> List[Dict[str, Any
 
     return features
 
-_ID_RULES_BLOCK = """- ID 형식 (절대 규칙):
-  - 반드시 'FEAT_' 뒤에 **3자리 0-패딩 숫자**만 붙인다. 예: FEAT_001, FEAT_002, FEAT_003.
-  - 한글·영문 키워드 금지: FEAT_청킹, FEAT_인덱싱, FEAT_login 같은 형태는 **절대** 사용하지 않는다.
-  - 출력 features 배열의 순서대로 001부터 순차 부여한다.
-  - deps(의존 ID 목록)도 동일한 FEAT_001 형식으로만 표기한다.
-- 라벨(label):
-  - 기능을 한 단어로 식별하고 싶으면 **별도의 'label' 필드**(예: "청킹", "인덱싱")에 작성한다.
-  - label은 짧은 한국어 명사 1~2어절로 작성한다.
-  - 절대 ID에 라벨을 섞어 쓰지 않는다."""
+# ID 형식 정의 (절대 규칙): FEAT_001 형식 강제
+_ID_RULES_BLOCK = """- ID Format (Absolute Rule):
+  - Use 'FEAT_' followed by a **3-digit zero-padded number**. E.g., FEAT_001, FEAT_002.
+  - Never use keywords in IDs (e.g., FEAT_Login is FORBIDDEN).
+- Label:
+  - Write a short identifier in the 'label' field (e.g., "Login", "Chunking").
+  - Use 1-2 Korean nouns for labels."""
 
-CREATE_SYSTEM_PROMPT = f"""# 역할: 방어적 요구사항 분석가 (CREATE 모드)
+# CREATE 모드: 사용자의 아이디어를 바탕으로 새로운 요구사항 명세를 설계하는 프롬프트
+CREATE_SYSTEM_PROMPT = f"""# Role: Lead Requirement Engineer (CREATE Mode)
 
-## 목표
-사용자 아이디어를 중복 없는 원자 단위 기능(FEAT_001, FEAT_002, ...)으로 분해한다.
+## Overview
+Analyze user ideas and decompose them into atomic, technically implementable features (FEAT_XXX).
+Your goal is to create specifications detailed enough for immediate development.
 
-## 규칙
-- 린(Lean) 기획: 기능 과분할 금지, 유사 기능은 통합한다.
-{_ID_RULES_BLOCK}
-- 우선순위: MoSCoW(Must / Should / Could / Won't)를 부여한다.
-- 기술 결정 금지: 프레임워크·라이브러리·스택을 명시하지 않는다.
+## Guidelines
+1. **File-to-Feature Forensic Mapping (STRICT)**: 
+   - Every major source file identified in the `<project_inventory>` MUST correspond to at least one unique FEAT ID. 
+   - **DO NOT GROUP**: For example, `folder_connector.py` (File Scan) and `ast_scanner.py` (AST Analysis) MUST be separate FEATs. Grouping them is a CRITICAL FAILURE.
+   - The total number of FEATs should be proportional to the number of source files. For a project with 50+ files, expect 15-30 FEATs.
+2. **Atomic Logic Rule**: 
+   - Each FEAT must describe only ONE atomic action. 
+   - If a description contains multiple verbs or conjunctions (and, &, 및, ~하고), you MUST split it into multiple IDs.
+3. **Evidence-Based Density**:
+   - Use the `<project_inventory>` as a checklist. If you miss a file, you missed a feature.
+   - Do NOT summarize. Every technical nuance (e.g., specific algorithms like LLMLingua, specific databases like ChromaDB) deserves its own FEAT.
 
-## 출력 규약
-- thinking: 한국어 핵심 단어 3개 이내 (문장 금지).
-- 모든 명세는 한국어로 작성한다.
+## Output Rules
+- **thinking**: Compare your FEAT list against the `<project_inventory>`. Did you group any files? If so, ungroup them now. (In Korean).
+- **Output Language**: All specification fields must be written in professional Korean.
 """
 
-UPDATE_SYSTEM_PROMPT = f"""# 역할: 증분 요구사항 분석가 (UPDATE 모드)
+# UPDATE 모드: 기존 코드를 보존하면서 신규 아이디어를 통합하는 하이브리드 프롬프트
+UPDATE_SYSTEM_PROMPT = f"""# Role: Incremental Design Expert (UPDATE Mode)
 
-## 목표
-기존 시스템에 추가하거나 변경해야 할 기능을 원자 단위(FEAT_001, FEAT_002, ...)로 분해한다.
+## Overview
+Integrate new user requests (<input_idea>) while maintaining 1:1 mapping with the existing system (<project_inventory>, <existing_system_analysis>).
 
-## 규칙
-- 컨텍스트 활용: 사용자 메시지의 <existing_system_analysis> / <project_context> 블록을 우선 참고하여 기존 기능을 식별한다.
-- 중복 회피: 기존에 이미 존재하는 기능은 신규 FEAT로 만들지 않는다.
-- 변경 vs 신규 구분: description 앞에 마커를 붙인다 — 신규 추가는 '[신규] ', 기존 기능의 확장·수정은 '[변경] '.
-- 영향 신호 전달: thinking은 '마커/영역' 형태의 핵심 단어 2~3개로 작성한다(예: '신규/계정', '변경/검색'). 실제 충돌 해결은 후속 SA 단계의 책임이며, PM은 신호만 남긴다.
-- 린(Lean) 기획: 기능 과분할 금지, 유사 기능은 통합한다.
+## Guidelines (Hybrid Two-Track)
+1. **[Existing Features] (Literal Mapping & No Compression)**:
+   - Identify existing code with **high granularity**. Do not summarize multiple files into one FEAT.
+   - Base everything 100% on actual file names and code facts. 
+   - No Hallucination, but also **No Over-summarization**.
+2. **[New Features] (Detailed Design)**:
+   - For new requirements, design detailed FEATs instead of one large block.
+3. **Change Markers**: 
+   - New features: Prefix description with **'[신규] '**.
+   - Modified existing features: Prefix description with **'[변경] '**.
+   - Unchanged existing features: Prefix description with **'[유지] '**.
 {_ID_RULES_BLOCK}
-- 우선순위: MoSCoW(Must / Should / Could / Won't)를 부여한다.
-- 기술 결정 금지: 프레임워크·라이브러리·스택을 명시하지 않는다.
 
-## 출력 규약
-- thinking: 위 영향 신호 형식을 따른다 (문장 금지).
-- 모든 명세는 한국어로 작성한다.
+## Output Rules
+- **thinking**: Justify the granularity level and mapping evidence (In Korean).
+- **Output Language**: All specification fields must be written in professional Korean.
 """
 
-REVERSE_SYSTEM_PROMPT = f"""# 역할: 리버스 엔지니어 (REVERSE_ENGINEER 모드)
+# REVERSE 모드: 현재 구현된 코드를 바탕으로 기능 지도(RTM)를 100% 복구하는 프롬프트
+REVERSE_SYSTEM_PROMPT = f"""# Role: Strict Software Reverse Engineer (REVERSE_ENGINEER Mode)
 
-## 목표
-스캔된 코드베이스에서 실제로 구현된 기능을 FEAT_001, FEAT_002, ... 단위로 추출한다.
+## Overview
+Recover a high-precision functional map (RTM) from the CURRENTLY IMPLEMENTED system.
 
-## 규칙
-- 환각 금지: 코드에 존재하지 않는 기능은 작성하지 않는다.
+## Guidelines
+1. **High-Precision Recovery (No Compression)**: 
+   - DO NOT group different modules or functions. If `chunker.py` and `retriever.py` exist, they must be separate FEATs.
+   - Recover the specification at the **function/class level** if they represent distinct technical features.
+2. **Zero-Hallucination**: 
+   - If it's not in the code, it's not in the RTM.
+3. **1:1 Evidence Mapping**: 
+   - Every FEAT must trace to a specific, granular code location.
 {_ID_RULES_BLOCK}
-- 명세 범위: 비즈니스 로직(What) 위주로 기술한다. 기술 스택·프레임워크 식별자는 제외한다.
 
-## 출력 규약
-- thinking: 한국어로 핵심 추론 근거를 상세히 기술한다.
-- 모든 분석 내용은 한국어로 작성한다.
+## Output Rules
+- **thinking**: Verify that each FEAT is a single technical unit and not a summary of multiple features (In Korean).
+- **Output Language**: All specification fields must be written in professional Korean.
 """
 
 _SYSTEM_PROMPT_BY_MODE = {
@@ -144,42 +160,84 @@ def requirement_analyzer_node(state: PipelineState) -> Dict[str, Any]:
     if ctx:
         parts.append(f"<project_context>\n{ctx}\n</project_context>")
 
-    # UPDATE/REVERSE 모드 + RAG 인덱스 존재 시 ChromaDB에서 직접 청크를 검색해 첨부.
-    if action_type in ("UPDATE", "REVERSE_ENGINEER") and rag_status.get("has_index"):
+    # RAG 인덱스 활용 (CREATE 모드가 아닐 때만 기존 코드 참고)
+    if action_type != "CREATE" and rag_status.get("has_index"):
         rag_session_id = rag_status.get("session_id") or sget("session_id", "")
-        queries: List[str] = []
-        if idea:
-            queries.append(idea)
-        queries.append("데이터 모델 엔티티 ORM 스키마 테이블")
-        queries.append("API 엔드포인트 라우터 컨트롤러")
-        chunks: List[Dict[str, Any]] = []
-        seen_chunk_ids: set[str] = set()
-        for q in queries:
-            try:
-                results = query_project_code(q, session_id=rag_session_id, n_results=4)
-            except Exception as e:
-                logger.warning(f"[requirement_analyzer] RAG 검색 실패 (q={q[:30]!r}): {e}")
-                continue
-            for c in results:
-                cid = c.get("chunk_id")
-                if cid and cid not in seen_chunk_ids:
-                    seen_chunk_ids.add(cid)
-                    chunks.append(c)
-        if chunks:
-            snippet_lines = []
-            for c in chunks[:8]:
-                sim = c.get("similarity", 0)
-                snippet_lines.append(
-                    f"- {c.get('file_path', '')}::{c.get('func_name', '')} (sim={sim:.2f})\n"
-                    f"  {(c.get('content_text', '') or '')[:300]}"
-                )
-            snippet_block = "\n".join(snippet_lines)
-            parts.append(
-                f"<existing_system_analysis>\n"
-                f"RAG 인덱스(청크 {rag_status.get('chunk_count', 0)}개)에서 검색한 관련 코드:\n"
-                f"{snippet_block}\n"
-                f"</existing_system_analysis>"
-            )
+        
+        # 1. Global Map (전체 파일/함수 구조) - 모든 모드에서 제공
+        try:
+            inventory = get_session_inventory(rag_session_id)
+            if inventory:
+                inventory_lines = ["<project_inventory>"]
+                inventory_lines.append(f"프로젝트 전체 코드 구조 (총 {len(inventory)}개 파일):")
+                for path, items in sorted(inventory.items()):
+                    # 각 아이템(함수/클래스)을 '이름(요약)' 형식으로 포맷팅
+                    formatted_items = []
+                    for it in items:
+                        name = it.get("name", "unknown")
+                        summary = it.get("summary", "").replace("\n", " ").strip()
+                        if summary:
+                            formatted_items.append(f"{name} ({summary[:100]})")
+                        else:
+                            formatted_items.append(name)
+                            
+                    # 너무 많으면 요약
+                    if len(formatted_items) > 20:
+                        items_str = ", ".join(formatted_items[:20]) + f" ... (외 {len(formatted_items)-20}개 더 있음)"
+                    else:
+                        items_str = ", ".join(formatted_items)
+                        
+                    inventory_lines.append(f"- {path}: [{items_str}]")
+                inventory_lines.append("</project_inventory>")
+                parts.append("\n".join(inventory_lines))
+        except Exception as e:
+            logger.warning(f"[requirement_analyzer] Inventory 추출 실패: {e}")
+
+        # 2. Local Details (RAG 검색을 통한 상세 코드)
+        if action_type in ("UPDATE", "REVERSE_ENGINEER") or (action_type == "CREATE" and idea):
+            queries: List[str] = []
+            if idea:
+                queries.append(idea)
+            
+            # 검색 전략 강화 (더 넓은 레이어 커버)
+            queries.append("데이터 모델 엔티티 ORM 스키마 테이블 DB structure")
+            queries.append("API 엔드포인트 라우터 컨트롤러 엔트리포인트 API endpoint routes")
+            if action_type == "REVERSE_ENGINEER":
+                queries.append("핵심 서비스 레이어 비즈니스 로직 알고리즘 core business service logic")
+                queries.append("상태 관리 스토어 리듀서 Context API state management store")
+                queries.append("유틸리티 헬퍼 함수 공통 모듈 utility helper functions")
+                queries.append("미들웨어 보안 인증 필터 middleware auth security")
+            
+            chunks: List[Dict[str, Any]] = []
+            seen_chunk_ids: set[str] = set()
+            
+            # 검색량 및 상세도 최적화 (REVERSE 모드일 때 대폭 확대)
+            results_per_query = 10 if action_type == "REVERSE_ENGINEER" else 4
+            snippet_limit = 30 if action_type == "REVERSE_ENGINEER" else 10
+            
+            for q in queries:
+                try:
+                    results = query_project_code(q, session_id=rag_session_id, n_results=results_per_query)
+                except Exception as e:
+                    logger.warning(f"[requirement_analyzer] RAG 검색 실패 (q={q[:30]!r}): {e}")
+                    continue
+                for c in results:
+                    cid = c.get("chunk_id")
+                    if cid and cid not in seen_chunk_ids:
+                        seen_chunk_ids.add(cid)
+                        chunks.append(c)
+            
+            if chunks:
+                snippet_lines = ["<existing_system_analysis>"]
+                snippet_lines.append(f"RAG 검색을 통해 추출한 상세 코드 분석 (검색 결과 {len(chunks)}개 중 상위 {snippet_limit}개):")
+                for c in chunks[:snippet_limit]:
+                    sim = c.get("similarity", 0)
+                    snippet_lines.append(
+                        f"- {c.get('file_path', '')}::{c.get('func_name', '')} (sim={sim:.2f})\n"
+                        f"  {(c.get('content_text', '') or '')[:400]}"
+                    )
+                snippet_lines.append("</existing_system_analysis>")
+                parts.append("\n".join(snippet_lines))
             
     user_content = "\n\n".join(parts)
     if not user_content:
@@ -195,7 +253,7 @@ def requirement_analyzer_node(state: PipelineState) -> Dict[str, Any]:
             user_msg=user_content,
             max_retries=3,
             temperature=0.1,
-            compress_prompt=True # Phase 3: Prompt Compression enabled
+            compress_prompt=False # 인벤토리 유실 방지를 위해 압축 비활성화
         )
         out = res.parsed
         usage = res.usage
