@@ -17,17 +17,19 @@ def retrieve_project_code(
     query: str,
     session_id: Optional[str] = None,
     n_results: int = 10,
+    api_key: str = "",
 ) -> List[Dict[str, Any]]:
     """REST 엔드포인트나 외부 파이프라인에서 직접 호출하는 검색 함수."""
     if not query.strip():
         return []
-    return query_project_code(query, session_id=session_id, n_results=n_results)
+    return query_project_code(query, session_id=session_id, n_results=n_results, api_key=api_key)
 
 
 def code_retriever_node(state: PipelineState) -> Dict[str, Any]:
     sget = make_sget(state)
     query = sget("rag_query_input", "") or ""
     run_id = sget("run_id", None)
+    api_key = sget("api_key", "")
 
     logger.info(f"[code_retriever] query={query!r:.60s}")
 
@@ -35,7 +37,7 @@ def code_retriever_node(state: PipelineState) -> Dict[str, Any]:
         logger.warning("[code_retriever] rag_query_input이 비어있어 검색을 건너뜁니다.")
         return {"rag_query_result": []}
 
-    results = retrieve_project_code(query, session_id=run_id)
+    results = retrieve_project_code(query, session_id=run_id, api_key=api_key)
     logger.info(f"[code_retriever] {len(results)}개 청크 검색됨")
 
     return {"rag_query_result": results}

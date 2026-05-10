@@ -7,9 +7,9 @@ project_code_knowledge 컬렉션에 저장합니다.
 from typing import Any, Dict
 
 from pipeline.core.state import PipelineState, make_sget
-from pipeline.core.models.nomic_embed_model import get_nomic_embeddings, MODEL_NAME
+from pipeline.core.models.google_embed_model import get_google_embeddings_batch, MODEL_NAME
 from pipeline.domain.rag.schemas import CodeChunk, RAGIngestOutput
-from pipeline.domain.rag.nodes.project_db import upsert_code_chunk
+from pipeline.domain.rag.nodes.project_db import upsert_code_chunks_batch
 from observability.logger import get_logger
 
 logger = get_logger()
@@ -18,6 +18,7 @@ logger = get_logger()
 def code_embedding_node(state: PipelineState) -> Dict[str, Any]:
     sget = make_sget(state)
     action_type = (sget("action_type", "") or "").strip().upper()
+    api_key = sget("api_key", "")
     # session_id는 source_dir 해시 기반 영속 키. 없으면 run_id로 폴백.
     session_id = sget("session_id", "") or sget("run_id", "unknown")
     raw_chunks = sget("rag_chunks", []) or []
@@ -37,15 +38,25 @@ def code_embedding_node(state: PipelineState) -> Dict[str, Any]:
             ],
         }
 
-    ingested = 0
+    chunks_list = []
+    texts = []
+
     for raw in raw_chunks:
         try:
             chunk = CodeChunk(**raw)
-            vector = get_nomic_embeddings(chunk.content_text)
-            upsert_code_chunk(session_id, chunk, vector)
-            ingested += 1
+            chunks_list.append(chunk)
+            texts.append(chunk.content_text)
         except Exception as e:
-            logger.warning(f"[code_embedding] 청크 임베딩 실패 ({raw.get('chunk_id', '?')}): {e}")
+            logger.warning(f"[code_embedding] 청크 초기화 실패 ({raw.get('chunk_id', '?')}): {e}")
+
+    ingested = len(chunks_list)
+    if ingested > 0:
+        try:
+            vectors = get_google_embeddings_batch(texts, api_key=api_key)
+            upsert_code_chunks_batch(session_id, chunks_list, vectors)
+        except Exception as e:
+            logger.warning(f"[code_embedding] 배치 임베딩/저장 실패: {e}")
+            ingested = 0
 
     status = "success" if ingested == len(raw_chunks) else ("partial" if ingested > 0 else "empty")
     output = RAGIngestOutput(session_id=session_id, chunks_ingested=ingested, status=status)

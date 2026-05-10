@@ -6,7 +6,7 @@ PROJECT_RAG 테이블 정의서를 준수합니다.
 import os
 import chromadb
 from typing import Optional, List, Dict, Any
-from pipeline.core.models.nomic_embed_model import get_nomic_embeddings
+from pipeline.core.models.google_embed_model import get_google_embeddings
 from pipeline.domain.rag.schemas import CodeChunk
 from observability.logger import get_logger
 
@@ -26,7 +26,7 @@ def _get_collection():
         os.makedirs(DB_PATH, exist_ok=True)
         _client = chromadb.PersistentClient(path=DB_PATH)
         _collection = _client.get_or_create_collection(
-            name="project_code_knowledge",
+            name="project_code_knowledge_v2",
             metadata={"hnsw:space": "cosine"},
         )
     return _collection
@@ -36,6 +36,7 @@ def upsert_code_chunk(
     session_id: str,
     chunk: CodeChunk,
     vector: Optional[List[float]] = None,
+    api_key: str = "",
 ) -> str:
     """코드 청크(Table: PROJECT_RAG)를 벡터 저장소에 업서트합니다."""
     collection = _get_collection()
@@ -58,7 +59,7 @@ def upsert_code_chunk(
 
     if not vector:
         try:
-            vector = get_nomic_embeddings(chunk.content_text)
+            vector = get_google_embeddings(chunk.content_text, api_key=api_key)
         except Exception as e:
             logger.warning(f"[PROJECT_DB] Auto-embedding failed: {e}")
 
@@ -68,6 +69,34 @@ def upsert_code_chunk(
     collection.upsert(**upsert_args)
     logger.info(f"[PROJECT_DB] Persisted chunk: {chunk.chunk_id}")
     return chunk.chunk_id
+
+
+def upsert_code_chunks_batch(
+    session_id: str,
+    chunks: List[CodeChunk],
+    vectors: List[List[float]]
+) -> None:
+    """코드 청크 리스트를 배치로 벡터 저장소에 업서트합니다."""
+    if not chunks or not vectors or len(chunks) != len(vectors):
+        return
+
+    collection = _get_collection()
+    
+    collection.upsert(
+        ids=[c.chunk_id for c in chunks],
+        documents=[c.content_text for c in chunks],
+        embeddings=vectors,
+        metadatas=[{
+            "session_id": session_id,
+            "chunk_id": c.chunk_id,
+            "version": c.version,
+            "feature_id": c.feature_id,
+            "file_path": c.file_path,
+            "func_name": c.func_name,
+            "lang": c.lang,
+        } for c in chunks]
+    )
+    logger.info(f"[PROJECT_DB] Persisted {len(chunks)} chunks in batch.")
 
 
 def delete_project_knowledge(session_id: str) -> int:
@@ -102,10 +131,11 @@ def query_project_code(
     query_text: str,
     session_id: Optional[str] = None,
     n_results: int = 10,
+    api_key: str = "",
 ) -> List[Dict[str, Any]]:
     """코드 청크 유사도 검색. session_id 지정 시 해당 세션 내에서만 검색."""
     collection = _get_collection()
-    query_vector = get_nomic_embeddings(query_text)
+    query_vector = get_google_embeddings(query_text, api_key=api_key)
 
     query_kwargs: Dict[str, Any] = {
         "query_embeddings": [query_vector],

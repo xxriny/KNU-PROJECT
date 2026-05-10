@@ -108,6 +108,7 @@ class RAGQueryRequest(BaseModel):
     query: str
     session_id: Optional[str] = None
     n_results: int = 10
+    api_key: str = ""
 
 
 class HealthResponse(BaseModel):
@@ -269,7 +270,12 @@ async def rag_query(req: RAGQueryRequest):
         return {"status": "error", "error": "query가 비어있습니다."}
     try:
         from pipeline.domain.rag.nodes.code_retriever import retrieve_project_code
-        results = retrieve_project_code(req.query, session_id=req.session_id, n_results=req.n_results)
+        results = retrieve_project_code(
+            req.query, 
+            session_id=req.session_id, 
+            n_results=req.n_results,
+            api_key=req.api_key
+        )
         return {"status": "ok", "results": results}
     except Exception as e:
         get_logger().exception("rag_query endpoint failed")

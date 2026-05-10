@@ -9,6 +9,8 @@ import ast
 import os
 import re
 import pathlib
+import concurrent.futures
+import multiprocessing
 from collections import defaultdict
 from typing import Optional
 
@@ -267,6 +269,14 @@ def _resolve_internal_imports(rel_path: str, lang: str, raw_imports: list[str], 
 # 공개 API
 # ─────────────────────────────────────────────────────────────
 
+def _parse_file_task(filepath: pathlib.Path, root: pathlib.Path) -> list[dict]:
+    suffix = filepath.suffix.lower()
+    if suffix in _PYTHON_EXTS:
+        return _parse_python_file(filepath, root)
+    elif suffix in _JS_EXTS:
+        return _parse_js_file(filepath, root)
+    return []
+
 def extract_functions(source_dir: str, max_functions: int = 300) -> list[dict]:
     """
     source_dir 하위의 모든 Python/JS/TS 파일에서 함수 목록 추출.
@@ -288,6 +298,8 @@ def extract_functions(source_dir: str, max_functions: int = 300) -> list[dict]:
 
     results: list[dict] = []
 
+    target_files = []
+
     for dirpath, dirnames, filenames in os.walk(root):
         # 무시할 디렉터리 제거 (os.walk in-place 수정으로 하위 탐색 차단)
         dirnames[:] = [d for d in dirnames if not _should_skip_dir(d)]
@@ -303,13 +315,24 @@ def extract_functions(source_dir: str, max_functions: int = 300) -> list[dict]:
             except OSError:
                 continue
 
-            if suffix in _PYTHON_EXTS:
-                results.extend(_parse_python_file(filepath, root))
-            elif suffix in _JS_EXTS:
-                results.extend(_parse_js_file(filepath, root))
+            if suffix in _PYTHON_EXTS or suffix in _JS_EXTS:
+                target_files.append(filepath)
 
-            if len(results) >= max_functions:
-                return results[:max_functions]
+    num_workers = min(multiprocessing.cpu_count(), len(target_files)) if target_files else 1
+    
+    if target_files:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+            futures = [executor.submit(_parse_file_task, f, root) for f in target_files]
+            
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    parsed_data = future.result()
+                    results.extend(parsed_data)
+                    
+                    if len(results) >= max_functions:
+                        break
+                except Exception:
+                    pass
 
     return results[:max_functions]
 

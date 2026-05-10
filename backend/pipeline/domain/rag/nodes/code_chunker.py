@@ -37,17 +37,18 @@ _OTHER_CODE_EXTS = {".java", ".go", ".rs", ".c", ".cpp", ".rb", ".kt", ".swift"}
 # JS/TS 최상위 함수·클래스·화살표 함수 탐지 정규식
 _JS_FUNC_RE = re.compile(
     r"^[ \t]*(?:export\s+)?(?:default\s+)?(?:async\s+)?"
-    r"(?:function\s+\w+|class\s+\w+|(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?(?:function|\())",
+    r"(?:function\s+\w+|class\s+\w+|(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?(?:function\b|\([^)]*\)\s*=>))",
     re.MULTILINE,
 )
 
 
 # ── 헬퍼 ────────────────────────────────────────────────────
 
-def _chunk_id(session_id: str, file_path: str, func_name: str) -> str:
+def _chunk_id(session_id: str, file_path: str, func_name: str, discriminator: str = "") -> str:
     file_hash = hashlib.md5(file_path.encode()).hexdigest()[:8]
     safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", func_name)[:40]
-    return f"{session_id}_{file_hash}_{safe_name}"
+    suffix = f"_{discriminator}" if discriminator else ""
+    return f"{session_id}_{file_hash}_{safe_name}{suffix}"
 
 
 def _window_chunks(
@@ -80,18 +81,25 @@ def _extract_python(source: str, file_path: str, session_id: str, version: str) 
         return _window_chunks(source, file_path, session_id, version, "python")
 
     # ClassDef 내부 FunctionDef는 ClassDef 청크에 포함되므로 최상위만 추출
+    func_counts = {}
     for node in ast.iter_child_nodes(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             continue
         body = ast.get_source_segment(source, node)
         if not body:
             continue
+            
+        # 중복 이름 처리 (예: 동일 파일 내 중복 정의)
+        name = node.name
+        func_counts[name] = func_counts.get(name, 0) + 1
+        disc = str(func_counts[name]) if func_counts[name] > 1 else ""
+        
         chunks.append(CodeChunk(
-            chunk_id=_chunk_id(session_id, file_path, node.name),
+            chunk_id=_chunk_id(session_id, file_path, name, disc),
             session_id=session_id,
             version=version,
             file_path=file_path,
-            func_name=node.name,
+            func_name=name,
             content_text=body[:_MAX_CHUNK_CHARS],
             lang="python",
         ))
@@ -111,6 +119,7 @@ def _extract_js(source: str, file_path: str, session_id: str, version: str) -> L
     start_lines.append(len(lines))  # sentinel
 
     chunks = []
+    func_counts = {}
     for i, m in enumerate(matches):
         sl = start_lines[i]
         el = min(start_lines[i + 1], sl + _MAX_JS_FUNC_LINES)
@@ -122,8 +131,12 @@ def _extract_js(source: str, file_path: str, session_id: str, version: str) -> L
         if name_m:
             func_name = name_m.group(1) or name_m.group(2) or func_name
 
+        # 중복 이름 처리
+        func_counts[func_name] = func_counts.get(func_name, 0) + 1
+        disc = str(func_counts[func_name]) if func_counts[func_name] > 1 else ""
+
         chunks.append(CodeChunk(
-            chunk_id=_chunk_id(session_id, file_path, func_name),
+            chunk_id=_chunk_id(session_id, file_path, func_name, disc),
             session_id=session_id,
             version=version,
             file_path=file_path,
@@ -177,7 +190,7 @@ def code_chunker_node(state: PipelineState) -> Dict[str, Any]:
     sget = make_sget(state)
     action_type = (sget("action_type", "") or "").strip().upper()
     source_dir = sget("source_dir", "")
-    run_id = sget("run_id", "unknown")
+    session_id = sget("session_id", "") or sget("run_id", "unknown")
     version = "v1.0"
 
     if action_type == "CREATE":
@@ -203,7 +216,7 @@ def code_chunker_node(state: PipelineState) -> Dict[str, Any]:
         for filename in filenames:
             full_path = os.path.join(dirpath, filename)
             rel_path = os.path.relpath(full_path, source_dir).replace("\\", "/")
-            chunks = _process_file(full_path, rel_path, run_id, version)
+            chunks = _process_file(full_path, rel_path, session_id, version)
             all_chunks.extend(chunks)
 
     # >>> [EXPERIMENT-RAG-VIS] BEGIN — 추후 원복 시 이 블록을 다음 한 줄로 교체:
