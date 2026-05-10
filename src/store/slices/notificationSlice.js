@@ -1,7 +1,7 @@
 export const createNotificationSlice = (set, get) => ({
   notifications: [],
   
-  addNotification: (message, type = "info", duration = 3000) => {
+  addNotification: (message, type = "info", duration = 5000) => {
     const id = Date.now().toString();
     const notification = { id, message, type, duration };
     

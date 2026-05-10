@@ -128,7 +128,11 @@ class _ChatFields(TypedDict, total=False):
 class _IdeaFields(TypedDict, total=False):
     idea_ready: bool                 # 아이디어 준비 완료 여부
     idea_summary: str                # 분석용 아이디어 요약
-    suggested_mode: str              # create | update | reverse
+    suggested_mode: str               # create | update | reverse
+    notes_to_add: list                # 채팅에서 추출된 메모(노트) 항목 목록
+                                      # [{"text": "...", "section": "Idea Chat"}, ...]
+                                      # LangGraph가 노드 반환 키를 스키마와 매칭하므로,
+                                      # 이 필드를 명시해야 idea_chat_node의 출력이 보존된다.
 
 
 # ── RAG 파이프라인 필드 ──────────────────────────
