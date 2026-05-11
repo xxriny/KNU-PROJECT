@@ -300,6 +300,7 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
                     continue
                 text = str(note.get("text") or "").strip()
                 section = str(note.get("section") or "Idea Chat").strip() or "Idea Chat"
+                detail = str(note.get("detail") or "").strip()
                 if not text:
                     continue
                 try:
@@ -308,8 +309,14 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
                         memo_text=text,
                         selected_text="",
                         section=section,
+                        detail=detail,
                     )
-                    persisted_notes.append({"id": memo_id, "text": text, "section": section})
+                    persisted_notes.append({
+                        "id": memo_id,
+                        "text": text,
+                        "section": section,
+                        "detail": detail,
+                    })
                 except Exception as memo_err:
                     get_logger().warning(f"[idea_chat] memo_db 영속화 실패: {memo_err}")
             get_logger().info(

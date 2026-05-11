@@ -172,6 +172,8 @@ def guardian_node(state: PipelineState) -> Dict[str, Any]:
     if not merged:
         return {"guardian_output": {"status": "REJECTED", "rejection_reason": "병합 실패"}}
 
+    thinking_steps = ["여러 소스의 데이터를 병합 완료 (NPM 버전 + GitHub Stars 등)"]
+
     # 2. 규칙 기반 필터 (Rule-based)
     is_safe, reason = rule_based_filter(merged)
     if not is_safe:
@@ -186,10 +188,19 @@ def guardian_node(state: PipelineState) -> Dict[str, Any]:
     thinking_steps.append("라이선스 및 업데이트 주기 규칙 검증 통과")
 
     # 3. AI 시맨틱 체크 (LLM)
+    # llm_semantic_check는 inventory(현재 세션의 파일/함수 분포)를 받아 프로젝트 정합성도 함께 평가한다.
+    # ChromaDB 호출이 일시 실패하더라도 PM 단계 전체가 죽지 않도록 빈 인벤토리로 폴백.
+    inventory: Dict[str, Any] = {}
+    try:
+        inventory = get_session_inventory(run_id) or {}
+    except Exception as inv_err:
+        logger.warning(f"[guardian] get_session_inventory 실패, 빈 인벤토리로 진행: {inv_err}")
+
     is_legit, ai_reason = llm_semantic_check(
         api_key=sget("api_key", ""),
         model=sget("model", DEFAULT_MODEL),
-        data=merged
+        data=merged,
+        inventory=inventory,
     )
     
     status = "APPROVED" if is_legit else "REJECTED"

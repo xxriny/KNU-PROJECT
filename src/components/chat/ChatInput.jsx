@@ -28,7 +28,7 @@ export default function ChatInput({
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={onKeyDown}
             rows={1}
-            placeholder="메시지를 입력하세요..."
+            placeholder={isProcessing ? "분석이 끝나면 다시 메시지를 보낼 수 있어요…" : "메시지를 입력하세요..."}
             disabled={isProcessing}
             className={`
               w-full bg-transparent border-none focus:outline-none focus:ring-0 text-[14px] py-2 resize-none scrollbar-hide placeholder:text-slate-500 disabled:opacity-50 leading-snug

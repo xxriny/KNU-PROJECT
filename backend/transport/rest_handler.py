@@ -96,6 +96,11 @@ class MemoRequest(BaseModel):
     text: str
     selected_text: str = ""
     section: str = "Global"
+    detail: str = ""
+
+
+class ApplyMemosRequest(BaseModel):
+    memo_ids: list[str]
 
 
 class RAGIngestRequest(BaseModel):
@@ -389,9 +394,32 @@ async def get_memos_endpoint(session_id: Optional[str] = None):
 async def add_memo_endpoint(req: MemoRequest):
     from pipeline.domain.pm.nodes.memo_db import add_memo
     try:
-        memo_id = add_memo(req.session_id, req.text, req.selected_text, req.section)
+        memo_id = add_memo(
+            req.session_id,
+            req.text,
+            req.selected_text,
+            req.section,
+            req.detail,
+        )
         return {"status": "ok", "memo_id": memo_id}
     except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/memos/apply")
+async def apply_memos_endpoint(req: ApplyMemosRequest):
+    """메모 ID 목록을 일괄 'applied' 상태로 표시한다.
+
+    Memos 탭의 "지적사항 반영 설계 업데이트" 흐름에서, UPDATE 분석이 성공한
+    직후 프론트가 호출한다. 메모 자체는 삭제하지 않고 메타데이터에 applied=True,
+    applied_at=<now>를 병합해 메인 뷰에서는 숨기고 토글로만 노출한다.
+    """
+    from pipeline.domain.pm.nodes.memo_db import apply_memos
+    try:
+        updated = apply_memos(req.memo_ids or [])
+        return {"status": "ok", "updated": updated}
+    except Exception as e:
+        get_logger().exception("apply_memos endpoint failed")
         return {"status": "error", "error": str(e)}
 
 

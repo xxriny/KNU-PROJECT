@@ -112,6 +112,9 @@ export const createSessionSlice = (set, get) => ({
         text: m.text,
         selectedText: m.metadata?.selected_text || "",
         section: m.metadata?.section || "Global",
+        detail: m.metadata?.detail || "",
+        applied: !!m.metadata?.applied,
+        appliedAt: m.metadata?.applied_at || null,
         createdAt: Date.now(),
       }));
 
@@ -164,6 +167,7 @@ export const createSessionSlice = (set, get) => ({
         text: comment.text,
         selected_text: comment.selectedText || "",
         section: comment.section || "Global",
+        detail: comment.detail || "",
       });
       console.log(`[addComment] POST 응답:`, res);
 
@@ -214,6 +218,40 @@ export const createSessionSlice = (set, get) => ({
         get().addDebugLog({ level: "error", message: "메모 삭제 실패", rawData: { error: e.message, id } });
         get().syncMemos(); // 오류 발생 시 서버 상태와 다시 맞춤
       }
+    }
+  },
+
+  /**
+   * 메모 ID 목록을 백엔드에 'applied' 표시 요청 + 로컬 userComments에도 반영.
+   * "지적사항 반영 설계 업데이트" 흐름의 마지막 단계에서 _processResult가 호출.
+   * 실패해도 사용자 흐름을 막지 않는다 (백엔드 일시 장애 등).
+   */
+  markMemosApplied: async (memoIds) => {
+    const { backendPort } = get();
+    if (!Array.isArray(memoIds) || memoIds.length === 0) return;
+    if (!backendPort) {
+      console.warn("[markMemosApplied] backendPort 없어 백엔드 갱신 스킵");
+      return;
+    }
+    try {
+      const res = await sessionService.applyMemos(backendPort, memoIds);
+      if (res?.status === "ok") {
+        const ts = new Date().toISOString();
+        set((s) => ({
+          userComments: (s.userComments || []).map((c) =>
+            memoIds.includes(c.id) ? { ...c, applied: true, appliedAt: ts } : c
+          ),
+        }));
+      } else {
+        console.warn("[markMemosApplied] 백엔드 응답 비정상:", res);
+      }
+    } catch (e) {
+      console.error("[markMemosApplied] 실패:", e);
+      get().addDebugLog?.({
+        level: "error",
+        message: "메모 applied 표시 실패",
+        rawData: { error: e?.message, ids: memoIds },
+      });
     }
   },
 

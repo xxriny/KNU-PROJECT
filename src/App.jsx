@@ -72,6 +72,17 @@ export default function App() {
     }
   }, [isDarkMode]);
 
+  // 분석이 시작되면 메모/세션/설정 등 활성 패널을 강제로 닫고 메인 viewport(Progress)를 노출.
+  // store의 activateOutputTab만으로는 App의 로컬 state(activeIconPanel)를 끄지 못하므로
+  // 여기서 보강. (Memos 탭 → "지적사항 반영 업데이트" 클릭 시 progress로 자동 전환되도록.)
+  useEffect(() => {
+    if (pipelineStatus === "running") {
+      setActiveIconPanel(null);
+      setShowSessions(false);
+      setShowSettingsModal(false);
+    }
+  }, [pipelineStatus]);
+
   const handleIconPanel = (id) => {
     setActiveIconPanel((prev) => (prev === id ? null : id));
     setShowSessions(false);

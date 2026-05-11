@@ -28,8 +28,18 @@ from pipeline.core.rag_manager import rag_manager
 # ── 구조화 출력 스키마 ────────────────────────────────────
 
 class NoteToAddItem(BaseModel):
-    text: str = Field(description="메모 본문 (한국어, 명확한 한 문장 또는 짧은 단락)")
+    text: str = Field(
+        description="메모 제목/요약 — 한 줄, 50자 이내, 카드 기본 노출용"
+    )
     section: str = Field(default="Idea Chat", description="메모 섹션 라벨")
+    detail: str = Field(
+        default="",
+        description=(
+            "상세 수정 사항 — 어떤 부분을 어떻게 바꿔야 하는지 구체적·자유 형식으로 작성. "
+            "여러 문장 가능, UPDATE 분석 시 LLM이 이 내용을 직접 참고. "
+            "사용자 발화가 짧은 한 줄이면 비워둘 수 있음."
+        ),
+    )
 
 
 class IdeaChatOutput(BaseModel):
@@ -107,12 +117,30 @@ SYSTEM_PROMPT = """당신은 PM(프로젝트 매니저) AI 어시스턴트입니
 
 반대로 notes_to_add가 빈 배열이면 reply에서도 메모를 추가했다고 말하지 마세요. 두 필드의 약속이 어긋나면 사용자에게 거짓 응답을 하는 것이며, 이는 시스템 신뢰를 깨뜨립니다.
 
-### 항목 형식
-- text: 사용자가 추가하라고 한 기능/요구사항/결정 사항을 명료하게 1~3문장 한국어로 정리. 사용자의 원문을 그대로 복사하지 말고 의미가 통하는 단위로 요약.
-- section: 기본값 "Idea Chat". 명백히 다른 영역이면 "RTM" / "기술 스택" / "API 설계" / "DB 설계" / "보안" 중에서 적절한 라벨 사용.
+### 항목 형식 (★title-detail 분리)
+- **text**: 메모의 **제목/요약**. 카드 한 줄에 노출되므로 **짧고 명확한 한 문장(50자 이내 권장)**. 예: "결제 모듈에 PG사 연동 추가", "회원가입에 이메일 인증 단계 추가".
+- **section**: 기본값 "Idea Chat". 명백히 다른 영역이면 "RTM" / "기술 스택" / "API 설계" / "DB 설계" / "보안" 중에서.
+- **detail**: **상세 수정 사항**. 사용자 발화에서 *어떤 부분을 어떻게* 바꿔야 하는지 구체적으로 풀어 쓴 본문. 여러 문장 가능. 예시:
+  ```
+  결제 모듈에 PG사(예: 토스페이먼츠) 연동을 추가한다.
+  - 신용카드/계좌이체/간편결제 3종 채널 지원
+  - 결제 완료 시점에 주문 상태를 'PAID'로 갱신하고 영수증 메일 발송
+  - 결제 실패 시 사용자에게 사유 노출 + 자동 재시도 1회
+  ```
+  사용자가 짧게 "결제 추가해줘"라고만 말했으면 detail은 빈 문자열로 두고, 사용자가 상세히 설명했으면 그 내용을 정리해 detail에 담는다. **text와 detail에 같은 문장을 중복 작성하지 말 것** — text는 표제, detail은 본문.
 
 ### 다중 항목
 사용자가 한 번에 여러 기능/항목을 요청하면 항목별로 분리해 배열에 담으세요.
+
+## 코드 참조 규칙 (★사용자 프로젝트 파일에 대한 질문)
+- 시스템 메시지 RAG 섹션에 **"### 관련 코드 청크 (사용자 프로젝트)"** 가 포함되어 있다면,
+  사용자가 등록한 프로젝트의 실제 코드 파일/함수가 제공된 것입니다. 이 내용을 그대로 인용하거나
+  요약해 정확한 답변을 작성하세요. 임의로 추측한 코드를 답변에 포함하지 마세요.
+- 위 섹션이 **없는데** 사용자가 "이 파일이 뭐야", "X 함수가 어디 있어", "코드 구조 설명해줘" 같이
+  코드 자체를 묻는 경우, 다음과 같이 안내하세요:
+  > "프로젝트 코드를 보려면 폴더를 선택한 뒤 분석(CREATE/UPDATE/REVERSE)을 한 번 실행해 주세요.
+  > 분석 라운드가 코드 청크를 RAG에 인덱싱하면 그 다음 채팅부터 파일별 정확한 설명이 가능합니다."
+  - 이 경우 `notes_to_add`는 비워두세요 (사용자가 명시적으로 메모해달라 한 게 아니므로).
 
 ## 대화 스타일
 - 친근하지만 전문적인 톤
@@ -157,6 +185,38 @@ def idea_chat_node(state: PipelineState) -> dict:
                     rag_context.append(f"- {res['content']}")
         except Exception as rag_err:
             logger.warning(f"RAG search via RAGManager failed: {rag_err}")
+
+        # ── 사용자 프로젝트 코드 청크 RAG (분석 1회 이후만 동작) ──
+        # previous_result.rag_index_status.session_id는 직전 분석 라운드에서 사용된
+        # source_dir 해시 기반 영속 ID. 코드 청크는 project_code_knowledge 컬렉션에 들어있음.
+        # 분석을 한 번도 안 돌렸으면 session_id가 비어 있어 자연히 검색 스킵.
+        code_session_id = ""
+        has_code_index = False
+        try:
+            rag_status = (previous_result or {}).get("rag_index_status") or {}
+            code_session_id = rag_status.get("session_id") or ""
+            has_code_index = bool(rag_status.get("has_index"))
+        except Exception:
+            pass
+
+        if code_session_id and has_code_index:
+            try:
+                from pipeline.domain.rag.nodes.project_db import query_project_code
+                code_results = query_project_code(
+                    user_request, session_id=code_session_id, n_results=5
+                )
+                if code_results:
+                    rag_context.append("### 관련 코드 청크 (사용자 프로젝트)")
+                    for r in code_results[:5]:
+                        fp = r.get("file_path", "")
+                        fn = r.get("func_name", "")
+                        sim = r.get("similarity", 0) or 0
+                        snippet = (r.get("content_text") or "")[:500]
+                        rag_context.append(
+                            f"- {fp}::{fn} (유사도 {sim:.2f})\n  {snippet}"
+                        )
+            except Exception as code_err:
+                logger.warning(f"[idea_chat] 코드 RAG 검색 실패: {code_err}")
 
         rag_text = "\n".join(rag_context)
 
@@ -288,7 +348,8 @@ def _normalize_notes_to_add(raw_notes) -> list:
 
     - 리스트가 아니면 빈 리스트로
     - 각 항목은 dict 또는 str 허용. 최소 'text'가 비어있지 않아야 채택
-    - section 기본값 'Idea Chat', 텍스트는 800자로 잘라 storage 폭주 방지
+    - section 기본값 'Idea Chat'
+    - text(제목)는 200자, detail(상세)은 4000자로 자름
     """
     if not isinstance(raw_notes, list):
         return []
@@ -298,14 +359,20 @@ def _normalize_notes_to_add(raw_notes) -> list:
         if isinstance(item, str):
             text = item.strip()
             section = "Idea Chat"
+            detail = ""
         elif isinstance(item, dict):
             text = str(item.get("text") or "").strip()
             section = str(item.get("section") or "Idea Chat").strip() or "Idea Chat"
+            detail = str(item.get("detail") or "").strip()
         else:
             continue
 
         if not text:
             continue
-        normalized.append({"text": text[:800], "section": section[:60]})
+        normalized.append({
+            "text": text[:200],
+            "section": section[:60],
+            "detail": detail[:4000],
+        })
 
     return normalized

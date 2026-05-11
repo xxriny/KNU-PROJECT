@@ -74,6 +74,56 @@ export function inferPipelineTypeFromResult(data) {
   return "analysis_create";
 }
 
+/**
+ * 사용자 메모 배열을 UPDATE 분석용 idea 텍스트로 합성한다.
+ * - section 별로 그룹핑하여 LLM이 영역 컨텍스트를 인식하도록 함.
+ * - selectedText가 있으면 짧게 잘라 같은 줄에 첨부 (popover로 만들어진 메모용).
+ *
+ * @param {Array<{text:string, section?:string, selectedText?:string}>} memos
+ * @returns {string} idea 텍스트
+ */
+export function synthesizeMemoIdea(memos) {
+  if (!memos || memos.length === 0) return "";
+
+  const grouped = memos.reduce((acc, m) => {
+    const sec = (m?.section || "Global").trim() || "Global";
+    if (!acc[sec]) acc[sec] = [];
+    acc[sec].push(m);
+    return acc;
+  }, {});
+
+  const sections = Object.entries(grouped)
+    .map(([sec, items]) => {
+      const lines = items
+        .map((m, i) => {
+          const text = (m.text || "").trim();
+          const sel = m.selectedText
+            ? ` (선택: "${m.selectedText.slice(0, 80)}")`
+            : "";
+          const titleLine = `${i + 1}. ${text}${sel}`;
+          const detail = (m.detail || "").trim();
+          if (detail) {
+            // detail은 들여쓰기로 본문 노출. 줄바꿈은 유지하되 각 줄에 들여쓰기 추가.
+            const indented = detail
+              .split("\n")
+              .map((ln) => `   ${ln}`)
+              .join("\n");
+            return `${titleLine}\n${indented}`;
+          }
+          return titleLine;
+        })
+        .join("\n");
+      return `[${sec}]\n${lines}`;
+    })
+    .join("\n\n");
+
+  return (
+    "다음 지적사항/메모들을 기반으로 기존 설계를 업데이트해주세요. " +
+    "각 항목은 사용자가 기존 분석 결과를 보면서 남긴 피드백·결정사항입니다.\n\n" +
+    sections
+  );
+}
+
 /** SA 관련 결과 필드의 초기값 (startAnalysis, resetPipeline, loadSession에서 공유) */
 export const EMPTY_RESULT_FIELDS = {
   resultData: null,
