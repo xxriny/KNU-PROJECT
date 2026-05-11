@@ -52,7 +52,7 @@ OUTPUT_GUIDE = """
 """
 
 
-def _build_user_message(merged_project: dict, inventory: dict, action_type: str) -> str:
+def _build_user_message(merged_project: dict, inventory: dict, action_type: str, snippets: str = "") -> str:
     plan = merged_project.get("plan", {})
     rtm = plan.get("requirements_rtm", [])
     p_rtm = "\n".join(f"{r.get('feature_id', r.get('id'))}:{r.get('description', r.get('desc'))}" for r in rtm)
@@ -61,8 +61,8 @@ def _build_user_message(merged_project: dict, inventory: dict, action_type: str)
     if inventory:
         lines = ["<project_inventory>"]
         for p, items in sorted(inventory.items()):
-            # [FIX] Increase visibility: show up to 20 items per folder to give more context
-            lines.append(f"- {p}: {[it.get('name') for it in items[:20]]}")
+            # [FIX] Limit removed: show all items per folder to give complete context
+            lines.append(f"- {p}: {[it.get('name') for it in items]}")
         lines.append("</project_inventory>")
         inventory_str = "\n".join(lines)
         
@@ -76,6 +76,7 @@ def _build_user_message(merged_project: dict, inventory: dict, action_type: str)
 
     return (
         f"{inventory_str}\n\n"
+        f"{snippets}\n\n"
         f"Strategy: {merged_project.get('merge_strategy', '')}\n"
         f"RTM:\n{p_rtm}\n\n"
         f"{final_instruction}"
@@ -93,13 +94,63 @@ def component_scheduler_node(ctx: NodeContext) -> dict:
 
     # 인벤토리 수집 (CREATE 제외)
     inventory = {}
+    snippets_text = ""
     if action_type != "CREATE":
+        search_session_id = sget("session_id", run_id)
         try:
-            inventory = get_session_inventory(run_id)
-        except:
-            pass
+            inventory = get_session_inventory(search_session_id)
+            
+            # [HYBRID EXTRACTION]
+            # Priority 1: Deterministic Targeting (via Forensic Profiler)
+            from pipeline.domain.rag.nodes.project_db import get_file_chunks, query_project_code
+            
+            seen_ids = set()
+            all_chunks = []
+            
+            # 1. ForensicProfiler 결과 활용
+            forensic_profile = sget("forensic_profile", {})
+            
+            target_files = []
+            if forensic_profile:
+                # [DYNAMIC] UI와 서비스 레이어 전체를 아우르는 동적 타겟팅
+                target_files = [path for path, role in forensic_profile.items() if role in ("UI", "SERVICE", "API")]
+                logger.info(f"[component_scheduler] Priority 1 (Forensic): {len(target_files)} UI/Service files identified.")
+            else:
+                # [MINIMAL FALLBACK]
+                comp_patterns = ["app", "index", "main", "service", "handler", "router", "view", "component"]
+                target_files = [path for path in inventory.keys() if any(p in path.lower() for p in comp_patterns)]
+            
+            for t_file in target_files:
+                direct_chunks = get_file_chunks(t_file, session_id=search_session_id)
+                for c in direct_chunks:
+                    cid = c.get("chunk_id")
+                    if cid and cid not in seen_ids:
+                        seen_ids.add(cid)
+                        all_chunks.append(c)
 
-    user_content = _build_user_message(merged_project, inventory, action_type)
+            # Priority 2: Semantic RAG Search (supplementary)
+            queries = ["system components entrypoints", "UI views and layouts", "business core services"]
+            for q in queries:
+                try:
+                    res_chunks = query_project_code(q, session_id=search_session_id, n_results=10)
+                    for c in res_chunks:
+                        cid = c.get("chunk_id")
+                        if cid and cid not in seen_ids:
+                            seen_ids.add(cid)
+                            all_chunks.append(c)
+                except Exception as e:
+                    logger.warning(f"[component_scheduler] Semantic RAG failed: {e}")
+
+            if all_chunks:
+                lines = ["<existing_system_structure_evidence>"]
+                for c in all_chunks[:100]:
+                    lines.append(f"File: {c.get('file_path')}\nContent: {c.get('content_text', '')[:1000]}")
+                lines.append("</existing_system_structure_evidence>")
+                snippets_text = "\n".join(lines)
+        except Exception as e:
+            logger.warning(f"[component_scheduler] RAG search failed: {e}")
+
+    user_content = _build_user_message(merged_project, inventory, action_type, snippets_text)
 
     # 모드에 따른 시스템 프롬프트 선택
     if action_type == "CREATE":

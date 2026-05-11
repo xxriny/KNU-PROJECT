@@ -216,6 +216,17 @@ def code_chunker_node(state: PipelineState) -> Dict[str, Any]:
     if action_type == "CREATE":
         return {"rag_chunks": []}
 
+    from pipeline.domain.rag.nodes.project_db import has_session_chunks
+    if has_session_chunks(session_id):
+        logger.info(f"[code_chunker] Session {session_id} is already indexed. Skipping.")
+        return {
+            "rag_chunks": [],
+            "thinking_log": (sget("thinking_log", []) or []) + [
+                {"node": "code_chunker", "thinking": f"이미 인덱싱된 세션({session_id})입니다. 기존 데이터를 활용합니다."}
+            ],
+            "rag_index_status": {"has_index": True, "session_id": session_id}
+        }
+
     logger.info(f"[code_chunker] source_dir={source_dir!r}")
 
     if not source_dir or not os.path.isdir(source_dir):

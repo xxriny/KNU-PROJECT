@@ -119,15 +119,23 @@ class EmbeddingOutput(BaseModel):
 
 class StackMapping(BaseModel):
     f_id: str = Field(description="Feature ID")
-    dom: str = Field(description="Domain (Frontend, Backend, etc)")
+    dom: str = Field(description="Domain (Frontend, Backend, DB)")
     pkg: str = Field(default="unknown", description="Package/Library name")
-    reason: str = Field(default="", description="Rationale")
-    status: str = Field(default="PENDING_CRAWL", description="APPROVED | PENDING_CRAWL")
+    ver: str = Field(default="", description="Detected version")
+    reason: str = Field(default="", description="Rationale/Evidence")
+    status: str = Field(default="APPROVED", description="APPROVED | PENDING_CRAWL")
     query: Optional[str] = Field(default=None, description="Crawler query")
+
+class GlobalStack(BaseModel):
+    name: str = Field(description="기술 스택/라이브러리 명칭")
+    version: str = Field(default="", description="버전 정보")
+    domain: str = Field(description="Frontend | Backend | Database | Infrastructure")
+    evidence: str = Field(description="근거 (파일명 또는 설정 파일 라인)")
 
 class StackPlannerOutput(BaseModel):
     th: str = Field(description="Thinking process")
-    m: List[StackMapping] = Field(default_factory=list, description="Stack mappings")
+    m: List[StackMapping] = Field(default_factory=list, description="Stack mappings (Linked to RTM)")
+    gs: List[GlobalStack] = Field(default_factory=list, description="Global Technology Inventory (Uncoupled from RTM)")
 
 # ── PM Analysis 산출물 (PM_BUNDLE) ─────────────────────────
 class RTMItem(BaseModel):

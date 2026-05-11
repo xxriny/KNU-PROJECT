@@ -181,11 +181,8 @@ def requirement_analyzer_node(state: PipelineState) -> Dict[str, Any]:
                         else:
                             formatted_items.append(name)
                             
-                    # 너무 많으면 요약
-                    if len(formatted_items) > 20:
-                        items_str = ", ".join(formatted_items[:20]) + f" ... (외 {len(formatted_items)-20}개 더 있음)"
-                    else:
-                        items_str = ", ".join(formatted_items)
+                    # [FIX] Remove item truncation to see ALL functions/classes for high precision
+                    items_str = ", ".join(formatted_items)
                         
                     inventory_lines.append(f"- {path}: [{items_str}]")
                 inventory_lines.append("</project_inventory>")
@@ -208,35 +205,58 @@ def requirement_analyzer_node(state: PipelineState) -> Dict[str, Any]:
                 queries.append("유틸리티 헬퍼 함수 공통 모듈 utility helper functions")
                 queries.append("미들웨어 보안 인증 필터 middleware auth security")
             
-            chunks: List[Dict[str, Any]] = []
-            seen_chunk_ids: set[str] = set()
+            # [HYBRID EXTRACTION]
+            # Priority 1: Deterministic Targeting (via Forensic Profiler)
+            from pipeline.domain.rag.nodes.project_db import get_file_chunks, query_project_code
             
-            # 검색량 및 상세도 최적화 (REVERSE 모드일 때 대폭 확대)
-            results_per_query = 10 if action_type == "REVERSE_ENGINEER" else 4
-            snippet_limit = 30 if action_type == "REVERSE_ENGINEER" else 10
+            seen_chunk_ids = set()
+            chunks = []
             
-            for q in queries:
-                try:
-                    results = query_project_code(q, session_id=rag_session_id, n_results=results_per_query)
-                except Exception as e:
-                    logger.warning(f"[requirement_analyzer] RAG 검색 실패 (q={q[:30]!r}): {e}")
-                    continue
-                for c in results:
+            # 1. ForensicProfiler 결과 활용
+            forensic_profile = sget("forensic_profile", {})
+            
+            target_files = []
+            if forensic_profile:
+                # [DYNAMIC] 핵심 도메인 로직이 담긴 모든 레이어를 타겟팅
+                target_files = [path for path, role in forensic_profile.items() if role in ("DB", "API", "SERVICE", "UI")]
+                logger.info(f"[requirement_analyzer] Priority 1 (Forensic): {len(target_files)} core domain files.")
+            else:
+                # [MINIMAL FALLBACK]
+                forensic_patterns = ["db", "model", "router", "handler", "service", "controller", "view", "page"]
+                target_files = [path for path in inventory.keys() if any(p in path.lower() for p in forensic_patterns)]
+            
+            for t_file in target_files:
+                direct_chunks = get_file_chunks(t_file, session_id=rag_session_id)
+                for c in direct_chunks:
                     cid = c.get("chunk_id")
                     if cid and cid not in seen_chunk_ids:
                         seen_chunk_ids.add(cid)
                         chunks.append(c)
+
+            # Priority 2: Semantic RAG Search (supplementary)
+            results_per_query = 10
+            for q in queries:
+                try:
+                    results = query_project_code(q, session_id=rag_session_id, n_results=results_per_query)
+                    for c in results:
+                        cid = c.get("chunk_id")
+                        if cid and cid not in seen_chunk_ids:
+                            seen_chunk_ids.add(cid)
+                            chunks.append(c)
+                except Exception as e:
+                    logger.warning(f"[requirement_analyzer] Semantic RAG failed: {e}")
             
             if chunks:
-                snippet_lines = ["<existing_system_analysis>"]
-                snippet_lines.append(f"RAG 검색을 통해 추출한 상세 코드 분석 (검색 결과 {len(chunks)}개 중 상위 {snippet_limit}개):")
-                for c in chunks[:snippet_limit]:
-                    sim = c.get("similarity", 0)
+                snippet_lines = ["<existing_system_analysis_forensic>"]
+                # [FIX] NO LIMITS: Ensure all forensic evidence is provided to LLM
+                final_limit = 1000 if action_type in ("UPDATE", "REVERSE_ENGINEER") else 50
+                for c in chunks[:final_limit]:
+                    sim = c.get("similarity", 1.0)
                     snippet_lines.append(
                         f"- {c.get('file_path', '')}::{c.get('func_name', '')} (sim={sim:.2f})\n"
-                        f"  {(c.get('content_text', '') or '')[:400]}"
+                        f"  {(c.get('content_text', '') or '')[:1000]}"
                     )
-                snippet_lines.append("</existing_system_analysis>")
+                snippet_lines.append("</existing_system_analysis_forensic>")
                 parts.append("\n".join(snippet_lines))
             
     user_content = "\n\n".join(parts)

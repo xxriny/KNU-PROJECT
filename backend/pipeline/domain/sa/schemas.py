@@ -16,6 +16,20 @@ class MergeProjectOutput(BaseModel):
     merge_strategy: str = Field(alias="ms")
 
 
+# ── Forensic Profiler ────────────────────────────────────
+
+class FileProfile(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    path: str = Field(alias="p")
+    role: str = Field(alias="r", description="DB|API|SERVICE|UI|STORE|CONFIG|UTIL")
+    reason: str = Field(alias="rs", default="")
+
+class ForensicProfilerOutput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    thinking: str = Field(alias="th", default="")
+    profiles: List[FileProfile] = Field(alias="pf")
+
+
 # ── Component Scheduler ─────────────────────────────────
 
 class ComponentDefinition(BaseModel):
@@ -36,19 +50,18 @@ class ComponentSchedulerOutput(BaseModel):
 
 class ApiDefinition(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
-    ep: str = Field(description="M /p")
-    req: str = Field(alias="rq", description="f:t,f:t")
-    res: str = Field(alias="rs", description="f:t|Ref(N)")
+    endpoint: str = Field(description="Method and Path (e.g., GET /api/user)")
+    request_schema: str = Field(alias="req", description="Detailed request parameters/types")
+    response_schema: str = Field(alias="res", description="Detailed response structure")
 
 class TableDefinition(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
-    name: str = Field(alias="nm")
-    cols: str = Field(alias="cl", description="n:t:pk,n:t:fk")
+    table_name: str = Field(alias="nm")
+    columns: str = Field(alias="cl", description="Detailed column definitions (name:type:constraints)")
 
 class SAUnifiedModelerOutput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
-    thinking: str = Field(alias="th", default="", description="단어 5개")
-    definitions: Dict[str, Any] = Field(alias="df", default_factory=dict)
+    thinking: str = Field(alias="th", default="", description="Technical rationale")
     apis: List[ApiDefinition] = Field(alias="ap")
     tables: List[TableDefinition] = Field(alias="tb")
 

@@ -209,4 +209,25 @@ def query_project_code(
             logger.warning(f"[PROJECT_DB] Query failed with model {model_name}: {e}")
             continue
             
-    return []
+def get_file_chunks(file_path: str, session_id: str) -> List[Dict[str, Any]]:
+    """특정 파일의 모든 청크를 유사도 검색 없이 정확하게 가져옵니다."""
+    collection = _get_collection()
+    try:
+        res = collection.get(
+            where={"$and": [{"session_id": session_id}, {"file_path": file_path}]},
+            include=["documents", "metadatas"]
+        )
+        results = []
+        for i in range(len(res.get("ids", []))):
+            meta = res["metadatas"][i]
+            results.append({
+                "chunk_id": res["ids"][i],
+                "file_path": meta.get("file_path", ""),
+                "func_name": meta.get("func_name", ""),
+                "content_text": res["documents"][i],
+                "similarity": 1.0,  # 직접 조성이므로 1.0
+            })
+        return results
+    except Exception as e:
+        logger.warning(f"[PROJECT_DB] get_file_chunks failed for {file_path}: {e}")
+        return []

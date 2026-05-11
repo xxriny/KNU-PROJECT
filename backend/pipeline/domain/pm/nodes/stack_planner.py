@@ -23,11 +23,17 @@ RECOVERY_PROMPT = """# Role: Strict Technology Forensic Auditor (Recovery Mode)
 ## [CRITICAL: Source of Truth - Configuration Files ONLY]
 **You must ONLY report technologies explicitly declared in the following files. NEVER guess.**
 1. **Frontend**: Audit `package.json`'s `dependencies`. 
-   - If a package is not there, do NOT report it. 
-   - (e.g., Even if there is a 'Tab' feature, do NOT report `react-tabs` unless it is in `package.json`.)
 2. **Backend**: Audit `requirements.txt` or `poetry.lock`.
-   - Record exact versions if available.
 3. **Internal Modules**: Use `pathlib`, `ast`, `os` ONLY if they are the primary tools for the feature.
+
+## [Uncoupled Technology Inventory (gs)]
+- **global_stacks (gs)**: This is your primary inventory. List EVERY package/library found in `package.json` or `requirements.txt` here. 
+- Do NOT limit this to what is mapped to RTM. If it's in the config file, it belongs in `gs`.
+- For each entry in `gs`, provide the exact file/line as `evidence`.
+
+## [Feature Mapping (m)]
+- Map RTM features to the technologies in `gs`. 
+- If a feature doesn't have a specific package, map it to the core language/framework (e.g., FastAPI, React).
 
 ## [No Guessing / No Beautification]
 - **Zero-Tolerance for Hallucination**: Reporting a package based on "typical use" (e.g., guessing `react-router` for navigation) without evidence in config files is a CRITICAL FAILURE.
@@ -59,6 +65,7 @@ OUTPUT_GUIDE = """
 ## Output Format (JSON)
 - **thinking (th)**: Analysis/Design rationale (Korean).
 - **stack_mapping (m)**: Map every feature ID (f_id) to the technology used/recommended.
+- **global_stacks (gs)**: List ALL technologies detected in the config files (uncoupled from RTM features).
 """
 
 def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
@@ -75,33 +82,57 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
     inventory = {}
     snippets_text = ""
     if action_type != "CREATE":
+        search_session_id = sget("session_id", run_id)
         try:
-            inventory = get_session_inventory(run_id)
+            inventory = get_session_inventory(search_session_id)
             
-            # [STRICT RAG SEARCH] dependencies 및 import 문구 강제 검색
-            from pipeline.domain.rag.nodes.project_db import query_project_code
-            queries = [
-                "requirements.txt dependencies version",
-                "package.json dependencies devDependencies",
-                "import FastAPI SQLAlchemy Pydantic",
-                "import React Zustand Monaco",
-                "chromadb PersistentClient Collection"
-            ]
-            all_chunks = []
+            # [HYBRID EXTRACTION]
+            # Priority 1: Deterministic Targeting (via Forensic Profiler)
+            from pipeline.domain.rag.nodes.project_db import get_file_chunks, query_project_code
+            
             seen_ids = set()
-            search_session_id = sget("session_id", run_id)
+            all_chunks = []
             
-            for q in queries:
-                res_chunks = query_project_code(q, session_id=search_session_id, n_results=10, api_key=sget("api_key", ""))
-                for c in res_chunks:
+            # 1. ForensicProfiler 결과 활용
+            forensic_profile = sget("forensic_profile", {})
+            
+            target_files = []
+            if forensic_profile:
+                # [DYNAMIC] CONFIG 및 DB 정보를 합쳐 기술 스택의 결정적 증거 확보
+                target_files = [path for path, role in forensic_profile.items() if role in ("CONFIG", "DB", "UTIL")]
+                logger.info(f"[stack_planner] Priority 1 (Forensic): {len(target_files)} config/db files.")
+            else:
+                # [MINIMAL FALLBACK]
+                config_patterns = ["package", "requirements", "lock", "docker", "setup", "pyproject"]
+                target_files = [path for path in inventory.keys() if any(p in path.lower() for p in config_patterns)]
+            
+            for t_file in target_files:
+                direct_chunks = get_file_chunks(t_file, session_id=search_session_id)
+                for c in direct_chunks:
                     cid = c.get("chunk_id")
                     if cid and cid not in seen_ids:
                         seen_ids.add(cid)
                         all_chunks.append(c)
+
+            # Priority 2: Semantic RAG Search (supplementary)
+            queries = ["requirements.txt dependencies version package.json", "database connection string config"]
+            for q in queries:
+                try:
+                    # [FIX] NO LIMITS: Increase n_results for update/reverse modes
+                    n_res = 50 if action_type in ("UPDATE", "REVERSE_ENGINEER") else 15
+                    res_chunks = query_project_code(q, session_id=search_session_id, n_results=n_res, api_key=sget("api_key", ""))
+                    for c in res_chunks:
+                        cid = c.get("chunk_id")
+                        if cid and cid not in seen_ids:
+                            seen_ids.add(cid)
+                            all_chunks.append(c)
+                except Exception as e:
+                    logger.warning(f"[stack_planner] Semantic RAG failed: {e}")
             
             if all_chunks:
                 lines = ["<source_code_dependency_evidence>"]
-                for c in all_chunks[:25]:
+                limit = 1000 if action_type in ("UPDATE", "REVERSE_ENGINEER") else 60
+                for c in all_chunks[:limit]:
                     lines.append(f"File: {c.get('file_path')}\nContent: {c.get('content_text', '')}")
                 lines.append("</source_code_dependency_evidence>")
                 snippets_text = "\n".join(lines)
@@ -128,7 +159,8 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
     if inventory:
         lines = ["<project_inventory>"]
         for p, items in sorted(inventory.items()):
-            lines.append(f"- {p}: {[it.get('name') for it in items[:5]]}")
+            # [FIX] Remove truncation to see all functions
+            lines.append(f"- {p}: {[it.get('name') for it in items]}")
         lines.append("</project_inventory>")
         inventory_str = "\n".join(lines)
 

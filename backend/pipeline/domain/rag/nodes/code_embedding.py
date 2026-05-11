@@ -30,6 +30,11 @@ def code_embedding_node(state: PipelineState) -> Dict[str, Any]:
     logger.info(f"[code_embedding] {len(raw_chunks)}개 청크 임베딩 시작 (model={MODEL_NAME})")
 
     if not raw_chunks:
+        # 이전 노드(code_chunker)에서 이미 인덱싱되어 스킵한 경우, 중복 로그를 피하기 위해 바로 반환
+        index_status = sget("rag_index_status") or {}
+        if index_status.get("has_index"):
+            return {"rag_ingest_output": RAGIngestOutput(session_id=session_id, chunks_ingested=0, status="skipped").model_dump()}
+
         output = RAGIngestOutput(session_id=session_id, chunks_ingested=0, status="empty")
         return {
             "rag_ingest_output": output.model_dump(),

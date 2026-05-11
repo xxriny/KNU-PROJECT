@@ -57,16 +57,19 @@ def _build_rag_context(action_type: str, input_idea: str, source_dir: str, sessi
 
     chunks: List[Dict[str, Any]] = []
     seen: set[str] = set()
+    
+    # [HYBRID EXTRACTION]
+    # Priority 2: Semantic RAG Search (supplementary)
     for q in queries:
         try:
             results = query_project_code(q, session_id=session_id, n_results=4)
-        except Exception:
-            continue
-        for c in results:
-            cid = c.get("chunk_id")
-            if cid and cid not in seen:
-                seen.add(cid)
-                chunks.append(c)
+            for c in results:
+                cid = c.get("chunk_id")
+                if cid and cid not in seen:
+                    seen.add(cid)
+                    chunks.append(c)
+        except Exception as e:
+            logger.warning(f"[merge_project] Semantic RAG failed: {e}")
 
     snippet_lines = [
         f"[{c.get('file_path', '')}::{c.get('func_name', '')}] {(c.get('content_text', '') or '')[:300]}"

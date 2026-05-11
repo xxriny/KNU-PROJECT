@@ -21,7 +21,6 @@ _SA_CHAIN = (
     "sa_merge_project",
     "component_scheduler",
     "sa_unified_modeler",
-    "sa_advisor",
     "sa_embedding",
 )
 
@@ -148,21 +147,18 @@ def _build_sa_pipeline():
     from pipeline.domain.sa.nodes.merge_project import sa_merge_project_node
     from pipeline.domain.sa.nodes.component_scheduler import component_scheduler_node
     from pipeline.domain.sa.nodes.sa_unified_modeler import sa_unified_modeler_node
-    from pipeline.domain.sa.nodes.sa_advisor import sa_advisor_node
     from pipeline.domain.sa.nodes.sa_embedding import sa_embedding_node
 
     workflow = StateGraph(PipelineState)
     workflow.add_node("sa_merge_project", sa_merge_project_node)
     workflow.add_node("component_scheduler", component_scheduler_node)
     workflow.add_node("sa_unified_modeler", sa_unified_modeler_node)
-    workflow.add_node("sa_advisor", sa_advisor_node)
     workflow.add_node("sa_embedding", sa_embedding_node)
 
     workflow.add_edge(START, "sa_merge_project")
     workflow.add_edge("sa_merge_project", "component_scheduler")
     workflow.add_edge("component_scheduler", "sa_unified_modeler")
-    workflow.add_edge("sa_unified_modeler", "sa_advisor")
-    workflow.add_edge("sa_advisor", "sa_embedding")
+    workflow.add_edge("sa_unified_modeler", "sa_embedding")
     workflow.add_edge("sa_embedding", END)
 
     return workflow.compile()
@@ -196,6 +192,7 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     """Full RAG-PM-SA pipeline."""
     from pipeline.domain.rag.nodes.code_chunker import code_chunker_node
     from pipeline.domain.rag.nodes.code_embedding import code_embedding_node
+    from pipeline.domain.sa.nodes.forensic_profiler import forensic_profiler_node
     from pipeline.domain.pm.nodes.requirement_analyzer import requirement_analyzer_node
     from pipeline.domain.pm.nodes.stack_retriever import stack_retriever_node
     from pipeline.domain.pm.nodes.stack_planner import stack_planner_node
@@ -203,13 +200,14 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     from pipeline.domain.sa.nodes.merge_project import sa_merge_project_node
     from pipeline.domain.sa.nodes.component_scheduler import component_scheduler_node
     from pipeline.domain.sa.nodes.sa_unified_modeler import sa_unified_modeler_node
-    from pipeline.domain.sa.nodes.sa_advisor import sa_advisor_node
     from pipeline.domain.sa.nodes.sa_embedding import sa_embedding_node
 
     workflow = StateGraph(PipelineState)
     # RAG Ingest
     workflow.add_node("code_chunker", code_chunker_node)
     workflow.add_node("code_embedding", code_embedding_node)
+    # Forensic (New)
+    workflow.add_node("forensic_profiler", forensic_profiler_node)
     # PM
     workflow.add_node("requirement_analyzer", requirement_analyzer_node)
     workflow.add_node("stack_retriever", stack_retriever_node)
@@ -219,21 +217,20 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     workflow.add_node("sa_merge_project", sa_merge_project_node)
     workflow.add_node("component_scheduler", component_scheduler_node)
     workflow.add_node("sa_unified_modeler", sa_unified_modeler_node)
-    workflow.add_node("sa_advisor", sa_advisor_node)
     workflow.add_node("sa_embedding", sa_embedding_node)
 
     # Edges
     workflow.add_edge(START, "code_chunker")
     workflow.add_edge("code_chunker", "code_embedding")
-    workflow.add_edge("code_embedding", "requirement_analyzer")
+    workflow.add_edge("code_embedding", "forensic_profiler")
+    workflow.add_edge("forensic_profiler", "requirement_analyzer")
     workflow.add_edge("requirement_analyzer", "stack_retriever")
     workflow.add_edge("stack_retriever", "stack_planner")
     workflow.add_edge("stack_planner", "pm_embedding")
     workflow.add_edge("pm_embedding", "sa_merge_project")
     workflow.add_edge("sa_merge_project", "component_scheduler")
     workflow.add_edge("component_scheduler", "sa_unified_modeler")
-    workflow.add_edge("sa_unified_modeler", "sa_advisor")
-    workflow.add_edge("sa_advisor", "sa_embedding")
+    workflow.add_edge("sa_unified_modeler", "sa_embedding")
     workflow.add_edge("sa_embedding", END)
 
     return workflow.compile()
