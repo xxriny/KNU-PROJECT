@@ -159,6 +159,15 @@ class _DevFields(TypedDict, total=False):
     pm_overview: dict
     sa_overview: dict
     sa_artifacts: dict
+    sa_bundle: dict
+    current_feature_id: str
+    development_request_feature: dict
+    dev_feature_queue: list
+    dev_feature_status: dict
+    completed_feature_ids: list
+    blocked_feature_ids: list
+    dev_feature_completion: dict
+    integration_feedback: dict
     develop_goal: str
     project_rag_context: dict
     artifact_rag_context: dict
