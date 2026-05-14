@@ -88,10 +88,10 @@ def pipeline_node(node_name: str):
                 if new_logs:
                     for log in new_logs:
                         log["node"] = node_name
-                    
+
                     existing_usage = state.get("accumulated_usage", []) or []
                     result["accumulated_usage"] = existing_usage + new_logs
-                    
+
                     existing_cost = state.get("accumulated_cost", 0.0) or 0.0
                     node_cost = sum(log["cost"] - log.get("savings", 0.0) for log in new_logs)
                     result["accumulated_cost"] = max(0.0, existing_cost + node_cost)
@@ -106,6 +106,22 @@ def pipeline_node(node_name: str):
                 # 5. 다음 스텝 설정
                 if "current_step" not in result:
                     result["current_step"] = f"{node_name}_done"
+
+                try:
+                    from pipeline.domain.dev.message_contracts import attach_dev_contract_outputs
+
+                    contract_outputs = attach_dev_contract_outputs(state, result, node_name)
+                    for key, value in contract_outputs.items():
+                        result.setdefault(key, value)
+                except Exception as contract_error:
+                    logger.exception(
+                        f"[FAILED] Dev contract output: {node_name}",
+                        error=str(contract_error),
+                    )
+                    result.setdefault("project_state_updates", []).append({
+                        "node": node_name,
+                        "error": f"PROJECT_STATE_UPDATE_FAILED: {contract_error}",
+                    })
 
                 logger.info(f"[SUCCESS] Node: {node_name}", cost=f"${node_cost:.4f}")
                 return result

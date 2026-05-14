@@ -42,6 +42,33 @@ def _sum_cost(existing, new):
     return (existing or 0.0) + (new or 0.0)
 
 
+def _merge_dev_message_logs(existing, new):
+    """Merge dev pipeline message logs across graph nodes."""
+    if not isinstance(existing, list):
+        existing = []
+    if not isinstance(new, list):
+        new = []
+    return existing + new
+
+
+def _merge_project_state_updates(existing, new):
+    """Append incremental project-state patches in execution order."""
+    if not isinstance(existing, list):
+        existing = []
+    if not isinstance(new, list):
+        new = []
+    return existing + new
+
+
+def _merge_project_state(existing, new):
+    """Overlay project-state snapshots while keeping the latest values."""
+    if not isinstance(existing, dict):
+        existing = {}
+    if not isinstance(new, dict):
+        new = {}
+    return {**existing, **new}
+
+
 # ── 기본 상태 (모든 모드 공통) ───────────────────
 
 class _BaseState(TypedDict):
@@ -78,6 +105,7 @@ class _AnalysisFields(TypedDict, total=False):
     session_id: str                  # source_dir 해시 기반 RAG 영속 키 (run_id와 별개)
     rag_index_status: dict           # {"has_index": bool, "chunk_count": int, "session_id": str}
     rag_warnings: list               # [{"code": "...", "message": "..."}] 사용자 알림 배너
+    system_scan: dict                  # 기존 코드 구조 분석 결과
     sa_phase2: dict                  # 영향도 분석 결과
     sa_phase3: dict                  # 기술 타당성 결과
     sa_phase4: dict                  # 의존성 샌드박스 검증 결과
@@ -140,9 +168,95 @@ class _RAGFields(TypedDict, total=False):
     rag_query_result: list           # RAGQueryResult dict 목록 (code_retriever 산출물)
 
 
-# ── 통합 상태 (하위 호환) ───────────────────────
+# ── dev pipeline 상태 확장 ───────────────────────
 
-class PipelineState(_BaseState, _AnalysisFields, _ChatFields, _IdeaFields, _RAGFields, total=False):
+class _DevFields(TypedDict, total=False):
+    # Dev pipeline request / codegen controls
+    development_request: str
+    source_session_id: str
+    enable_backend_codegen: bool
+    backend_codegen_language: str
+    backend_codegen_framework: str
+    backend_codegen_mode: str
+    enable_frontend_codegen: bool
+    frontend_codegen_language: str
+    frontend_codegen_framework: str
+    frontend_codegen_mode: str
+    enable_dependency_install: bool
+
+    # Inputs collected from upstream analysis / planning steps
+    components: list
+    apis: list
+    tables: list
+    project_overview: dict
+    pm_overview: dict
+    sa_overview: dict
+    sa_artifacts: dict
+    sa_bundle: dict
+    current_feature_id: str
+    development_request_feature: dict
+    dev_feature_queue: list
+    dev_feature_status: dict
+    completed_feature_ids: list
+    blocked_feature_ids: list
+    dev_feature_completion: dict
+    integration_feedback: dict
+    develop_goal: str
+    project_rag_context: dict
+    artifact_rag_context: dict
+    develop_main_plan: dict
+
+    # Task-level execution outputs
+    uiux_task_spec: dict
+    backend_task_spec: dict
+    frontend_task_spec: dict
+    uiux_result: dict
+    uiux_artifact: dict
+    backend_result: dict
+    frontend_result: dict
+    frontend_codegen_result: dict
+    frontend_codegen_verification: dict
+    frontend_codegen_repair_result: dict
+    frontend_codegen_reverify_result: dict
+    uiux_qa_result: dict
+    backend_qa_result: dict
+    frontend_qa_result: dict
+    uiux_domain_gate_result: dict
+    backend_domain_gate_result: dict
+    backend_codegen_result: dict
+    backend_codegen_verification: dict
+    backend_codegen_repair_result: dict
+    backend_codegen_reverify_result: dict
+    frontend_domain_gate_result: dict
+    global_fe_sync_result: dict
+    fullstack_runtime_verification: dict
+    integration_qa_result: dict
+    branch_pr_result: dict
+    embedding_result: dict
+    dev_fallback_result: dict
+    sa_review_request: dict
+
+    # Retry / routing / audit state
+    develop_next_action: str
+    develop_loop_count: int
+    global_fe_sync_retry_count: int
+    develop_integration_rework_count: int
+    develop_rework_targets: list
+    uiux_retry_count: int
+    backend_retry_count: int
+    frontend_retry_count: int
+
+    # Aggregated logs and project-state patches emitted by nodes
+    dev_message_log: Annotated[list, _merge_dev_message_logs]
+    project_state: Annotated[dict, _merge_project_state]
+    project_state_updates: Annotated[list, _merge_project_state_updates]
+    dev_task_plan: dict
+    dev_impact_output: dict
+    dev_solution_output: dict
+    dev_patch_plan: dict
+
+
+class PipelineState(_BaseState, _AnalysisFields, _ChatFields, _IdeaFields, _RAGFields, _DevFields, total=False):
     """LangGraph 파이프라인 공유 상태 — 모든 모드의 합집합.
 
     개별 모드가 사용하는 필드는 _AnalysisFields, _ChatFields, _IdeaFields를 참조.

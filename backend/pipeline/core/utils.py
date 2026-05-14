@@ -19,7 +19,6 @@ from pipeline.core.models.gemini_model import get_gemini_client, get_raw_genai_c
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from pipeline.core.cost_manager import calculate_cost
-from pipeline.core.compressor import get_compressor
 from version import DEFAULT_MODEL, DEFAULT_TEMPERATURE, MAX_LLM_RETRIES
 
 T = TypeVar("T", bound=BaseModel)
@@ -149,6 +148,8 @@ def call_structured(
 ) -> LLMResult[T]:
     """Unified structured output: parsed result, usage metadata, and thinking."""
     if compress_prompt:
+        from pipeline.core.compressor import get_compressor
+
         user_msg = get_compressor().compress_with_preservation(user_msg, target_token_rate=compression_rate)
         logger.info(f"[PromptCompressor] Compressed with rate {compression_rate}")
 

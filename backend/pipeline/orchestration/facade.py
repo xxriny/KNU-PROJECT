@@ -18,6 +18,12 @@ from pipeline.orchestration.aux_graphs import (
     get_idea_pipeline,
     get_idea_chat_routing_map,
 )
+# Dev pipeline lives in its own module so the public facade can expose it
+# without coupling it to the PM/SA/analysis graph families.
+from pipeline.orchestration.dev_graphs import (
+    get_develop_pipeline,
+    get_develop_routing_map,
+)
 from pipeline.orchestration.rag_graph import (
     get_rag_ingest_pipeline,
     get_rag_query_pipeline,
@@ -31,6 +37,8 @@ __all__ = [
     "get_sa_pipeline",
     "get_pm_routing_map",
     "get_sa_routing_map",
+    "get_develop_pipeline",
+    "get_develop_routing_map",
     "get_idea_pipeline",
     "get_idea_chat_routing_map",
     "get_rag_ingest_pipeline",
