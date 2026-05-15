@@ -18,7 +18,14 @@ def _merge_thinking_logs(existing_logs, new_logs):
         existing_logs = []
     if not isinstance(new_logs, list):
         new_logs = []
-    return existing_logs + new_logs
+    # Some legacy nodes return the full prior log plus a new entry. LangGraph
+    # reducers also receive the prior value, so blindly concatenating causes
+    # exponential growth across long devpipeline runs.
+    if existing_logs and new_logs[: len(existing_logs)] == existing_logs:
+        merged = new_logs
+    else:
+        merged = existing_logs + new_logs
+    return merged[-200:]
 
 
 def _keep_last_step(existing_step, new_step):
