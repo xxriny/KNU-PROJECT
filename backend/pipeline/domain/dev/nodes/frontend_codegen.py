@@ -311,6 +311,24 @@ def _generated_api_types(plan: dict) -> str:
     return "\n".join(lines)
 
 
+def _contract_registry(uiux_artifact: dict, frontend_plan: dict) -> str:
+    handoff = uiux_artifact.get("frontend_handoff") or {}
+    routes = frontend_plan.get("routes") or handoff.get("routes") or []
+    api_client_needs = frontend_plan.get("api_client_needs") or handoff.get("api_client_needs") or []
+    data_contracts = frontend_plan.get("data_contracts") or handoff.get("data_contracts") or []
+    screens = frontend_plan.get("screen_bindings") or uiux_artifact.get("screens") or []
+    return "\n".join([
+        "export const generatedRoutes = " + json.dumps(routes, ensure_ascii=False, indent=2) + " as const;",
+        "",
+        "export const generatedApiClientNeeds = " + json.dumps(api_client_needs, ensure_ascii=False, indent=2) + " as const;",
+        "",
+        "export const generatedDataContracts = " + json.dumps(data_contracts, ensure_ascii=False, indent=2) + " as const;",
+        "",
+        "export const generatedScreens = " + json.dumps(screens, ensure_ascii=False, indent=2) + " as const;",
+        "",
+    ])
+
+
 def _query_client() -> str:
     return "\n".join([
         "import { QueryClient } from '@tanstack/react-query';",
@@ -641,6 +659,7 @@ def _template_files(uiux_artifact: dict, frontend_plan: dict) -> tuple[str, list
         ("src/api/generated.ts", _generated_api_types(frontend_plan)),
         ("src/api/queryClient.ts", _query_client()),
         ("src/api/hooks.ts", _query_hooks(frontend_plan)),
+        ("src/generated-contracts.ts", _contract_registry(uiux_artifact, frontend_plan)),
         ("src/state/uiMachine.ts", _fsm_store()),
         ("src/vite-env.d.ts", _vite_env()),
         ("tests/App.test.tsx", _test_tsx()),
@@ -783,6 +802,7 @@ def _normalize_frontend_files(generated_files: list[tuple[str, str]], template_f
         "src/api/generated.ts",
         "src/api/hooks.ts",
         "src/api/queryClient.ts",
+        "src/generated-contracts.ts",
         "src/vite-env.d.ts",
     }
 
