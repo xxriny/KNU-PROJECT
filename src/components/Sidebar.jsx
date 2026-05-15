@@ -33,9 +33,16 @@ export default function Sidebar() {
     selectAndScanFolder,
     isDarkMode,
     toggleDarkMode,
+    startDevelop,
+    pipelineStatus,
+    resultData,
   } = useAppStore();
 
   const [showSettings, setShowSettings] = useState(false);
+
+  const handleRunDev = () => {
+    startDevelop(apiKey, model);
+  };
 
   return (
     <div className="h-full flex flex-col bg-transparent border-r border-[var(--border)] text-[15px] transition-colors duration-300">
@@ -64,6 +71,22 @@ export default function Sidebar() {
             <FileTreeNode nodes={fileTree} depth={0} />
           )}
         </div>
+      </div>
+
+      {/* ── 개발 파이프라인 (임시 UI) ───── */}
+      <div className="p-3 border-t border-[var(--border)]">
+        <button
+          onClick={handleRunDev}
+          disabled={pipelineStatus === "running" || !resultData}
+          className={`w-full py-2 px-4 flex items-center justify-center gap-2 rounded text-sm font-semibold transition-colors ${
+            pipelineStatus === "running" || !resultData
+              ? "bg-slate-700/50 text-slate-500 cursor-not-allowed"
+              : "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20"
+          }`}
+        >
+          <Cpu size={16} />
+          {pipelineStatus === "running" ? "실행 중..." : "Dev 파이프라인 실행"}
+        </button>
       </div>
     </div>
   );

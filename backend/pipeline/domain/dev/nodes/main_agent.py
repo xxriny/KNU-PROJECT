@@ -88,9 +88,9 @@ def _requirement_trace_tokens(req: dict) -> set[str]:
 
 def _component_trace_requirement_ids(components: list[dict]) -> set[str]:
     traced: set[str] = set()
-    for component in components:
-        traced.update(str(req_id) for req_id in component.get("rtms", []) if str(req_id).strip())
-        traced.update(str(req_id) for req_id in component.get("rt", []) if str(req_id).strip())
+    for component in (components or []):
+        traced.update(str(req_id) for req_id in (component.get("rtms", []) or []) if str(req_id).strip())
+        traced.update(str(req_id) for req_id in (component.get("rt", []) or []) if str(req_id).strip())
     return traced
 
 
@@ -185,6 +185,11 @@ def _load_project_rag_context(goal: str, source_session_id: str, requirements: l
             "chunks": [],
             "error": str(exc),
         }
+
+    # Ensure chunks is a list before calling len()
+    if not isinstance(chunks, list):
+        chunks = []
+
     return {
         "session_id": source_session_id,
         "query": query_text,
@@ -197,6 +202,7 @@ def _load_project_rag_context(goal: str, source_session_id: str, requirements: l
                 "content_preview": str(item.get("content_text", ""))[:MAX_MAIN_AGENT_PROJECT_PREVIEW_CHARS],
             }
             for item in chunks
+            if isinstance(item, dict)
         ],
     }
 
@@ -598,12 +604,18 @@ def develop_main_agent_node(ctx: NodeContext) -> dict:
         uiux_requirement_ids = fallback_requirement_ids(requirements, limit=6)
     if not frontend_requirement_ids:
         frontend_requirement_ids = fallback_requirement_ids(requirements, limit=6)
+    
+    print(f"DEBUG: goal={type(goal)} {goal}")
+    print(f"DEBUG: source_session_id={type(source_session_id)} {source_session_id}")
+    print(f"DEBUG: prompt_requirements={type(prompt_requirements)} len={len(prompt_requirements) if prompt_requirements is not None else 'NONE'}")
+    print(f"DEBUG: components={type(components)} len={len(components) if components is not None else 'NONE'}")
+
     project_rag_context = _load_project_rag_context(goal, source_session_id, prompt_requirements, components)
     project_rag_context.update({
         "source_dir": source_dir,
-        "component_count": len(components),
-        "api_count": len(apis),
-        "table_count": len(tables),
+        "component_count": len(components or []),
+        "api_count": len(apis or []),
+        "table_count": len(tables or []),
         "components": component_names,
     })
     artifact_rag_context = _load_artifact_rag_context(source_session_id)

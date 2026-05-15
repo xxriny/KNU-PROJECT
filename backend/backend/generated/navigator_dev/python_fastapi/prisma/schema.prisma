@@ -1,0 +1,1 @@
+datasource db { provider = "postgresql" url = env("DATABASE_URL") } generator client { provider = "prisma-client-py" } model posts { id String @id @default(uuid()) title String content String created_at DateTime @default(now()) updated_at DateTime @default(now()) }

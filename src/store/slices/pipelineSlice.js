@@ -143,6 +143,30 @@ export const createPipelineSlice = (set, get) => ({
     });
   },
 
+  startDevelop: (apiKey = "", model = "gemini-3.1-flash-lite-preview") => {
+    const sourceDir = get().projectFolder || "";
+    set({
+      pipelineStatus: "running",
+      pipelineError: null,
+      pipelineNodes: {},
+      thinkingLog: [],
+      pipelineType: "develop_plan",
+      activeViewportTab: { kind: "output", id: "progress" },
+      lastOutputTab: "progress",
+    });
+    get().sendWsMessage("develop", {
+      development_request: get().chatInput || "Execute Development Pipeline",
+      previous_result: get().resultData || {},
+      source_dir: sourceDir,
+      api_key: apiKey,
+      model: model,
+      enable_backend_codegen: true,
+      enable_frontend_codegen: true,
+      enable_dependency_install: true,
+      enable_runtime_verification: true,
+    });
+  },
+
   resetPipeline: () => set((state) => ({
     pipelineStatus: "idle",
     pipelineError: null,

@@ -208,6 +208,7 @@ def query_project_code(
         except Exception as e:
             logger.warning(f"[PROJECT_DB] Query failed with model {model_name}: {e}")
             continue
+    return []
             
 def get_file_chunks(file_path: str, session_id: str) -> List[Dict[str, Any]]:
     """특정 파일의 모든 청크를 유사도 검색 없이 정확하게 가져옵니다."""

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -91,8 +91,11 @@ def _cmd_name(name: str) -> str:
     return f"{name}.cmd" if os.name == "nt" else name
 
 
-def _run_check(name: str, command: list[str], cwd: Path, timeout: int = 120) -> BackendCodegenVerificationCheck:
+def _run_check(name: str, command: list[str], cwd: Path, timeout: int = 120, env: dict[str, str] | None = None) -> BackendCodegenVerificationCheck:
     try:
+        full_env = os.environ.copy()
+        if env:
+            full_env.update(env)
         completed = subprocess.run(
             command,
             cwd=cwd,
@@ -102,6 +105,7 @@ def _run_check(name: str, command: list[str], cwd: Path, timeout: int = 120) -> 
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            env=full_env,
         )
     except FileNotFoundError as exc:
         return BackendCodegenVerificationCheck(
@@ -427,7 +431,39 @@ def _node_checks(output_dir: Path, *, enable_dependency_install: bool = False) -
     )
 
 
-def _python_checks(output_dir: Path) -> BackendCodegenVerificationResult:
+def _install_python_dependencies(output_dir: Path) -> BackendCodegenVerificationCheck:
+    return _run_check("pip_install", [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], output_dir, timeout=300)
+
+
+def _python_checks(output_dir: Path, *, enable_dependency_install: bool = False) -> BackendCodegenVerificationResult:
+    install_plan: list[dict[str, Any]] = []
+    install_result: dict[str, Any] = {}
+
+    requirements = output_dir / "requirements.txt"
+    if requirements.is_file():
+        install_plan = [{
+            "manager": "pip",
+            "command": "pip install -r requirements.txt",
+            "cwd": str(output_dir),
+            "manifest": str(requirements),
+            "reason": "requirements.txt found",
+            "requires_user_approval": True,
+        }]
+        if enable_dependency_install:
+            install_check = _install_python_dependencies(output_dir)
+            install_result = install_check.model_dump()
+            if install_check.status != "passed":
+                return BackendCodegenVerificationResult(
+                    status="failed",
+                    output_dir=str(output_dir),
+                    checks=[install_check],
+                    failed_checks=["pip_install"],
+                    failure_type="dependency_install_failed",
+                    next_actions=["Inspect pip install output and rerun verification."],
+                    dependency_install_plan=install_plan,
+                    dependency_install_result=install_result,
+                )
+
     checks: list[BackendCodegenVerificationCheck] = []
     python_files = [path for path in output_dir.rglob("*.py") if "__pycache__" not in path.parts]
     compile_errors: list[str] = []
@@ -447,7 +483,15 @@ def _python_checks(output_dir: Path) -> BackendCodegenVerificationResult:
 
     tests_dir = output_dir / "tests"
     if tests_dir.is_dir():
-        checks.append(_run_check("pytest", [sys.executable, "-m", "pytest", "tests", "-q"], output_dir))
+        env = {"PYTHONPATH": str(output_dir)}
+        checks.append(_run_check("pytest", [sys.executable, "-m", "pytest", "tests", "-q"], output_dir, env=env))
+
+    return _result_from_checks(
+        output_dir=output_dir,
+        checks=checks,
+        dependency_install_plan=install_plan,
+        dependency_install_result=install_result,
+    )
 
     failed = [check.name for check in checks if check.status == "failed"]
     return BackendCodegenVerificationResult(
@@ -779,7 +823,7 @@ def develop_backend_codegen_verifier_node(ctx: NodeContext) -> dict:
     framework = str(codegen.get("framework") or "").lower()
     verifier = _select_verifier(language, framework, output_dir)
     if verifier:
-        result = verifier(output_dir, enable_dependency_install=bool(ctx.sget("enable_dependency_install", False))) if verifier is _node_checks else verifier(output_dir)
+        result = verifier(output_dir, enable_dependency_install=bool(ctx.sget("enable_dependency_install", False))) if verifier in {_node_checks, _python_checks} else verifier(output_dir)
     else:
         result = BackendCodegenVerificationResult(
             status="skipped",
