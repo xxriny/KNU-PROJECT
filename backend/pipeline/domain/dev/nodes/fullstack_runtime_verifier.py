@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
 import subprocess
 import time
 import urllib.error
@@ -22,6 +23,40 @@ class ApiProbe:
 
 def _cmd_name(name: str) -> str:
     return f"{name}.cmd" if os.name == "nt" else name
+
+
+def _is_port_available(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _select_runtime_port(env_name: str, default_port: int, *, reserved: set[int] | None = None) -> tuple[int, str]:
+    reserved = reserved or set()
+    raw = os.environ.get(env_name, "").strip()
+    try:
+        preferred = int(raw) if raw else default_port
+    except ValueError:
+        preferred = default_port
+
+    if preferred not in reserved and _is_port_available(preferred):
+        return preferred, ""
+
+    for _ in range(20):
+        candidate = _free_port()
+        if candidate not in reserved and _is_port_available(candidate):
+            return candidate, f"{env_name or 'runtime port'}={preferred} was unavailable; selected {candidate}."
+    return preferred, f"Could not find an available replacement port for {env_name}; using {preferred}."
 
 
 def _selected_domains(ctx: NodeContext) -> set[str]:
@@ -207,10 +242,10 @@ def _start_backend(output_dir: Path, port: int) -> tuple[subprocess.Popen[str] |
     if _npm_runnable_package_path(output_dir):
         package = _load_package(output_dir)
         scripts = package.get("scripts") or {}
-        if "start" in scripts:
-            command = [_cmd_name("npm"), "start"]
-        elif "dev" in scripts:
+        if "dev" in scripts:
             command = [_cmd_name("npm"), "run", "dev"]
+        elif "start" in scripts:
+            command = [_cmd_name("npm"), "start"]
         else:
             return None, "No backend package start/dev script was found."
 
@@ -447,10 +482,18 @@ def develop_fullstack_runtime_verifier_node(ctx: NodeContext) -> dict:
                 "_thinking": "runtime-preflight-failed",
             }
 
-    backend_port = int(os.environ.get("NAVIGATOR_SMOKE_BACKEND_PORT", "3000"))
-    frontend_port = int(os.environ.get("NAVIGATOR_SMOKE_FRONTEND_PORT", "5173"))
+    backend_port, backend_port_note = _select_runtime_port("NAVIGATOR_SMOKE_BACKEND_PORT", 3000)
+    frontend_port, frontend_port_note = _select_runtime_port(
+        "NAVIGATOR_SMOKE_FRONTEND_PORT",
+        5173,
+        reserved={backend_port},
+    )
     backend_url = f"http://127.0.0.1:{backend_port}"
     frontend_url = f"http://127.0.0.1:{frontend_port}"
+    if backend_port_note:
+        checks.append({"name": "backend_port_selection", "status": "passed", "details": backend_port_note, "port": backend_port})
+    if frontend_port_note:
+        checks.append({"name": "frontend_port_selection", "status": "passed", "details": frontend_port_note, "port": frontend_port})
     probes = _extract_api_probes(ctx)
     backend_process: subprocess.Popen[str] | None = None
     frontend_process: subprocess.Popen[str] | None = None
@@ -474,7 +517,10 @@ def develop_fullstack_runtime_verifier_node(ctx: NodeContext) -> dict:
         ok, reason, backend_probe = _wait_for_backend(backend_url, probes)
         checks.append({"name": "backend_http", "status": "passed" if ok else "failed", "url": backend_url, "probe": backend_probe})
         if not ok:
-            findings.append(reason or _exit_reason("backend", backend_process) or "Backend did not respond.")
+            exit_reason = _exit_reason("backend", backend_process)
+            if exit_reason:
+                checks.append({"name": "backend_process", "status": "failed", "details": exit_reason})
+            findings.append(exit_reason or reason or "Backend did not respond.")
 
         if not findings:
             frontend_process, reason = _start_frontend(frontend_dir, frontend_port, backend_url)
@@ -485,7 +531,10 @@ def develop_fullstack_runtime_verifier_node(ctx: NodeContext) -> dict:
                 ok, reason, body = _wait_for_text(frontend_url)
                 checks.append({"name": "frontend_http", "status": "passed" if ok else "failed", "url": frontend_url})
                 if not ok:
-                    findings.append(reason or _exit_reason("frontend", frontend_process) or "Frontend did not respond.")
+                    exit_reason = _exit_reason("frontend", frontend_process)
+                    if exit_reason:
+                        checks.append({"name": "frontend_process", "status": "failed", "details": exit_reason})
+                    findings.append(exit_reason or reason or "Frontend did not respond.")
                 elif "<html" not in body.lower() and "root" not in body.lower():
                     findings.append("Frontend responded, but the response did not look like the generated app shell.")
                     checks[-1]["status"] = "failed"
