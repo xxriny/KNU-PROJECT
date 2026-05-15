@@ -6,9 +6,7 @@ from typing import Any
 
 from pipeline.core.node_base import NodeContext, pipeline_node
 from pipeline.domain.dev.nodes._shared import get_goal, slugify
-from pipeline.domain.pm.nodes.pm_db import upsert_pm_artifact
 from pipeline.domain.rag.nodes.code_chunker import _process_file
-from pipeline.domain.rag.nodes.project_db import upsert_code_chunk
 
 
 def _artifact_envelope(
@@ -237,6 +235,7 @@ def develop_embedding_node(ctx: NodeContext) -> dict:
     for chunk in project_chunks:
         try:
             from pipeline.domain.rag.schemas import CodeChunk
+            from pipeline.domain.rag.nodes.project_db import upsert_code_chunk
 
             stored_id = upsert_code_chunk(
                 source_session_id,
@@ -257,6 +256,8 @@ def develop_embedding_node(ctx: NodeContext) -> dict:
         artifact_type = document["type"]
         chunk_id = f"dev_{source_session_id}_{goal_slug}_{index:02d}_{artifact_type.lower()}"
         try:
+            from pipeline.domain.pm.nodes.pm_db import upsert_pm_artifact
+
             stored_id = upsert_pm_artifact(
                 session_id=source_session_id,
                 artifact_data=_artifact_envelope(ctx, artifact_type, document["content"]),

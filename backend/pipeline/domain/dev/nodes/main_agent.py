@@ -30,8 +30,6 @@ from pipeline.domain.dev.nodes._shared import (
     slugify,
 )
 from pipeline.domain.dev.schemas import MainAgentPlanningOutput
-from pipeline.domain.pm.nodes.pm_db import _get_collection as _get_artifact_collection
-from pipeline.domain.rag.nodes.project_db import query_project_code
 
 MAX_MAIN_AGENT_REQUIREMENTS = 8
 MAX_MAIN_AGENT_COMPONENTS = 6
@@ -172,6 +170,8 @@ def _merge_requirement_lists(*lists: list[dict]) -> list[dict]:
 def _load_project_rag_context(goal: str, source_session_id: str, requirements: list[dict], components: list[dict]) -> dict:
     query_text = _build_project_query(goal, requirements, components)
     try:
+        from pipeline.domain.rag.nodes.project_db import query_project_code
+
         chunks = query_project_code(
             query_text,
             session_id=source_session_id or None,
@@ -246,6 +246,8 @@ def _load_artifact_rag_context(source_session_id: str) -> dict:
             "artifact_count": 0,
             "artifacts": [],
         }
+
+    from pipeline.domain.pm.nodes.pm_db import _get_collection as _get_artifact_collection
 
     collection = _get_artifact_collection()
     results = collection.get(where={"session_id": source_session_id})

@@ -24,11 +24,24 @@ from pipeline.orchestration.dev_graphs import (
     get_develop_pipeline,
     get_develop_routing_map,
 )
-from pipeline.orchestration.rag_graph import (
-    get_rag_ingest_pipeline,
-    get_rag_query_pipeline,
-    get_rag_routing_map,
-)
+
+
+def get_rag_ingest_pipeline():
+    from pipeline.orchestration.rag_graph import get_rag_ingest_pipeline as _impl
+
+    return _impl()
+
+
+def get_rag_query_pipeline():
+    from pipeline.orchestration.rag_graph import get_rag_query_pipeline as _impl
+
+    return _impl()
+
+
+def get_rag_routing_map():
+    from pipeline.orchestration.rag_graph import get_rag_routing_map as _impl
+
+    return _impl()
 
 __all__ = [
     "get_analysis_pipeline",
