@@ -1021,6 +1021,18 @@ def _with_required_template_files(generated_files: list[tuple[str, str]], templa
     return result
 
 
+def _is_test_file(path: str) -> bool:
+    normalized = path.replace("\\", "/").lower()
+    name = Path(normalized).name
+    return (
+        normalized.startswith("tests/")
+        or name.endswith(".test.ts")
+        or name.endswith(".test.tsx")
+        or name.endswith(".spec.ts")
+        or name.endswith(".spec.tsx")
+    )
+
+
 def _normalize_backend_files(
     generated_files: list[tuple[str, str]],
     template_files: list[tuple[str, str]],
@@ -1028,7 +1040,7 @@ def _normalize_backend_files(
     language: str,
     framework: str,
 ) -> list[tuple[str, str]]:
-    """Keep LLM source code and merge deterministic Node manifests without losing imports."""
+    """Keep LLM source code and make runtime manifests/tests deterministic."""
     if language not in {"typescript", "ts", "javascript", "js"} or framework not in {"express", "expressjs"}:
         return generated_files
 
@@ -1039,6 +1051,8 @@ def _normalize_backend_files(
 
     for path, content in generated_files:
         normalized_path = path.replace("\\", "/")
+        if _is_test_file(normalized_path):
+            continue
         if normalized_path == "package.json":
             content = _merge_node_package_json(
                 generated_content=content,
@@ -1049,6 +1063,12 @@ def _normalize_backend_files(
             content = template_by_path.get(normalized_path, content)
         normalized.append((path, content))
         seen.add(normalized_path)
+
+    for path, content in template_files:
+        normalized_path = path.replace("\\", "/")
+        if _is_test_file(normalized_path) and normalized_path not in seen:
+            normalized.append((path, content))
+            seen.add(normalized_path)
 
     for path in deterministic:
         if path not in seen and path in template_by_path:

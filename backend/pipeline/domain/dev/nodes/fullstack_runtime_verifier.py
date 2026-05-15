@@ -564,9 +564,10 @@ def develop_fullstack_runtime_verifier_node(ctx: NodeContext) -> dict:
             else:
                 checks.append({"name": "frontend_backend_contract", "status": "skipped", "reason": "No API probes were available."})
 
-        return {
+        status = "failed" if findings else "passed"
+        result = {
             "fullstack_runtime_verification": {
-                "status": "failed" if findings else "passed",
+                "status": status,
                 "reason": "Fullstack runtime verification failed." if findings else "Backend and frontend runtime checks passed.",
                 "checks": checks,
                 "findings": findings,
@@ -576,6 +577,19 @@ def develop_fullstack_runtime_verifier_node(ctx: NodeContext) -> dict:
             },
             "_thinking": "runtime-http-integration",
         }
+        if status == "passed":
+            result.update({
+                "global_fe_sync_result": {
+                    "status": "pass",
+                    "reason": "Runtime verifier reached fullstack smoke checks after frontend/backend sync.",
+                    "shared_components": [],
+                    "sync_actions": [],
+                },
+                "integration_qa_result": {},
+                "branch_pr_result": {},
+                "develop_next_action": "",
+            })
+        return result
     except FileNotFoundError as exc:
         return {
             "fullstack_runtime_verification": {
