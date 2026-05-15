@@ -770,7 +770,7 @@ def _frontend_smoke_test_files(template_files: list[tuple[str, str]]) -> list[tu
 
 
 def _normalize_frontend_files(generated_files: list[tuple[str, str]], template_files: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    """Keep LLM app code, but make Vite/Vitest manifests and tests deterministic."""
+    """Keep LLM app code, but make runtime and SA API contract files deterministic."""
     template_by_path = {path.replace("\\", "/"): content for path, content in template_files}
     normalized: list[tuple[str, str]] = []
     seen: set[str] = set()
@@ -778,6 +778,11 @@ def _normalize_frontend_files(generated_files: list[tuple[str, str]], template_f
         "package.json",
         "tsconfig.json",
         "vite.config.ts",
+        "openapi.generated.json",
+        "src/api/client.ts",
+        "src/api/generated.ts",
+        "src/api/hooks.ts",
+        "src/api/queryClient.ts",
         "src/vite-env.d.ts",
     }
 
