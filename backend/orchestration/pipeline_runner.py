@@ -422,7 +422,7 @@ async def stream_pipeline_updates(
         "data": {"status": "running", "message": start_message},
     })
 
-    async for update in pipeline.astream(payload, stream_mode="updates"):
+    async for update in pipeline.astream(payload, config={"recursion_limit": 150}, stream_mode="updates"):
         if not isinstance(update, dict):
             continue
 

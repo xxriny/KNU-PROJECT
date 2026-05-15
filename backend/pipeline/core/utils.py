@@ -430,16 +430,30 @@ def get_vector_db_client(db_name: str = "pm_sa_vector_db") -> Any:
 
 # ── 직렬화 유틸 ──────────────────────────────────
 
-def to_serializable(obj: Any) -> Any:
-    """Pydantic 모델, dict, list를 재귀적으로 JSON 직렬화 가능하게 변환."""
+def to_serializable(obj: Any, seen=None) -> Any:
+    """Pydantic 모델, dict, list를 재귀적으로 JSON 직렬화 가능하게 변환 (순환 참조 방지)."""
+    if seen is None:
+        seen = set()
+
     if obj is None or isinstance(obj, (str, int, float, bool)):
         return obj
+
+    # 순환 참조 및 중복 처리 방지 (메모리 절약)
+    obj_id = id(obj)
+    if obj_id in seen:
+        return f"<Circular Reference: {type(obj).__name__}>"
+    
+    # 컨테이너 타입인 경우에만 seen에 추가
+    if isinstance(obj, (dict, list)) or hasattr(obj, "__dict__"):
+        seen.add(obj_id)
+
     if hasattr(obj, "model_dump"):
-        return obj.model_dump()
+        return to_serializable(obj.model_dump(), seen)
     if hasattr(obj, "dict"):
-        return obj.dict()
+        return to_serializable(obj.dict(), seen)
     if isinstance(obj, dict):
-        return {k: to_serializable(v) for k, v in obj.items()}
+        return {k: to_serializable(v, seen) for k, v in obj.items()}
     if isinstance(obj, list):
-        return [to_serializable(item) for item in obj]
+        return [to_serializable(item, seen) for item in obj]
+    
     return str(obj)

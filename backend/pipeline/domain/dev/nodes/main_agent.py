@@ -605,11 +605,6 @@ def develop_main_agent_node(ctx: NodeContext) -> dict:
     if not frontend_requirement_ids:
         frontend_requirement_ids = fallback_requirement_ids(requirements, limit=6)
     
-    print(f"DEBUG: goal={type(goal)} {goal}")
-    print(f"DEBUG: source_session_id={type(source_session_id)} {source_session_id}")
-    print(f"DEBUG: prompt_requirements={type(prompt_requirements)} len={len(prompt_requirements) if prompt_requirements is not None else 'NONE'}")
-    print(f"DEBUG: components={type(components)} len={len(components) if components is not None else 'NONE'}")
-
     project_rag_context = _load_project_rag_context(goal, source_session_id, prompt_requirements, components)
     project_rag_context.update({
         "source_dir": source_dir,
@@ -708,17 +703,6 @@ def develop_main_agent_node(ctx: NodeContext) -> dict:
         project_rag_context=project_rag_context,
         artifact_rag_context=artifact_rag_context,
     )
-
-    # [DIAGNOSTIC] 로그 출력: 어떤 데이터가 토큰 폭발을 일으키는지 확인
-    print(f"\n[DevelopMainAgent] Prompt Component Sizes (chars):")
-    print(f" - goal: {len(goal)}")
-    print(f" - requirements: {len(str(requirements))}")
-    print(f" - components: {len(str(components))}")
-    print(f" - apis: {len(str(apis))}")
-    print(f" - tables: {len(str(tables))}")
-    print(f" - project_rag: {len(str(project_rag_context))}")
-    print(f" - artifact_rag: {len(str(artifact_rag_context))}")
-    print(f" - TOTAL USER_MSG: {len(user_msg)}\n")
 
     fallback_branch_strategy = {
         "gitflow": "git-flow",

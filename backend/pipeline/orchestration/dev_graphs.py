@@ -237,6 +237,24 @@ def _route_loop_controller(state: PipelineState) -> str:
     return "block"
 
 
+def _noop(state: PipelineState) -> dict:
+    return {}
+
+
+def _route_after_backend_runtime(state: PipelineState) -> str:
+    return "frontend" if "frontend" in _selected_domains(state) else "integration"
+
+
+def _route_backend_codegen_reverifier(state: PipelineState) -> str:
+    status = str((state.get("backend_codegen_reverify_result", {}) or {}).get("status", "")).lower()
+    return "pass" if status in {"pass", "passed"} else "block"
+
+
+def _route_frontend_codegen_reverifier(state: PipelineState) -> str:
+    status = str((state.get("frontend_codegen_reverify_result", {}) or {}).get("status", "")).lower()
+    return "pass" if status in {"pass", "passed"} else "block"
+
+
 def _route_branch_pr_orchestrator(state: PipelineState) -> str:
     result = state.get("branch_pr_result", {}) or {}
     status = str(result.get("status", "") or "").lower()
@@ -345,7 +363,7 @@ def get_develop_pipeline():
             "block": "develop_backend_runtime_blocker"
         }
     )
-    workflow.add_node("develop_after_uiux_gate", lambda state: {}) # 도메인 선택을 위한 가상 노드
+    workflow.add_node("develop_after_uiux_gate", _noop)
     workflow.add_conditional_edges(
         "develop_after_uiux_gate",
         _route_after_uiux_gate,
@@ -381,16 +399,16 @@ def get_develop_pipeline():
     workflow.add_edge("develop_backend_codegen_repair", "develop_backend_codegen_reverifier")
     workflow.add_conditional_edges(
         "develop_backend_codegen_reverifier",
-        lambda state: "pass" if str((state.get("backend_codegen_reverify_result", {}) or {}).get("status", "")).lower() in {"pass", "passed"} else "block",
+        _route_backend_codegen_reverifier,
         {
             "pass": "develop_after_backend_runtime",
             "block": "develop_backend_runtime_blocker"
         }
     )
-    workflow.add_node("develop_after_backend_runtime", lambda state: {})
+    workflow.add_node("develop_after_backend_runtime", _noop)
     workflow.add_conditional_edges(
         "develop_after_backend_runtime",
-        lambda state: "frontend" if "frontend" in _selected_domains(state) else "integration",
+        _route_after_backend_runtime,
         {
             "frontend": "develop_frontend_agent",
             "integration": "develop_integration_qa_gate"
@@ -422,7 +440,7 @@ def get_develop_pipeline():
     workflow.add_edge("develop_frontend_codegen_repair", "develop_frontend_codegen_reverifier")
     workflow.add_conditional_edges(
         "develop_frontend_codegen_reverifier",
-        lambda state: "pass" if str((state.get("frontend_codegen_reverify_result", {}) or {}).get("status", "")).lower() in {"pass", "passed"} else "block",
+        _route_frontend_codegen_reverifier,
         {
             "pass": "develop_global_fe_sync_gate",
             "block": "develop_frontend_runtime_blocker"

@@ -484,3 +484,96 @@ def fallback_requirement_ids(requirements: list[dict[str, Any]], limit: int = 8)
         requirement_id(req, idx)
         for idx, req in enumerate(requirements[:limit], start=1)
     ]
+
+
+# ── 노드 공통 헬퍼 (각 에이전트 파일에서 중복 정의하지 않도록) ─────────────
+
+def api_endpoint(api: dict[str, Any]) -> str:
+    return str(api.get("endpoint") or api.get("ep") or api.get("path") or "").strip()
+
+
+def table_name(table: dict[str, Any]) -> str:
+    return str(table.get("table_name") or table.get("name") or table.get("nm") or "").strip()
+
+
+def column_names(table: dict[str, Any]) -> list[str]:
+    columns = table.get("columns") or table.get("cols") or []
+    if isinstance(columns, str):
+        return [part.split(":", 1)[0].strip() for part in columns.split(",") if part.strip()]
+    names = []
+    for column in _as_list(columns):
+        if isinstance(column, dict):
+            name = str(column.get("name") or column.get("column_name") or "").strip()
+        else:
+            name = str(column).strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def artifact_items(ctx: Any, key: str) -> list[dict[str, Any]]:
+    direct = _as_list(ctx.sget(key, []))
+    artifact_context = ctx.sget("artifact_rag_context", {}) or {}
+    nested = _as_list(artifact_context.get(key))
+    return [item for item in [*direct, *nested] if isinstance(item, dict)]
+
+
+def topology_queue(
+    *,
+    apis: list[dict[str, Any]],
+    tables: list[dict[str, Any]],
+    components: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    queue: list[dict[str, Any]] = []
+    order = 1
+    for t in tables:
+        name = table_name(t)
+        if not name:
+            continue
+        queue.append({"order": order, "kind": "table", "name": name, "source": "SA DB contract", "depends_on": []})
+        order += 1
+    for c in components:
+        name = component_name(c)
+        if not name:
+            continue
+        queue.append({
+            "order": order,
+            "kind": "component",
+            "name": name,
+            "source": "SA component contract",
+            "depends_on": [table_name(t) for t in tables if table_name(t)],
+        })
+        order += 1
+    for a in apis:
+        endpoint = api_endpoint(a)
+        if not endpoint:
+            continue
+        queue.append({
+            "order": order,
+            "kind": "api",
+            "name": endpoint,
+            "source": "SA API contract",
+            "depends_on": [
+                *[table_name(t) for t in tables if table_name(t)],
+                *[component_name(c) for c in components if component_name(c)],
+            ],
+        })
+        order += 1
+    return queue
+
+
+def slug(value: str, fallback: str) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(value or "")).strip("-")
+    while "--" in cleaned:
+        cleaned = cleaned.replace("--", "-")
+    return cleaned or fallback
+
+
+def looks_like_endpoint(value: Any) -> bool:
+    text = str(value or "").strip()
+    upper = text.upper()
+    return (
+        upper.startswith(("GET ", "POST ", "PUT ", "PATCH ", "DELETE "))
+        or text.startswith("/api/")
+        or text.startswith("/")
+    )
