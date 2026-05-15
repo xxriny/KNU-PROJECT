@@ -13,6 +13,8 @@ from fastapi import WebSocket
 
 from pipeline.orchestration.facade import (
     get_analysis_pipeline,
+    get_develop_pipeline,
+    get_develop_routing_map,
     get_idea_pipeline,
     get_pm_pipeline,
     get_sa_pipeline,
@@ -339,6 +341,56 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
             "pipeline_type": "idea_chat",
         },
     })
+
+
+async def run_develop(ws: WebSocket, payload: dict) -> None:
+    api_key = payload.get("api_key", "")
+    model = payload.get("model", DEFAULT_MODEL)
+    previous_result = payload.get("previous_result", {}) or {}
+    source_dir = payload.get("source_dir", "")
+    development_request = payload.get("development_request") or payload.get("idea") or ""
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    state_payload = {
+        **previous_result,
+        "api_key": api_key,
+        "model": model,
+        "run_id": run_id,
+        "source_dir": source_dir,
+        "development_request": development_request,
+        "enable_backend_codegen": bool(payload.get("enable_backend_codegen", False)),
+        "backend_codegen_language": payload.get("backend_codegen_language", ""),
+        "backend_codegen_framework": payload.get("backend_codegen_framework", ""),
+        "backend_codegen_mode": payload.get("backend_codegen_mode", "llm"),
+        "enable_frontend_codegen": bool(payload.get("enable_frontend_codegen", False)),
+        "frontend_codegen_language": payload.get("frontend_codegen_language", ""),
+        "frontend_codegen_framework": payload.get("frontend_codegen_framework", ""),
+        "frontend_codegen_mode": payload.get("frontend_codegen_mode", "template"),
+        "enable_dependency_install": bool(payload.get("enable_dependency_install", False)),
+        "previous_result": previous_result,
+        "requirements_rtm": previous_result.get("requirements_rtm", []),
+        "components": previous_result.get("components", []),
+        "sa_artifacts": previous_result.get("sa_artifacts", {}),
+        "current_feature_id": payload.get("current_feature_id") or previous_result.get("current_feature_id", ""),
+        "development_request_feature": payload.get("development_request_feature") or previous_result.get("development_request_feature", {}),
+        "dev_feature_queue": payload.get("dev_feature_queue") or previous_result.get("dev_feature_queue", []),
+        "dev_feature_status": payload.get("dev_feature_status") or previous_result.get("dev_feature_status", {}),
+        "completed_feature_ids": payload.get("completed_feature_ids") or previous_result.get("completed_feature_ids", []),
+        "blocked_feature_ids": payload.get("blocked_feature_ids") or previous_result.get("blocked_feature_ids", []),
+        "pm_overview": previous_result.get("pm_overview", {}),
+        "sa_overview": previous_result.get("sa_overview", {}),
+        "project_overview": previous_result.get("project_overview", {}),
+    }
+
+    await _run_pipeline_base(
+        ws,
+        pipeline=get_develop_pipeline(),
+        routing=get_develop_routing_map(),
+        state_payload=state_payload,
+        pipeline_type="develop_plan",
+        result_node="develop_complete",
+        save=True,
+    )
 
 
 # ─── 스트리밍 ─────────────────────────────────────────────

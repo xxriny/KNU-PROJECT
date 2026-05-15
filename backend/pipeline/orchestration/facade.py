@@ -23,6 +23,10 @@ from pipeline.orchestration.rag_graph import (
     get_rag_query_pipeline,
     get_rag_routing_map,
 )
+from pipeline.orchestration.dev_graphs import (
+    get_develop_pipeline,
+    get_develop_routing_map,
+)
 
 __all__ = [
     "get_analysis_pipeline",
@@ -36,5 +40,7 @@ __all__ = [
     "get_rag_ingest_pipeline",
     "get_rag_query_pipeline",
     "get_rag_routing_map",
+    "get_develop_pipeline",
+    "get_develop_routing_map",
 ]
 

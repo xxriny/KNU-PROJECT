@@ -18,6 +18,7 @@ from observability.logger import get_logger
 from pipeline.core.action_type import normalize_action_type
 from pipeline.orchestration.facade import (
     get_analysis_pipeline,
+    get_develop_pipeline,
     get_idea_pipeline,
     get_rag_ingest_pipeline,
 )
@@ -78,6 +79,31 @@ class IdeaChatRequest(BaseModel):
     model: str = DEFAULT_MODEL
 
 
+class DevelopRequest(BaseModel):
+    # Upstream state fed into the develop pipeline.
+    development_request: str = ""
+    source_dir: str = ""
+    previous_result: dict = {}
+    api_key: str = ""
+    model: str = DEFAULT_MODEL
+    current_feature_id: str = ""
+    development_request_feature: dict = {}
+    dev_feature_queue: list = []
+    dev_feature_status: dict = {}
+    completed_feature_ids: list = []
+    blocked_feature_ids: list = []
+    enable_backend_codegen: bool = False
+    backend_codegen_language: str = ""
+    backend_codegen_framework: str = ""
+    backend_codegen_mode: str = "llm"
+    enable_frontend_codegen: bool = False
+    frontend_codegen_language: str = ""
+    frontend_codegen_framework: str = ""
+    frontend_codegen_mode: str = "template"
+    enable_dependency_install: bool = False
+    compact_response: bool = False
+
+
 class ScanRequest(BaseModel):
     path: str
     max_depth: int = 3
@@ -96,11 +122,6 @@ class MemoRequest(BaseModel):
     text: str
     selected_text: str = ""
     section: str = "Global"
-    detail: str = ""
-
-
-class ApplyMemosRequest(BaseModel):
-    memo_ids: list[str]
 
 
 class RAGIngestRequest(BaseModel):
@@ -113,7 +134,6 @@ class RAGQueryRequest(BaseModel):
     query: str
     session_id: Optional[str] = None
     n_results: int = 10
-    api_key: str = ""
 
 
 class HealthResponse(BaseModel):
@@ -186,6 +206,109 @@ def _to_response(result) -> dict:
     return {"status": "error", "error": result.error}
 
 
+def _compact_result_value(value, *, depth: int = 0):
+    if depth > 4:
+        return "<truncated>"
+    if isinstance(value, str):
+        return value if len(value) <= 4000 else value[:4000] + "\n<truncated>"
+    if isinstance(value, list):
+        return [_compact_result_value(item, depth=depth + 1) for item in value[:25]]
+    if isinstance(value, dict):
+        compact = {}
+        for key, item in value.items():
+            if key in {
+                "content",
+                "source",
+                "raw",
+                "stdout",
+                "stderr",
+                "stdout_tail",
+                "stderr_tail",
+                "prompt",
+                "user_msg",
+                "system_msg",
+                "messages",
+                "semantic_slices",
+            }:
+                compact[key] = _compact_result_value(item, depth=depth + 1)
+            elif key in {"files", "generated_files"} and isinstance(item, list):
+                compact[key] = [
+                    {
+                        sub_key: _compact_result_value(sub_value, depth=depth + 1)
+                        for sub_key, sub_value in file_item.items()
+                        if sub_key not in {"content", "source"}
+                    }
+                    for file_item in item[:50]
+                    if isinstance(file_item, dict)
+                ]
+            else:
+                compact[key] = _compact_result_value(item, depth=depth + 1)
+        return compact
+    return value
+
+
+def _compact_develop_response(shaped: dict) -> None:
+    # Keep only the develop-facing fields that are useful for REST clients.
+    keep_keys = [
+        "model",
+        "run_id",
+        "pipeline_type",
+        "accumulated_cost",
+        "accumulated_usage",
+        "pm_overview",
+        "sa_overview",
+        "requirements_rtm",
+        "components",
+        "apis",
+        "tables",
+        "dev_overview",
+        "develop_overview",
+        "develop_main_plan",
+        "current_feature_id",
+        "development_request_feature",
+        "dev_feature_queue",
+        "dev_feature_status",
+        "completed_feature_ids",
+        "blocked_feature_ids",
+        "dev_feature_completion",
+        "uiux_result",
+        "uiux_artifact",
+        "backend_result",
+        "backend_qa_result",
+        "backend_domain_gate_result",
+        "backend_codegen_result",
+        "backend_codegen_verification",
+        "backend_codegen_repair_result",
+        "backend_codegen_reverify_result",
+        "frontend_result",
+        "frontend_qa_result",
+        "frontend_domain_gate_result",
+        "frontend_codegen_result",
+        "frontend_codegen_verification",
+        "frontend_codegen_repair_result",
+        "frontend_codegen_reverify_result",
+        "global_fe_sync_result",
+        "fullstack_runtime_verification",
+        "integration_qa_result",
+        "branch_pr_result",
+        "embedding_result",
+        "dev_message_log",
+        "project_state",
+        "project_state_updates",
+        "dev_fallback_result",
+        "sa_review_request",
+        "develop_next_action",
+    ]
+    compact = {
+        key: _compact_result_value(shaped.get(key))
+        for key in keep_keys
+        if key in shaped
+    }
+    shaped.clear()
+    shaped.update(compact)
+    shaped["response_mode"] = "compact"
+
+
 @rest_router.post("/api/analyze")
 async def analyze(req: AnalysisRequest):
     try:
@@ -243,6 +366,50 @@ async def idea_chat(req: IdeaChatRequest):
         return {"status": "error", "error": str(e)}
 
 
+@rest_router.post("/api/develop")
+async def develop(req: DevelopRequest):
+    try:
+        previous_result = req.previous_result or {}
+        return _to_response(execute_pipeline(
+            get_develop_pipeline(),
+            {
+                **previous_result,
+                "api_key": req.api_key,
+                "model": req.model,
+                "run_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
+                "source_dir": req.source_dir,
+                "development_request": req.development_request,
+                "enable_backend_codegen": req.enable_backend_codegen,
+                "backend_codegen_language": req.backend_codegen_language,
+                "backend_codegen_framework": req.backend_codegen_framework,
+                "backend_codegen_mode": req.backend_codegen_mode,
+                "enable_frontend_codegen": req.enable_frontend_codegen,
+                "frontend_codegen_language": req.frontend_codegen_language,
+                "frontend_codegen_framework": req.frontend_codegen_framework,
+                "frontend_codegen_mode": req.frontend_codegen_mode,
+                "enable_dependency_install": req.enable_dependency_install,
+                "previous_result": previous_result,
+                "requirements_rtm": previous_result.get("requirements_rtm", []),
+                "components": previous_result.get("components", []),
+                "sa_artifacts": previous_result.get("sa_artifacts", {}),
+                "current_feature_id": req.current_feature_id or previous_result.get("current_feature_id", ""),
+                "development_request_feature": req.development_request_feature or previous_result.get("development_request_feature", {}),
+                "dev_feature_queue": req.dev_feature_queue or previous_result.get("dev_feature_queue", []),
+                "dev_feature_status": req.dev_feature_status or previous_result.get("dev_feature_status", {}),
+                "completed_feature_ids": req.completed_feature_ids or previous_result.get("completed_feature_ids", []),
+                "blocked_feature_ids": req.blocked_feature_ids or previous_result.get("blocked_feature_ids", []),
+                "pm_overview": previous_result.get("pm_overview", {}),
+                "sa_overview": previous_result.get("sa_overview", {}),
+                "project_overview": previous_result.get("project_overview", {}),
+            },
+            "develop_plan",
+            result_mutator=_compact_develop_response if req.compact_response else None,
+        ))
+    except Exception as e:
+        get_logger().exception("develop endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
 @rest_router.post("/api/rag/ingest")
 async def rag_ingest(req: RAGIngestRequest):
     """소스 디렉터리를 청킹·임베딩하여 project_code_knowledge에 저장합니다."""
@@ -275,12 +442,7 @@ async def rag_query(req: RAGQueryRequest):
         return {"status": "error", "error": "query가 비어있습니다."}
     try:
         from pipeline.domain.rag.nodes.code_retriever import retrieve_project_code
-        results = retrieve_project_code(
-            req.query, 
-            session_id=req.session_id, 
-            n_results=req.n_results,
-            api_key=req.api_key
-        )
+        results = retrieve_project_code(req.query, session_id=req.session_id, n_results=req.n_results)
         return {"status": "ok", "results": results}
     except Exception as e:
         get_logger().exception("rag_query endpoint failed")
@@ -394,32 +556,9 @@ async def get_memos_endpoint(session_id: Optional[str] = None):
 async def add_memo_endpoint(req: MemoRequest):
     from pipeline.domain.pm.nodes.memo_db import add_memo
     try:
-        memo_id = add_memo(
-            req.session_id,
-            req.text,
-            req.selected_text,
-            req.section,
-            req.detail,
-        )
+        memo_id = add_memo(req.session_id, req.text, req.selected_text, req.section)
         return {"status": "ok", "memo_id": memo_id}
     except Exception as e:
-        return {"status": "error", "error": str(e)}
-
-
-@rest_router.post("/api/memos/apply")
-async def apply_memos_endpoint(req: ApplyMemosRequest):
-    """메모 ID 목록을 일괄 'applied' 상태로 표시한다.
-
-    Memos 탭의 "지적사항 반영 설계 업데이트" 흐름에서, UPDATE 분석이 성공한
-    직후 프론트가 호출한다. 메모 자체는 삭제하지 않고 메타데이터에 applied=True,
-    applied_at=<now>를 병합해 메인 뷰에서는 숨기고 토글로만 노출한다.
-    """
-    from pipeline.domain.pm.nodes.memo_db import apply_memos
-    try:
-        updated = apply_memos(req.memo_ids or [])
-        return {"status": "ok", "updated": updated}
-    except Exception as e:
-        get_logger().exception("apply_memos endpoint failed")
         return {"status": "error", "error": str(e)}
 
 
