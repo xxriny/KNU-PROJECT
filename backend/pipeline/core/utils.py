@@ -438,22 +438,21 @@ def to_serializable(obj: Any, seen=None) -> Any:
     if obj is None or isinstance(obj, (str, int, float, bool)):
         return obj
 
-    # 순환 참조 및 중복 처리 방지 (메모리 절약)
+    # 순환 참조 방지: 현재 탐색 경로(Path)에 동일 객체가 있는지 확인
     obj_id = id(obj)
     if obj_id in seen:
         return f"<Circular Reference: {type(obj).__name__}>"
     
-    # 컨테이너 타입인 경우에만 seen에 추가
-    if isinstance(obj, (dict, list)) or hasattr(obj, "__dict__"):
-        seen.add(obj_id)
+    # 새로운 경로 세트 생성 (자식들에게만 전달하여 형제 노드 간 공유 허용)
+    new_seen = seen | {obj_id}
 
     if hasattr(obj, "model_dump"):
-        return to_serializable(obj.model_dump(), seen)
+        return to_serializable(obj.model_dump(), new_seen)
     if hasattr(obj, "dict"):
-        return to_serializable(obj.dict(), seen)
+        return to_serializable(obj.dict(), new_seen)
     if isinstance(obj, dict):
-        return {k: to_serializable(v, seen) for k, v in obj.items()}
+        return {k: to_serializable(v, new_seen) for k, v in obj.items()}
     if isinstance(obj, list):
-        return [to_serializable(item, seen) for item in obj]
+        return [to_serializable(item, new_seen) for item in obj]
     
     return str(obj)

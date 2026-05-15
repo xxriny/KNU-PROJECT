@@ -237,7 +237,15 @@ def shape_result(raw_result: dict) -> dict:
     context_spec: dict = sanitized.get("context_spec") or merged_plan.get("context_spec") or {}
 
     # 1. APIs (sa_output.data.apis > sa_unified.apis)
-    raw_apis = sa_data.get("apis") or sa_unified.get("apis") or []
+    raw_apis = []
+    if isinstance(sa_data, dict):
+        raw_apis = sa_data.get("apis") or []
+    
+    if not raw_apis and isinstance(sa_unified, dict):
+        raw_apis = sa_unified.get("apis") or []
+    
+    if not raw_apis:
+        raw_apis = []
     expanded_apis = []
     for a in raw_apis:
         # 이미 확장된 객체인지 확인 (sa_advisor가 처리한 경우)
@@ -253,7 +261,13 @@ def shape_result(raw_result: dict) -> dict:
     sanitized["apis"] = expanded_apis
 
     # 2. Tables (sa_output.data.tables > sa_unified.tables)
-    raw_tables = sa_data.get("tables") or sa_unified.get("tables") or []
+    raw_tables = []
+    if isinstance(sa_data, dict):
+        raw_tables = sa_data.get("tables") or []
+    if not raw_tables and isinstance(sa_unified, dict):
+        raw_tables = sa_unified.get("tables") or []
+    if not raw_tables:
+        raw_tables = []
     expanded_tables = []
     for t in raw_tables:
         if "table_name" in t:
@@ -276,7 +290,13 @@ def shape_result(raw_result: dict) -> dict:
     sanitized["tables"] = expanded_tables
 
     # 3. Components
-    raw_components = sa_data.get("components") or sa_sched.get("components") or []
+    raw_components = []
+    if isinstance(sa_data, dict):
+        raw_components = sa_data.get("components") or []
+    if not raw_components and isinstance(sa_sched, dict):
+        raw_components = sa_sched.get("components") or []
+    if not raw_components:
+        raw_components = []
     expanded_components = []
     for c in raw_components:
         if "component_name" in c:
