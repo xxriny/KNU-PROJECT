@@ -7,7 +7,7 @@ from typing import Any
 
 from pipeline.core.node_base import NodeContext, pipeline_node
 from pipeline.core.utils import call_structured
-from pipeline.domain.dev.nodes.backend_codegen import _safe_name, _write_if_changed
+from pipeline.domain.dev.nodes.backend_codegen import _resolve_repo_layout, _safe_name, _write_if_changed
 from pipeline.domain.dev.nodes._shared import (
     approved_stack_for_domain,
     generation_policy,
@@ -117,9 +117,8 @@ def _api_client(plan: dict) -> str:
         "}",
         "",
         "export const apiClient = {",
+        "  health: () => requestJson<Record<string, unknown>>('/'),",
     ]
-    if not endpoints:
-        lines.append("  health: () => requestJson<Record<string, unknown>>('/'),")
     for index, endpoint in enumerate(endpoints, start=1):
         method, path = _method_path(endpoint)
         name = f"request{index}"
@@ -334,8 +333,13 @@ def _query_client() -> str:
 
 def _query_hooks(plan: dict) -> str:
     endpoints = plan.get("api_client_needs") or []
-    first_get = next((endpoint for endpoint in endpoints if _method_path(endpoint)[0] == "GET"), None)
+    first_get_index = next(
+        (index for index, endpoint in enumerate(endpoints, start=1) if _method_path(endpoint)[0] == "GET"),
+        None,
+    )
+    first_get = endpoints[first_get_index - 1] if first_get_index is not None else None
     path = _method_path(first_get)[1] if first_get else "/"
+    query_fn = f"apiClient.request{first_get_index}()" if first_get_index is not None else "apiClient.health()"
     return "\n".join([
         "import { useQuery } from '@tanstack/react-query';",
         "import { apiClient } from './client';",
@@ -344,10 +348,7 @@ def _query_hooks(plan: dict) -> str:
         "  return useQuery({",
         f"    queryKey: ['generated-data', {json.dumps(path)}],",
         "    queryFn: async () => {",
-        "      if ('request1' in apiClient) {",
-        "        return apiClient.request1();",
-        "      }",
-        "      return apiClient.health();",
+        f"      return {query_fn};",
         "    },",
         "  });",
         "}",
@@ -363,7 +364,24 @@ def _app_tsx(uiux_artifact: dict, frontend_plan: dict) -> str:
     return "\n".join([
         "import './styles.css';",
         "",
-        f"const screens = {screen_items} as const;",
+        "type ScreenItem = {",
+        "  id?: string;",
+        "  screen?: string;",
+        "  name?: string;",
+        "  title?: string;",
+        "  route?: string;",
+        "  states?: readonly string[];",
+        "  [key: string]: unknown;",
+        "};",
+        "",
+        f"const screens = {screen_items} as readonly ScreenItem[];",
+        "",
+        "const normalizedScreens = screens.map((screen) => ({",
+        "  ...screen,",
+        "  screen: screen.screen ?? screen.name ?? screen.title ?? screen.id ?? 'Generated Screen',",
+        "  route: screen.route ?? '/',",
+        "  states: screen.states ?? [],",
+        "}));",
         "",
         "export default function App() {",
         "  return (",
@@ -373,7 +391,7 @@ def _app_tsx(uiux_artifact: dict, frontend_plan: dict) -> str:
         "        <h1>Generated App Flow</h1>",
         "      </section>",
         "      <section className=\"screen-grid\" aria-label=\"Generated screens\">",
-        "        {screens.map((screen) => (",
+        "        {normalizedScreens.map((screen) => (",
         "          <article className=\"screen-card\" key={`${screen.screen}-${screen.route}`}>",
         "            <div>",
         "              <p className=\"route\">{screen.route}</p>",
@@ -805,7 +823,8 @@ def develop_frontend_codegen_node(ctx: NodeContext) -> dict:
     source_dir = Path(str(ctx.sget("source_dir", "") or "")).resolve()
     language, framework, mode = _target(ctx)
     policy = _target_policy(language, framework)
-    output_dir = source_dir / "frontend" / "generated" / "navigator_dev" / policy["target_key"]
+    _, _, frontend_root = _resolve_repo_layout(source_dir)
+    output_dir = frontend_root / "generated" / "navigator_dev" / policy["target_key"]
 
     if not _enabled(ctx.sget("enable_frontend_codegen", False)):
         return {

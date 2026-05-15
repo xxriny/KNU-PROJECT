@@ -155,6 +155,16 @@ def _target_policy(language: str, framework: str) -> dict[str, str]:
     }
 
 
+def _resolve_repo_layout(source_dir: Path) -> tuple[Path, Path, Path]:
+    """Return (project_root, backend_root, frontend_root) for generated artifacts."""
+    if source_dir.name.lower() == "backend":
+        project_root = source_dir.parent
+        return project_root, source_dir, project_root / "frontend"
+    if (source_dir / "backend").is_dir():
+        return source_dir, source_dir / "backend", source_dir / "frontend"
+    return source_dir, source_dir / "backend", source_dir / "frontend"
+
+
 def _as_list(value: Any) -> list:
     return value if isinstance(value, list) else []
 
@@ -418,18 +428,50 @@ def _express_service_code(goal: str, apis: list[dict[str, Any]], tables: list[di
     ])
 
 
+def _express_app_code() -> str:
+    return "\n".join([
+        "import express from 'express';",
+        "import { generatedRouter } from './routes';",
+        "",
+        "export function createApp() {",
+        "  const app = express();",
+        "  app.use(express.json());",
+        "  app.get('/', (_req, res) => {",
+        "    res.status(200).json({ status: 'ok', service: 'navigator-generated-backend' });",
+        "  });",
+        "  app.use('/generated', generatedRouter);",
+        "  app.use((error: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {",
+        "    res.status(500).json({ status: 'error', message: error.message });",
+        "  });",
+        "  return app;",
+        "}",
+        "",
+    ])
+
+
+def _express_index_code() -> str:
+    return "\n".join([
+        "import { createApp } from './app';",
+        "",
+        "const port = Number(process.env.PORT ?? 3000);",
+        "const host = process.env.HOST ?? '127.0.0.1';",
+        "",
+        "createApp().listen(port, host, () => {",
+        "  console.log(`Generated backend listening on http://${host}:${port}`);",
+        "});",
+        "",
+    ])
+
+
 def _express_test_code(apis: list[dict[str, Any]]) -> str:
     method, path, _ = _endpoint_parts((apis or [{}])[0], 1)
     return "\n".join([
-        "import express from 'express';",
         "import request from 'supertest';",
-        "import { generatedRouter } from '../src/routes';",
+        "import { createApp } from '../src/app';",
         "",
         "describe('generated backend route', () => {",
         "  it('accepts a payload', async () => {",
-        "    const app = express();",
-        "    app.use(express.json());",
-        "    app.use('/generated', generatedRouter);",
+        "    const app = createApp();",
         f"    const response = await request(app).{method}('/generated{path}').send({{ sample: true }});",
         "    expect(response.status).toBe(200);",
         "    expect(response.body.status).toBe('ok');",
@@ -445,7 +487,7 @@ def _express_package_json() -> str:
             "dev": "ts-node src/index.ts",
             "build": "tsc",
             "start": "node dist/index.js",
-            "test": "vitest run",
+            "test": "vitest run --config vitest.config.ts",
             "typecheck": "tsc --noEmit",
         },
         "dependencies": {
@@ -455,10 +497,26 @@ def _express_package_json() -> str:
             "@types/express": "^4.17.21",
             "@types/supertest": "^6.0.2",
             "supertest": "^6.3.4",
+            "ts-node": "^10.9.2",
             "typescript": "^5.4.0",
             "vitest": "^1.6.0",
         },
     }, indent=2)
+
+
+def _express_vitest_config() -> str:
+    return "\n".join([
+        "import { defineConfig } from 'vitest/config';",
+        "",
+        "export default defineConfig({",
+        "  test: {",
+        "    environment: 'node',",
+        "    globals: true,",
+        "    include: ['tests/**/*.test.ts'],",
+        "  },",
+        "});",
+        "",
+    ])
 
 
 NODE_PACKAGE_VERSIONS = {
@@ -556,7 +614,7 @@ def _merge_node_package_json(
         merged["devDependencies"].setdefault("@types/node", NODE_DEV_PACKAGE_VERSIONS["@types/node"])
 
     if "vitest" in merged["devDependencies"] and "jest" not in merged["devDependencies"]:
-        merged["scripts"]["test"] = "vitest run"
+        merged["scripts"]["test"] = "vitest run --config vitest.config.ts"
     elif "jest" in merged["devDependencies"]:
         merged["scripts"]["test"] = "jest --detectOpenHandles --runInBand"
 
@@ -572,6 +630,7 @@ def _express_tsconfig() -> str:
             "strict": True,
             "esModuleInterop": True,
             "skipLibCheck": True,
+            "types": ["node", "vitest/globals"],
             "outDir": "dist",
         },
         "include": ["src", "tests"],
@@ -794,11 +853,14 @@ def _template_files(
         target_dir = "typescript_express"
         test_command = "npm install && npm test"
         files = [
+            ("src/app.ts", _express_app_code()),
+            ("src/index.ts", _express_index_code()),
             ("src/routes.ts", _express_routes_code(apis)),
             ("src/service.ts", _express_service_code(goal, apis, tables)),
             ("tests/generated-backend.test.ts", _express_test_code(apis)),
             ("package.json", _express_package_json()),
             ("tsconfig.json", _express_tsconfig()),
+            ("vitest.config.ts", _express_vitest_config()),
             ("README.md", _readme(goal, apis, tables)),
         ]
 
@@ -944,7 +1006,7 @@ def _missing_required_template_file(generated_files: list[tuple[str, str]], temp
     template_paths = {path.replace("\\", "/") for path, _ in template_files}
     required = {
         path for path in template_paths
-        if path.endswith(("package.json", "tsconfig.json", "pom.xml", "README.md"))
+        if path.endswith(("src/app.ts", "src/index.ts", "package.json", "tsconfig.json", "vitest.config.ts", "pom.xml", "README.md"))
     }
     return not required.issubset(generated_paths)
 
@@ -954,7 +1016,7 @@ def _with_required_template_files(generated_files: list[tuple[str, str]], templa
     generated_paths = {path.replace("\\", "/") for path, _ in result}
     for path, content in template_files:
         normalized = path.replace("\\", "/")
-        if normalized.endswith(("package.json", "tsconfig.json", "pom.xml", "README.md")) and normalized not in generated_paths:
+        if normalized.endswith(("src/app.ts", "src/index.ts", "package.json", "tsconfig.json", "vitest.config.ts", "pom.xml", "README.md")) and normalized not in generated_paths:
             result.append((path, content))
     return result
 
@@ -973,7 +1035,7 @@ def _normalize_backend_files(
     template_by_path = {path.replace("\\", "/"): content for path, content in template_files}
     normalized: list[tuple[str, str]] = []
     seen: set[str] = set()
-    deterministic = {"package.json", "tsconfig.json"}
+    deterministic = {"src/app.ts", "src/index.ts", "package.json", "tsconfig.json", "vitest.config.ts"}
 
     for path, content in generated_files:
         normalized_path = path.replace("\\", "/")
@@ -1007,7 +1069,8 @@ def develop_backend_codegen_node(ctx: NodeContext) -> dict:
     source_dir = Path(str(ctx.sget("source_dir", "") or "")).resolve()
     language, framework, mode = _target(ctx)
     policy = _target_policy(language, framework)
-    output_dir = source_dir / "backend" / "generated" / "navigator_dev" / policy["target_key"]
+    _, backend_root, _ = _resolve_repo_layout(source_dir)
+    output_dir = backend_root / "generated" / "navigator_dev" / policy["target_key"]
 
     if not _enabled(ctx.sget("enable_backend_codegen", False)):
         return {
