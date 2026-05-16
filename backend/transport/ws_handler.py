@@ -11,7 +11,7 @@ import json
 from fastapi import WebSocket, WebSocketDisconnect
 
 from transport.connection_manager import manager
-from orchestration.pipeline_runner import run_analysis, run_idea_chat, run_develop
+from orchestration.pipeline_runner import run_analysis, run_idea_chat
 from observability.logger import get_logger
 
 
@@ -47,8 +47,6 @@ async def websocket_pipeline(websocket: WebSocket):
                 await run_analysis(websocket, payload)
             elif msg_type == "idea_chat":
                 await run_idea_chat(websocket, payload)
-            elif msg_type == "develop":
-                await run_develop(websocket, payload)
             elif msg_type == "ping":
                 await manager.send_json(websocket, {"type": "pong"})
             else:

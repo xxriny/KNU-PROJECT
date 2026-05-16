@@ -21,6 +21,8 @@ _SA_CHAIN = (
     "sa_merge_project",
     "component_scheduler",
     "sa_unified_modeler",
+    "sa_test_analysis",
+    "sa_project_structure",
     "sa_embedding",
 )
 
@@ -147,18 +149,24 @@ def _build_sa_pipeline():
     from pipeline.domain.sa.nodes.merge_project import sa_merge_project_node
     from pipeline.domain.sa.nodes.component_scheduler import component_scheduler_node
     from pipeline.domain.sa.nodes.sa_unified_modeler import sa_unified_modeler_node
+    from pipeline.domain.sa.nodes.sa_test_analysis import sa_test_analysis_node
+    from pipeline.domain.sa.nodes.sa_project_structure import sa_project_structure_node
     from pipeline.domain.sa.nodes.sa_embedding import sa_embedding_node
 
     workflow = StateGraph(PipelineState)
     workflow.add_node("sa_merge_project", sa_merge_project_node)
     workflow.add_node("component_scheduler", component_scheduler_node)
     workflow.add_node("sa_unified_modeler", sa_unified_modeler_node)
+    workflow.add_node("sa_test_analysis", sa_test_analysis_node)
+    workflow.add_node("sa_project_structure", sa_project_structure_node)
     workflow.add_node("sa_embedding", sa_embedding_node)
 
     workflow.add_edge(START, "sa_merge_project")
     workflow.add_edge("sa_merge_project", "component_scheduler")
     workflow.add_edge("component_scheduler", "sa_unified_modeler")
-    workflow.add_edge("sa_unified_modeler", "sa_embedding")
+    workflow.add_edge("sa_unified_modeler", "sa_test_analysis")
+    workflow.add_edge("sa_test_analysis", "sa_project_structure")
+    workflow.add_edge("sa_project_structure", "sa_embedding")
     workflow.add_edge("sa_embedding", END)
 
     return workflow.compile()
@@ -200,13 +208,15 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     from pipeline.domain.sa.nodes.merge_project import sa_merge_project_node
     from pipeline.domain.sa.nodes.component_scheduler import component_scheduler_node
     from pipeline.domain.sa.nodes.sa_unified_modeler import sa_unified_modeler_node
+    from pipeline.domain.sa.nodes.sa_test_analysis import sa_test_analysis_node
+    from pipeline.domain.sa.nodes.sa_project_structure import sa_project_structure_node
     from pipeline.domain.sa.nodes.sa_embedding import sa_embedding_node
 
     workflow = StateGraph(PipelineState)
     # RAG Ingest
     workflow.add_node("code_chunker", code_chunker_node)
     workflow.add_node("code_embedding", code_embedding_node)
-    # Forensic (New)
+    # Forensic
     workflow.add_node("forensic_profiler", forensic_profiler_node)
     # PM
     workflow.add_node("requirement_analyzer", requirement_analyzer_node)
@@ -217,6 +227,8 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     workflow.add_node("sa_merge_project", sa_merge_project_node)
     workflow.add_node("component_scheduler", component_scheduler_node)
     workflow.add_node("sa_unified_modeler", sa_unified_modeler_node)
+    workflow.add_node("sa_test_analysis", sa_test_analysis_node)
+    workflow.add_node("sa_project_structure", sa_project_structure_node)
     workflow.add_node("sa_embedding", sa_embedding_node)
 
     # Edges
@@ -230,7 +242,9 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     workflow.add_edge("pm_embedding", "sa_merge_project")
     workflow.add_edge("sa_merge_project", "component_scheduler")
     workflow.add_edge("component_scheduler", "sa_unified_modeler")
-    workflow.add_edge("sa_unified_modeler", "sa_embedding")
+    workflow.add_edge("sa_unified_modeler", "sa_test_analysis")
+    workflow.add_edge("sa_test_analysis", "sa_project_structure")
+    workflow.add_edge("sa_project_structure", "sa_embedding")
     workflow.add_edge("sa_embedding", END)
 
     return workflow.compile()

@@ -1,6 +1,6 @@
 """
 SA Pipeline Schemas — DSL 기반 초압축 출력 스키마 정의
-활성 노드: merge_project → component_scheduler → sa_unified_modeler → sa_analysis
+활성 노드: merge_project → component_scheduler → sa_unified_modeler → sa_test_analysis → sa_project_structure → sa_embedding
 """
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Any
@@ -91,3 +91,73 @@ class SAAdvisorOutput(BaseModel):
     thinking: str = Field(alias="th", default="", description="단어 3개")
     summary: str = Field(alias="sm", default="", description="전체 요약")
     recommendations: List[AdvisorRecommendation] = Field(alias="rc", default_factory=list)
+
+
+# ── SA Test Analysis ─────────────────────────────────────
+
+class RiskZone(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    component_name: str = Field(alias="cn")
+    risk_level: str = Field(alias="rl", description="critical|high|medium|low")
+    reason: str = Field(alias="rs")
+    mitigation: str = Field(alias="mt")
+
+class UnitTestSpec(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    component_name: str = Field(alias="cn")
+    key_invariants: List[str] = Field(alias="ki")
+    mock_targets: List[str] = Field(alias="mt")
+    edge_cases: List[str] = Field(alias="ec")
+
+class IntegrationTestSpec(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    endpoint: str = Field(alias="ep")
+    db_approach: str = Field(alias="db")
+    transaction_scenario: str = Field(alias="ts")
+    contract_pair: str = Field(alias="cp", default="")
+
+class SystemTestSpec(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    critical_path: str = Field(alias="cp")
+    sla_target: str = Field(alias="sl")
+    chaos_scenarios: List[str] = Field(alias="cs")
+
+class AcceptanceTestSpec(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    feat_id: str = Field(alias="fi")
+    given: str = Field(alias="gv")
+    when: str = Field(alias="wh")
+    then_: str = Field(alias="tn")
+    edge_case: str = Field(alias="ec", default="")
+
+class SATestAnalysisOutput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    thinking: str = Field(alias="th", default="")
+    test_philosophy: str = Field(alias="tp")
+    risk_zones: List[RiskZone] = Field(alias="rz")
+    unit_specs: List[UnitTestSpec] = Field(alias="us")
+    integration_specs: List[IntegrationTestSpec] = Field(alias="is_")
+    system_specs: List[SystemTestSpec] = Field(alias="ss")
+    acceptance_specs: List[AcceptanceTestSpec] = Field(alias="as_")
+    test_data_strategy: str = Field(alias="td")
+    automation_priority: List[str] = Field(alias="ap")
+
+
+# ── SA Project Structure ──────────────────────────────────
+
+class DirectoryNode(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    name: str = Field(alias="nm")
+    type_: str = Field(alias="tp", description="dir|file")
+    component_id: str = Field(alias="ci", default="")
+    children: List["DirectoryNode"] = Field(alias="ch", default_factory=list)
+    rationale: str = Field(alias="rt", default="")
+
+DirectoryNode.model_rebuild()
+
+class SAProjectStructureOutput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    thinking: str = Field(alias="th", default="")
+    tree: DirectoryNode = Field(alias="tr")
+    component_mapping: Dict[str, List[str]] = Field(alias="cm")
+    conventions: List[str] = Field(alias="cv")

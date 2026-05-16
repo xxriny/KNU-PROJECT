@@ -47,3 +47,19 @@ def query_sa_artifacts(query_text: str, n_results: int = 5):
     """통합 RAG에서 SA 관련 지식 검색 (필요 시 phase="SA" 필터링 추가 가능)"""
     from pipeline.domain.pm.nodes.pm_db import query_pm_artifacts
     return query_pm_artifacts(query_text, n_results=n_results)
+
+
+def delete_sa_knowledge(session_id: str) -> int:
+    """세션의 SA 아티팩트를 통합 RAG에서 삭제합니다."""
+    try:
+        collection = _get_collection()
+        results = collection.get(
+            where={"$and": [{"session_id": session_id}, {"phase": "SA"}]}
+        )
+        if results["ids"]:
+            collection.delete(ids=results["ids"])
+            return len(results["ids"])
+        return 0
+    except Exception as e:
+        logger.error(f"[SA_DB] delete_sa_knowledge failed: {e}")
+        return 0
