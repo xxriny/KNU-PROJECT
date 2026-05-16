@@ -11,7 +11,6 @@ from typing import Dict, Any, List
 from pipeline.core.state import PipelineState, make_sget
 from pipeline.core.utils import call_structured
 from pipeline.domain.pm.schemas import RequirementAnalyzerOutput
-from pipeline.domain.rag.nodes.project_db import query_project_code, get_session_inventory
 from observability.logger import get_logger
 from version import DEFAULT_MODEL
 
@@ -160,104 +159,27 @@ def requirement_analyzer_node(state: PipelineState) -> Dict[str, Any]:
     if ctx:
         parts.append(f"<project_context>\n{ctx}\n</project_context>")
 
-    # RAG 인덱스 활용 (CREATE 모드가 아닐 때만 기존 코드 참고)
-    if action_type != "CREATE" and rag_status.get("has_index"):
-        rag_session_id = rag_status.get("session_id") or sget("session_id", "")
-        
-        # 1. Global Map (전체 파일/함수 구조) - 모든 모드에서 제공
-        try:
-            inventory = get_session_inventory(rag_session_id)
-            if inventory:
-                inventory_lines = ["<project_inventory>"]
-                inventory_lines.append(f"프로젝트 전체 코드 구조 (총 {len(inventory)}개 파일):")
-                for path, items in sorted(inventory.items()):
-                    # 각 아이템(함수/클래스)을 '이름(요약)' 형식으로 포맷팅
-                    formatted_items = []
-                    for it in items:
-                        name = it.get("name", "unknown")
-                        summary = it.get("summary", "").replace("\n", " ").strip()
-                        if summary:
-                            formatted_items.append(f"{name} ({summary[:100]})")
-                        else:
-                            formatted_items.append(name)
-                            
-                    # [FIX] Remove item truncation to see ALL functions/classes for high precision
-                    items_str = ", ".join(formatted_items)
-                        
-                    inventory_lines.append(f"- {path}: [{items_str}]")
-                inventory_lines.append("</project_inventory>")
-                parts.append("\n".join(inventory_lines))
-        except Exception as e:
-            logger.warning(f"[requirement_analyzer] Inventory 추출 실패: {e}")
-
-        # 2. Local Details (RAG 검색을 통한 상세 코드)
-        if action_type in ("UPDATE", "REVERSE_ENGINEER") or (action_type == "CREATE" and idea):
-            queries: List[str] = []
-            if idea:
-                queries.append(idea)
-            
-            # 검색 전략 강화 (더 넓은 레이어 커버)
-            queries.append("데이터 모델 엔티티 ORM 스키마 테이블 DB structure")
-            queries.append("API 엔드포인트 라우터 컨트롤러 엔트리포인트 API endpoint routes")
-            if action_type == "REVERSE_ENGINEER":
-                queries.append("핵심 서비스 레이어 비즈니스 로직 알고리즘 core business service logic")
-                queries.append("상태 관리 스토어 리듀서 Context API state management store")
-                queries.append("유틸리티 헬퍼 함수 공통 모듈 utility helper functions")
-                queries.append("미들웨어 보안 인증 필터 middleware auth security")
-            
-            # [HYBRID EXTRACTION]
-            # Priority 1: Deterministic Targeting (via Forensic Profiler)
-            from pipeline.domain.rag.nodes.project_db import get_file_chunks, query_project_code
-            
-            seen_chunk_ids = set()
-            chunks = []
-            
-            # 1. ForensicProfiler 결과 활용
-            forensic_profile = sget("forensic_profile", {})
-            
-            target_files = []
-            if forensic_profile:
-                # [DYNAMIC] 핵심 도메인 로직이 담긴 모든 레이어를 타겟팅
-                target_files = [path for path, role in forensic_profile.items() if role in ("DB", "API", "SERVICE", "UI")]
-                logger.info(f"[requirement_analyzer] Priority 1 (Forensic): {len(target_files)} core domain files.")
-            else:
-                # [MINIMAL FALLBACK]
-                forensic_patterns = ["db", "model", "router", "handler", "service", "controller", "view", "page"]
-                target_files = [path for path in inventory.keys() if any(p in path.lower() for p in forensic_patterns)]
-            
-            for t_file in target_files:
-                direct_chunks = get_file_chunks(t_file, session_id=rag_session_id)
-                for c in direct_chunks:
-                    cid = c.get("chunk_id")
-                    if cid and cid not in seen_chunk_ids:
-                        seen_chunk_ids.add(cid)
-                        chunks.append(c)
-
-            # Priority 2: Semantic RAG Search (supplementary)
-            results_per_query = 10
-            for q in queries:
-                try:
-                    results = query_project_code(q, session_id=rag_session_id, n_results=results_per_query)
-                    for c in results:
-                        cid = c.get("chunk_id")
-                        if cid and cid not in seen_chunk_ids:
-                            seen_chunk_ids.add(cid)
-                            chunks.append(c)
-                except Exception as e:
-                    logger.warning(f"[requirement_analyzer] Semantic RAG failed: {e}")
-            
-            if chunks:
-                snippet_lines = ["<existing_system_analysis_forensic>"]
-                # [FIX] NO LIMITS: Ensure all forensic evidence is provided to LLM
-                final_limit = 1000 if action_type in ("UPDATE", "REVERSE_ENGINEER") else 50
-                for c in chunks[:final_limit]:
-                    sim = c.get("similarity", 1.0)
-                    snippet_lines.append(
-                        f"- {c.get('file_path', '')}::{c.get('func_name', '')} (sim={sim:.2f})\n"
-                        f"  {(c.get('content_text', '') or '')[:1000]}"
-                    )
-                snippet_lines.append("</existing_system_analysis_forensic>")
-                parts.append("\n".join(snippet_lines))
+    # UPDATE/REVERSE_ENGINEER 모드: source_dir에서 직접 파일 구조 스캔 (ChromaDB 없이)
+    source_dir = sget("source_dir", "") or ""
+    if action_type != "CREATE" and source_dir:
+        import os as _os
+        inventory_lines = ["<project_inventory>"]
+        file_count = 0
+        for root, dirs, files in _os.walk(source_dir):
+            # 불필요한 디렉토리 건너뜀
+            dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "__pycache__", ".venv", "dist", "build")]
+            for fname in files:
+                if fname.endswith((".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".java")):
+                    rel_path = _os.path.relpath(_os.path.join(root, fname), source_dir)
+                    inventory_lines.append(f"- {rel_path}")
+                    file_count += 1
+                    if file_count >= 200:
+                        break
+            if file_count >= 200:
+                break
+        if file_count > 0:
+            inventory_lines.append("</project_inventory>")
+            parts.append("\n".join(inventory_lines))
             
     user_content = "\n\n".join(parts)
     if not user_content:

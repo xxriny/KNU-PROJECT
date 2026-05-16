@@ -212,7 +212,7 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
             "chunk_count": post_count,
             "session_id": session_id,
         }
-        if action_type in ("UPDATE", "REVERSE_ENGINEER") and not post_has_index:
+        if action_type in ("UPDATE", "REVERSE_ENGINEER") and source_dir and not post_has_index:
             await manager.send_json(ws, {
                 "type": "error",
                 "data": {

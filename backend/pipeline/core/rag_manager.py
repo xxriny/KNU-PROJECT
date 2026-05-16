@@ -43,48 +43,19 @@ class RAGManager:
             return self._search_memo(query, n_results, session_id)
 
     def _search_pm(self, query: str, n_results: int, session_id: Optional[str]) -> List[Dict[str, Any]]:
-        """
-        PM 산출물 검색 - 계층형 처리 및 중복 요약
-        """
-        from pipeline.domain.pm.nodes.pm_db import query_pm_artifacts
-        raw_results = query_pm_artifacts(query, n_results=n_results)
-        items = format_chroma_results(raw_results)
-        
-        # [Adaptive Logic] 계층형 필터링: 동일 feature_id에 대해 가장 유사도가 높은 것만 본문을 유지
-        seen_features = {}
-        optimized_items = []
-        
-        for item in items:
-            f_id = item["metadata"].get("feature_id")
-            a_type = item["metadata"].get("artifact_type")
-            
-            # feature_id가 있고 이미 처리된 경우 요약 모드로 전환
-            if f_id and f_id in seen_features:
-                item["content"] = f"[요약] {a_type} (ID: {f_id}) - 중복 컨텍스트 생략 (캐시 또는 상단 결과 참조)"
-                item["is_summary"] = True
-            else:
-                if f_id: seen_features[f_id] = True
-                item["is_summary"] = False
-            
-            optimized_items.append(item)
-            
-        return optimized_items
+        # PM/SA RAG 제거 — 빈 결과 반환
+        logger.info("[RAGManager] _search_pm: ChromaDB removed, returning empty")
+        return []
 
     def _search_stack(self, query: str, n_results: int, session_id: Optional[str]) -> List[Dict[str, Any]]:
-        """
-        기술 스택 검색 - 정밀 필터링
-        """
-        from pipeline.domain.pm.nodes.stack_db import search_tech_stacks
-        # 기존 search_tech_stacks는 이미 정제된 결과를 반환함
-        return search_tech_stacks(query, top_k=n_results)
+        # Stack RAG 제거 — guardian 크롤링으로 대체됨
+        logger.info("[RAGManager] _search_stack: ChromaDB removed, returning empty")
+        return []
 
     def _search_memo(self, query: str, n_results: int, session_id: Optional[str]) -> List[Dict[str, Any]]:
-        """
-        사용자 메모 검색 - 단순 조회
-        """
-        from pipeline.domain.pm.nodes.memo_db import query_memos
-        results = query_memos(query, n_results=n_results)
-        return format_chroma_results(results)
+        # Memo DB ChromaDB 제거 — SQLAlchemy로 이전됨
+        logger.info("[RAGManager] _search_memo: ChromaDB removed, returning empty")
+        return []
 
 # 싱글톤 인스턴스
 rag_manager = RAGManager()

@@ -5,7 +5,7 @@ SQLAlchemy ORM 모델: User, Team, AnalysisSession, DesignChangeRequest
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, ForeignKey, DateTime, Text, CheckConstraint
+from sqlalchemy import Column, String, ForeignKey, DateTime, Text, CheckConstraint, Boolean, Index
 from sqlalchemy.orm import relationship
 
 from auth.database import Base
@@ -22,6 +22,11 @@ class Team(Base):
     name = Column(String(255), nullable=False)
     github_repo = Column(String(500), nullable=True)
     github_token = Column(String(500), nullable=True)
+    
+    # 동적 OAuth 구성을 위한 필드
+    github_client_id = Column(String(255), nullable=True)
+    github_client_secret = Column(String(255), nullable=True)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
 
     users = relationship("User", back_populates="team", cascade="all, delete-orphan")
@@ -92,4 +97,24 @@ class DesignChangeRequest(Base):
         "User",
         foreign_keys=[requested_by],
         back_populates="change_requests",
+    )
+
+
+class MemoItem(Base):
+    """사용자 메모 — ChromaDB memo_db 대체 (팀 DB 단일화)."""
+    __tablename__ = "memo_items"
+
+    id = Column(String(36), primary_key=True, default=_new_uuid)
+    session_id = Column(String(255), nullable=False)
+    team_id = Column(String(36), ForeignKey("teams.id"), nullable=True)
+    text = Column(Text, nullable=False)
+    selected_text = Column(Text, default="")
+    section = Column(String(255), default="Global")
+    detail = Column(Text, default="")
+    applied = Column(Boolean, default=False)
+    applied_at = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_memo_items_session_id", "session_id"),
     )

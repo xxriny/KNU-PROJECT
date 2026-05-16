@@ -73,6 +73,7 @@ def run_impact_analyzer(
     api_key: str = "",
     model: str = "gemini-1.5-flash",
     session_id: str | None = None,
+    use_llm: bool = True,
 ) -> ImpactResult:
     """
     변경 영향 분석.
@@ -134,7 +135,7 @@ def run_impact_analyzer(
 JSON만 반환:"""
 
     try:
-        if not api_key and not os.environ.get("GEMINI_API_KEY", ""):
+        if not use_llm or (not api_key and not os.environ.get("GEMINI_API_KEY", "")):
             return _fallback_impact(change_description, sa_data)
 
         llm = _get_llm(api_key, model)

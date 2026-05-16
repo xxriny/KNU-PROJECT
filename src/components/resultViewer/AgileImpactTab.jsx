@@ -24,13 +24,18 @@ export default function AgileImpactTab() {
   const isDarkMode = useAppStore((s) => s.isDarkMode);
   const resultData = useAppStore((s) => s.resultData);
   const apiKey = useAppStore((s) => s.apiKey);
+  const backendHasKey = useAppStore((s) => s.backendHasKey);
+  const currentUser = useAppStore((s) => s.currentUser);
   const userRole = useAppStore((s) => s.userRole);
   const backendPort = useAppStore((s) => s.backendPort);
   const addComment = useAppStore((s) => s.addComment);
+  const storedImpactResult = useAppStore((s) => s.agileImpactResult);
+  const setAgileImpactResult = useAppStore((s) => s.setAgileImpactResult);
   const port = backendPort || 8000;
+  const isGithubConnected = !!currentUser?.github_id;
 
   const [changeDesc, setChangeDesc] = useState("");
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState(storedImpactResult);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expandedComps, setExpandedComps] = useState(() => new Set());
@@ -61,11 +66,14 @@ export default function AgileImpactTab() {
             tables: saData.tables || [],
           },
           api_key: apiKey || "",
+          use_llm: (!!apiKey || backendHasKey) && isGithubConnected,
         }),
       });
       const json = await res.json();
-      if (json.status === "ok") setResult(json.data);
-      else setError(json.error || "분석 실패");
+      if (json.status === "ok") {
+        setResult(json.data);
+        setAgileImpactResult(json.data);
+      } else setError(json.error || "분석 실패");
     } catch (e) {
       setError("서버 연결 실패: " + e.message);
     } finally {
@@ -128,6 +136,11 @@ export default function AgileImpactTab() {
           {!canEdit && (
             <p className={`text-xs ${isDarkMode ? "text-amber-300" : "text-amber-600"}`}>
               viewer 역할은 영향 분석을 실행할 수 없습니다.
+            </p>
+          )}
+          {!isGithubConnected && (
+            <p className="text-xs text-amber-400">
+              ⚠ GitHub 연결 시 LLM 기반 심층 분석이 활성화됩니다
             </p>
           )}
           <div className="flex gap-2">

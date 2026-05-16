@@ -51,6 +51,10 @@ class TeamUpdateRequest(BaseModel):
     github_token: Optional[str] = None
 
 
+class TeamNameUpdateRequest(BaseModel):
+    name: str
+
+
 class ChangeRequestCreate(BaseModel):
     session_id: str
     target_section: str

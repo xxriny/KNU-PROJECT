@@ -1,18 +1,6 @@
 """
 RBAC 인증 라우터: /auth/*
-POST /auth/register  — 회원가입
-POST /auth/login     — 로그인 → JWT
-GET  /auth/me        — 현재 사용자 정보
-GET  /auth/status    — 사용자 존재 여부 (첫 실행 체크)
-
-팀 관리:
-GET  /api/teams/me       — 내 팀 정보
-PATCH /api/teams/me/github — GitHub 연동 설정
-
-설계 변경 요청:
-POST  /api/change-requests        — 요청 제출
-GET   /api/change-requests        — 목록 조회
-PATCH /api/change-requests/{id}   — 승인/거절
+동적 OAuth 구성 및 팀별 설정을 지원합니다.
 """
 
 from __future__ import annotations
@@ -21,11 +9,12 @@ import os
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from auth.database import get_db
 from auth.models import User, Team, DesignChangeRequest
 from auth.schemas import (
-    RegisterRequest, LoginRequest, TeamUpdateRequest,
+    RegisterRequest, LoginRequest, TeamUpdateRequest, TeamNameUpdateRequest,
     ChangeRequestCreate, ChangeRequestUpdate, DevicePollRequest,
 )
 from auth.service import (
@@ -35,6 +24,7 @@ from auth.service import (
     get_github_user_info, create_or_update_github_user,
 )
 from auth.deps import get_current_user, require_pm, require_engineer, get_current_user_optional
+from auth.oauth_config import get_github_credentials
 
 auth_router = APIRouter()
 
@@ -43,7 +33,7 @@ auth_router = APIRouter()
 
 @auth_router.get("/auth/status")
 async def auth_status(db: Session = Depends(get_db)):
-    """앱 최초 실행 여부 체크. 사용자가 없으면 회원가입 화면 표시."""
+    """앱 최초 실행 여부 체크."""
     total = count_users(db)
     return {"has_users": total > 0, "user_count": total}
 
@@ -83,41 +73,37 @@ async def me(current_user: User = Depends(get_current_user)):
     return build_user_response(current_user)
 
 
-# ── GitHub OAuth Device Flow ─────────────────────────────────
+# ── GitHub OAuth Device Flow (Dynamic) ───────────────────────
 
 @auth_router.post("/auth/github/device-start")
-async def github_device_start():
-    """GitHub Device Flow 시작. user_code와 verification_uri를 반환."""
-    client_id = os.environ.get("GITHUB_OAUTH_CLIENT_ID", "")
-    if not client_id:
+async def github_device_start(db: Session = Depends(get_db)):
+    """GitHub Device Flow 시작. DB 설정을 우선적으로 사용합니다."""
+    from auth.oauth_config import get_github_credentials
+    client_id, _ = get_github_credentials(db)
+    
+    # 미설정이거나 더미 값이 들어있는 경우 설정창 유도
+    if not client_id or "your_" in client_id.lower() or "YOUR_" in client_id:
         raise HTTPException(
             status_code=503,
-            detail="GitHub OAuth가 설정되지 않았습니다. GITHUB_OAUTH_CLIENT_ID 환경변수를 설정하세요.",
+            detail="needs_oauth_setup",
         )
     try:
         data = start_github_device_flow(client_id)
         if "error" in data:
             raise HTTPException(status_code=400, detail=data.get("error_description", data["error"]))
-        return {
-            "user_code": data["user_code"],
-            "verification_uri": data.get("verification_uri", "https://github.com/login/device"),
-            "device_code": data["device_code"],
-            "expires_in": data.get("expires_in", 900),
-            "interval": data.get("interval", 5),
-        }
-    except HTTPException:
-        raise
+        return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"GitHub 인증 시작 실패: {e}")
 
 
 @auth_router.post("/auth/github/device-poll")
 async def github_device_poll(req: DevicePollRequest, db: Session = Depends(get_db)):
-    """GitHub Device Flow 폴링. 사용자가 승인하면 JWT + github_token 반환."""
-    client_id = os.environ.get("GITHUB_OAUTH_CLIENT_ID", "")
-    client_secret = os.environ.get("GITHUB_OAUTH_CLIENT_SECRET", "")
+    """GitHub Device Flow 폴링 및 로그인 완료."""
+    client_id, client_secret = get_github_credentials(db)
+    
     if not client_id:
-        raise HTTPException(status_code=503, detail="GitHub OAuth 미설정")
+        raise HTTPException(status_code=503, detail="GitHub OAuth 구성 오류")
+
     try:
         token_data = poll_github_device_token(client_id, client_secret, req.device_code)
         error = token_data.get("error")
@@ -128,7 +114,7 @@ async def github_device_poll(req: DevicePollRequest, db: Session = Depends(get_d
 
         access_token = token_data.get("access_token")
         if not access_token:
-            return {"status": "error", "error": "토큰 없음"}
+            return {"status": "error", "error": "토큰을 받지 못했습니다."}
 
         gh_info = get_github_user_info(access_token)
         user = create_or_update_github_user(
@@ -145,15 +131,47 @@ async def github_device_poll(req: DevicePollRequest, db: Session = Depends(get_d
             "access_token": jwt_token,
             "token_type": "bearer",
             "user": build_user_response(user),
-            "github_token": access_token,
         }
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"GitHub 인증 폴링 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"GitHub 인증 실패: {e}")
 
 
-# ── 팀 관리 ──────────────────────────────────────────────────
+@auth_router.post("/auth/github/disconnect")
+async def github_disconnect(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    current_user.github_id = None
+    current_user.github_login = None
+    current_user.github_oauth_token = None
+    db.commit()
+    return {"status": "ok"}
+
+
+class OauthSetupRequest(BaseModel):
+    client_id: str
+    client_secret: str
+
+@auth_router.post("/auth/setup-oauth")
+async def setup_initial_oauth(req: OauthSetupRequest, db: Session = Depends(get_db)):
+    """최초 실행 시 로그인을 위한 OAuth 설정 엔드포인트"""
+    if count_users(db) > 0:
+        raise HTTPException(status_code=403, detail="이미 시스템이 초기화되었습니다. 설정 패널을 이용하세요.")
+    
+    team = db.query(Team).first()
+    if not team:
+        team = Team(name="Default Team")
+        db.add(team)
+        db.flush()
+    
+    team.github_client_id = req.client_id
+    team.github_client_secret = req.client_secret
+    db.commit()
+    
+    return {"status": "ok", "message": "초기 OAuth 설정이 완료되었습니다."}
+
+
+# ── 팀 및 인증 설정 관리 ──────────────────────────────────────────
 
 @auth_router.get("/api/teams/me")
 async def get_my_team(
@@ -170,31 +188,43 @@ async def get_my_team(
             "id": team.id,
             "name": team.name,
             "github_repo": team.github_repo,
+            "github_client_id": team.github_client_id,
             "has_github_token": bool(team.github_token),
+            "has_oauth_config": bool(team.github_client_id and team.github_client_secret),
         }
     }
 
 
+class TeamOAuthConfigUpdate(BaseModel):
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
+    github_repo: Optional[str] = None
+    github_token: Optional[str] = None
+
 @auth_router.patch("/api/teams/me/github")
-async def update_team_github(
-    req: TeamUpdateRequest,
+async def update_team_github_config(
+    req: TeamOAuthConfigUpdate,
     current_user: User = Depends(require_pm),
     db: Session = Depends(get_db),
 ):
+    """팀의 GitHub OAuth 및 저장소 설정을 업데이트합니다."""
     if not current_user.team_id:
-        raise HTTPException(status_code=404, detail="팀이 없습니다.")
+        raise HTTPException(status_code=404, detail="팀 정보를 찾을 수 없습니다.")
+    
     team = db.query(Team).filter(Team.id == current_user.team_id).first()
     if not team:
         raise HTTPException(status_code=404, detail="팀을 찾을 수 없습니다.")
-    if req.github_repo is not None:
-        team.github_repo = req.github_repo
-    if req.github_token is not None:
-        team.github_token = req.github_token
+    
+    if req.client_id is not None: team.github_client_id = req.client_id
+    if req.client_secret is not None: team.github_client_secret = req.client_secret
+    if req.github_repo is not None: team.github_repo = req.github_repo
+    if req.github_token is not None: team.github_token = req.github_token
+    
     db.commit()
-    return {"status": "ok", "github_repo": team.github_repo}
+    return {"status": "ok", "message": "GitHub 구성이 업데이트되었습니다."}
 
 
-# ── 설계 변경 요청 ─────────────────────────────────────────────
+# ── 설계 변경 요청 (Agile) ─────────────────────────────────────
 
 @auth_router.post("/api/change-requests")
 async def create_change_request(

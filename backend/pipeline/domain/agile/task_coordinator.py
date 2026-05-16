@@ -45,6 +45,7 @@ class AgileTask(_Base):
     result = Column(Text, default="")
     created_by = Column(String(36), default="")
     reviewed_by = Column(String(36), default="")
+    team_id = Column(String(36), default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -52,7 +53,7 @@ class AgileTask(_Base):
 def init_tasks_db():
     _Base.metadata.create_all(bind=_engine)
     with _engine.connect() as conn:
-        for col_def in ["area TEXT DEFAULT ''", "assignee TEXT DEFAULT ''"]:
+        for col_def in ["area TEXT DEFAULT ''", "assignee TEXT DEFAULT ''", "team_id TEXT DEFAULT ''"]:
             try:
                 conn.execute(text(f"ALTER TABLE agile_tasks ADD COLUMN {col_def}"))
                 conn.commit()
@@ -70,6 +71,7 @@ def create_task(
     created_by: str = "",
     area: str = "",
     assignee: str = "",
+    team_id: str = "",
 ) -> dict:
     import json
     init_tasks_db()
@@ -83,18 +85,21 @@ def create_task(
             assignee=assignee,
             payload=json.dumps(payload or {}),
             created_by=created_by,
+            team_id=team_id,
         )
         session.add(task)
         session.commit()
         return _task_to_dict(task)
 
 
-def list_tasks(status: str | None = None) -> list[dict]:
+def list_tasks(status: str | None = None, team_id: str | None = None) -> list[dict]:
     init_tasks_db()
     with _Session() as session:
         q = session.query(AgileTask)
         if status:
             q = q.filter(AgileTask.status == status)
+        if team_id:
+            q = q.filter(AgileTask.team_id == team_id)
         tasks = q.order_by(AgileTask.created_at.desc()).all()
         return [_task_to_dict(t) for t in tasks]
 

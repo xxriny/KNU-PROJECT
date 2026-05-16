@@ -15,6 +15,9 @@ export default function AgileVerifierTab() {
   const isDarkMode = useAppStore((s) => s.isDarkMode);
   const resultData = useAppStore((s) => s.resultData);
   const apiKey = useAppStore((s) => s.apiKey);
+  const backendHasKey = useAppStore((s) => s.backendHasKey);
+  const currentUser = useAppStore((s) => s.currentUser);
+  const isGithubConnected = !!currentUser?.github_id;
   const backendPort = useAppStore((s) => s.backendPort);
   const storedVerifyResult = useAppStore((s) => s.agileVerifyResult);
   const setAgileVerifyResult = useAppStore((s) => s.setAgileVerifyResult);
@@ -53,8 +56,8 @@ export default function AgileVerifierTab() {
             tables: saData.tables || [],
           },
           api_key: apiKey || "",
-          use_llm: !!apiKey,
-          use_deep_llm: useDeepLlm && !!apiKey,
+          use_llm: (!!apiKey || backendHasKey) && isGithubConnected,
+          use_deep_llm: useDeepLlm && (!!apiKey || backendHasKey) && isGithubConnected,
         }),
       });
       const json = await res.json();
@@ -105,8 +108,11 @@ export default function AgileVerifierTab() {
                 심층 LLM
               </span>
             </label>
-            {useDeepLlm && !apiKey && (
+            {useDeepLlm && !apiKey && !backendHasKey && (
               <p className="text-xs text-amber-400">⚠ API 키 없음 — LLM 비활성화</p>
+            )}
+            {!isGithubConnected && (
+              <p className="text-xs text-amber-400 mt-0.5">⚠ GitHub 연결 시 LLM 검증이 활성화됩니다</p>
             )}
           </div>
           <button

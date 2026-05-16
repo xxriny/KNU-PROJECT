@@ -1,20 +1,20 @@
 """
 인증 서비스: 사용자 생성, JWT 토큰 발급/검증, 비밀번호 해시
+GitHub 연동에는 githubkit과 httpx를 혼합 사용합니다.
 """
 
 from __future__ import annotations
 
-import json
 import os
-import urllib.request
-import urllib.parse
 import uuid
+import httpx
 from datetime import datetime, timedelta
 from typing import Optional
 
 from jose import JWTError, jwt
 import bcrypt as _bcrypt_lib
 from sqlalchemy.orm import Session
+from githubkit import GitHub
 
 from auth.models import User, Team
 
@@ -111,67 +111,82 @@ def count_users(db: Session) -> int:
     return db.query(User).count()
 
 
-# ── GitHub OAuth Device Flow ─────────────────────────────────
-
-def _github_post(url: str, data: dict, extra_headers: dict | None = None) -> dict:
-    body = urllib.parse.urlencode(data).encode()
-    headers = {"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"}
-    if extra_headers:
-        headers.update(extra_headers)
-    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode())
-
-
-def _github_get(url: str, token: str) -> dict | list:
-    req = urllib.request.Request(url, headers={
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github.v3+json",
-    })
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode())
-
+# ── GitHub OAuth Device Flow ──────────────────────────────────
 
 def start_github_device_flow(client_id: str) -> dict:
-    """GitHub Device Flow 시작: user_code, verification_uri, device_code 반환."""
-    return _github_post(
-        "https://github.com/login/device/code",
-        {"client_id": client_id, "scope": "user:email read:user"},
-    )
+    """GitHub Device Flow 시작."""
+    # 공식 경로로 복귀
+    url = "https://github.com/login/device/code"
+    payload = {"client_id": client_id, "scope": "user:email read:user"}
+    
+    # User-Agent는 GitHub API 호출 시 필수적인 경우가 많습니다.
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "Navigator-App/2.0"
+    }
+    
+    with httpx.Client(follow_redirects=True) as client:
+        # JSON 포맷으로 전송
+        resp = client.post(url, json=payload, headers=headers)
+        
+        # 만약 404가 나면 oauth 경로로 폴백 (하이브리드 지원)
+        if resp.status_code == 404:
+            url = "https://github.com/login/oauth/device/code"
+            resp = client.post(url, json=payload, headers=headers)
+            
+        try:
+            data = resp.json()
+            if resp.status_code != 200:
+                return {"error": "github_error", "error_description": f"GitHub API 에러 ({resp.status_code}): {data.get('error_description', data.get('error', 'Unknown'))}"}
+            return data
+        except Exception:
+            return {
+                "error": "invalid_client",
+                "error_description": f"GitHub 서버 응답 오류 ({resp.status_code}). Client ID를 확인하시고, GitHub OAuth App 설정에서 'Enable Device Flow'가 켜져 있는지 다시 확인하세요."
+            }
 
 
 def poll_github_device_token(client_id: str, client_secret: str, device_code: str) -> dict:
-    """GitHub Device Flow 폴링: access_token 또는 error 반환."""
-    return _github_post(
-        "https://github.com/login/oauth/access_token",
-        {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "device_code": device_code,
-            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-        },
-    )
+    """GitHub Device Flow 폴링."""
+    url = "https://github.com/login/oauth/access_token"
+    payload = {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "device_code": device_code,
+        "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+    }
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "Navigator-App/2.0"
+    }
+    
+    with httpx.Client(follow_redirects=True) as client:
+        resp = client.post(url, json=payload, headers=headers)
+        return resp.json()
 
 
 def get_github_user_info(access_token: str) -> dict:
-    """GitHub OAuth 토큰으로 사용자 정보 조회."""
-    user = _github_get("https://api.github.com/user", access_token)
-    email = user.get("email")
-    if not email:
-        try:
-            emails = _github_get("https://api.github.com/user/emails", access_token)
-            primary = next((e for e in emails if isinstance(e, dict) and e.get("primary")), None)
-            if primary:
-                email = primary["email"]
-        except Exception:
-            pass
-    return {
-        "id": str(user["id"]),
-        "login": user["login"],
-        "name": user.get("name") or user["login"],
-        "email": email or f"{user['login']}@github-noreply.com",
-        "avatar_url": user.get("avatar_url", ""),
-    }
+    """GitHub OAuth 토큰으로 사용자 정보 조회 (githubkit 사용)."""
+    with GitHub(access_token) as gh:
+        user = gh.rest.users.get_authenticated().parsed_data
+        
+        email = getattr(user, "email", None)
+        if not email:
+            try:
+                emails = gh.rest.users.list_emails_for_authenticated_user().parsed_data
+                primary = next((e for e in emails if e.primary), None)
+                if primary:
+                    email = primary.email
+            except Exception:
+                pass
+                
+        return {
+            "id": str(user.id),
+            "login": user.login,
+            "name": getattr(user, "name", user.login) or user.login,
+            "email": email or f"{user.login}@github-noreply.com",
+            "avatar_url": getattr(user, "avatar_url", ""),
+        }
 
 
 def create_or_update_github_user(
@@ -186,6 +201,7 @@ def create_or_update_github_user(
     user = db.query(User).filter(User.github_id == github_id).first()
     if not user and email:
         user = db.query(User).filter(User.email == email).first()
+    
     if user:
         user.github_id = github_id
         user.github_login = github_login
@@ -217,6 +233,8 @@ def build_user_response(user: User) -> dict:
         "email": user.email,
         "role": user.role,
         "github_username": user.github_username,
+        "github_id": user.github_id,
+        "github_login": user.github_login,
         "team_id": user.team_id,
         "team_name": team_name,
     }

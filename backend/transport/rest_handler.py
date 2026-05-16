@@ -98,6 +98,11 @@ class MemoRequest(BaseModel):
     text: str
     selected_text: str = ""
     section: str = "Global"
+    detail: str = ""
+
+
+class MemoApplyRequest(BaseModel):
+    memo_ids: list = []
 
 
 class RAGIngestRequest(BaseModel):
@@ -414,9 +419,29 @@ async def restore_session(run_id: str):
 
 @rest_router.get("/api/memos")
 async def get_memos_endpoint(session_id: Optional[str] = None):
-    from pipeline.domain.pm.nodes.memo_db import get_memos
+    from auth.database import get_db as _get_db
+    from auth.models import MemoItem
     try:
-        memos = get_memos(session_id)
+        db = next(_get_db())
+        q = db.query(MemoItem)
+        if session_id:
+            q = q.filter(MemoItem.session_id == session_id)
+        items = q.order_by(MemoItem.created_at.asc()).all()
+        memos = [
+            {
+                "id": m.id,
+                "session_id": m.session_id,
+                "text": m.text,
+                "metadata": {
+                    "selected_text": m.selected_text,
+                    "section": m.section,
+                    "detail": m.detail,
+                    "applied": m.applied,
+                    "applied_at": m.applied_at,
+                },
+            }
+            for m in items
+        ]
         return {"status": "ok", "memos": memos}
     except Exception as e:
         return {"status": "error", "error": str(e)}
@@ -424,20 +449,58 @@ async def get_memos_endpoint(session_id: Optional[str] = None):
 
 @rest_router.post("/api/memos")
 async def add_memo_endpoint(req: MemoRequest):
-    from pipeline.domain.pm.nodes.memo_db import add_memo
+    from auth.database import get_db as _get_db
+    from auth.models import MemoItem
     try:
-        memo_id = add_memo(req.session_id, req.text, req.selected_text, req.section)
-        return {"status": "ok", "memo_id": memo_id}
+        db = next(_get_db())
+        memo = MemoItem(
+            session_id=req.session_id,
+            text=req.text,
+            selected_text=req.selected_text,
+            section=req.section,
+            detail=req.detail,
+        )
+        db.add(memo)
+        db.commit()
+        db.refresh(memo)
+        return {"status": "ok", "memo_id": memo.id}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
 
 @rest_router.delete("/api/memos/{memo_id}")
 async def delete_memo_endpoint(memo_id: str):
-    from pipeline.domain.pm.nodes.memo_db import delete_memo
+    from auth.database import get_db as _get_db
+    from auth.models import MemoItem
     try:
-        delete_memo(memo_id)
+        db = next(_get_db())
+        memo = db.query(MemoItem).filter(MemoItem.id == memo_id).first()
+        if memo:
+            db.delete(memo)
+            db.commit()
         return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/memos/apply")
+async def apply_memos_endpoint(req: MemoApplyRequest):
+    from auth.database import get_db as _get_db
+    from auth.models import MemoItem
+    from datetime import datetime as _dt
+    try:
+        db = next(_get_db())
+        ts = _dt.utcnow().isoformat()
+        updated = (
+            db.query(MemoItem)
+            .filter(MemoItem.id.in_(req.memo_ids))
+            .all()
+        )
+        for m in updated:
+            m.applied = True
+            m.applied_at = ts
+        db.commit()
+        return {"status": "ok", "updated": len(updated)}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
@@ -458,6 +521,7 @@ class AgileImpactRequest(BaseModel):
     api_key: str = ""
     model: str = DEFAULT_MODEL
     session_id: Optional[str] = None
+    use_llm: bool = True
 
 
 @rest_router.post("/api/agile/verify")
@@ -491,6 +555,7 @@ async def agile_impact(req: AgileImpactRequest):
             api_key=req.api_key,
             model=req.model,
             session_id=req.session_id,
+            use_llm=req.use_llm,
         )
         return {"status": "ok", "data": result.model_dump()}
     except Exception as e:
@@ -623,6 +688,7 @@ class TaskCreateRequest(BaseModel):
     assignee: str = ""
     payload: dict = {}
     created_by: str = ""
+    team_id: str = ""
 
 
 class TaskUpdateRequest(BaseModel):
@@ -663,6 +729,7 @@ async def create_task_endpoint(req: TaskCreateRequest):
             assignee=req.assignee,
             payload=req.payload,
             created_by=req.created_by,
+            team_id=req.team_id,
         )
         return {"status": "ok", "data": task}
     except Exception as e:
@@ -671,12 +738,12 @@ async def create_task_endpoint(req: TaskCreateRequest):
 
 
 @rest_router.get("/api/tasks")
-async def list_tasks_endpoint(status: Optional[str] = None):
+async def list_tasks_endpoint(status: Optional[str] = None, team_id: Optional[str] = None):
     """태스크 목록 조회."""
     try:
         from pipeline.domain.agile.task_coordinator import list_tasks, init_tasks_db
         init_tasks_db()
-        tasks = list_tasks(status=status)
+        tasks = list_tasks(status=status, team_id=team_id or None)
         return {"status": "ok", "data": tasks}
     except Exception as e:
         return {"status": "error", "error": str(e)}

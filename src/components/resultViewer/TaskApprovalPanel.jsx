@@ -64,12 +64,16 @@ export default function TaskApprovalPanel() {
   const isPM    = !userRole || userRole === "pm";
   const userId  = currentUser?.id || "";
 
+  const teamId = currentUser?.team_id || "";
+
   const fetchTasks = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      const url = filterStatus === "all"
-        ? `http://127.0.0.1:${port}/api/tasks`
-        : `http://127.0.0.1:${port}/api/tasks?status=${filterStatus}`;
+      const params = new URLSearchParams();
+      if (filterStatus !== "all") params.set("status", filterStatus);
+      if (teamId) params.set("team_id", teamId);
+      const query = params.toString() ? `?${params.toString()}` : "";
+      const url = `http://127.0.0.1:${port}/api/tasks${query}`;
       const res = await fetch(url);
       const json = await res.json();
       if (json.status === "ok") setTasks(json.data);
@@ -114,6 +118,7 @@ export default function TaskApprovalPanel() {
             page_title: "SA 설계 문서",
           },
           created_by: userId,
+          team_id: teamId,
         }),
       });
       const json = await res.json();
@@ -129,7 +134,7 @@ export default function TaskApprovalPanel() {
       const res = await fetch(`http://127.0.0.1:${port}/api/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...createForm, created_by: userId }),
+        body: JSON.stringify({ ...createForm, created_by: userId, team_id: teamId }),
       });
       const json = await res.json();
       if (json.status === "ok") {

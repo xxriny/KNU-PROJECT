@@ -142,12 +142,10 @@ export default function App() {
     );
   }
 
-  // 인증 체크 완료 후 로그인 필요 시 LoginScreen 표시
-  if (authChecked && hasUsers && !authToken) {
-    return <LoginScreen isFirstRun={false} />;
-  }
-  if (authChecked && hasUsers === false && !authToken) {
-    return <LoginScreen isFirstRun={true} />;
+  // 인증 체크 완료 후 토큰 없으면 항상 LoginScreen 표시
+  // hasUsers === null (백엔드 미응답)도 로그인 화면으로 처리
+  if (authChecked && !authToken) {
+    return <LoginScreen isFirstRun={hasUsers === false} />;
   }
 
   return (

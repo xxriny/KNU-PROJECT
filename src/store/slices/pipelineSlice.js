@@ -15,9 +15,11 @@ export const createPipelineSlice = (set, get) => ({
   pipelineType: "analysis",
   resultData: null,
   agileVerifyResult: null,
+  agileImpactResult: null,
   ...EMPTY_RESULT_FIELDS,
 
   setAgileVerifyResult: (result) => set({ agileVerifyResult: result }),
+  setAgileImpactResult: (result) => set({ agileImpactResult: result }),
 
   // 디버그 시스템
   debugLogs: [],
@@ -97,6 +99,11 @@ export const createPipelineSlice = (set, get) => ({
   },
 
   startAnalysis: (idea, context = "", apiKey = "", model = "gemini-3.1-flash-lite-preview", selectedMode = "create", initialTitle = null) => {
+    const { currentUser } = get();
+    if (!currentUser?.github_id) {
+      get().addNotification("GitHub 로그인이 필요합니다. 설정에서 연결하세요.", "error");
+      return;
+    }
     const normalizedMode = normalizeMode(selectedMode);
     const sourceDir = get().projectFolder || "";
     get().createSession(initialTitle);
@@ -121,6 +128,40 @@ export const createPipelineSlice = (set, get) => ({
       idea, context, api_key: apiKey, model,
       action_type: MODE_TO_ACTION_TYPE[normalizedMode],
       source_dir: sourceDir,
+    });
+  },
+
+  startMemoDrivenUpdate: (memoIds) => {
+    const { currentUser } = get();
+    if (!currentUser?.github_id) {
+      get().addNotification("GitHub 로그인이 필요합니다. 설정에서 연결하세요.", "error");
+      return;
+    }
+    const { userComments, resultData, apiKey, model, createSession, projectFolder } = get();
+    const memos = (userComments || []).filter((c) => memoIds.includes(c.id));
+    const memoText = memos
+      .map((m, i) => `${i + 1}. [${m.section || "일반"}] ${m.text}`)
+      .join('\n');
+
+    createSession("지적사항 반영 업데이트");
+    set({
+      pipelineStatus: "running",
+      pipelineError: null,
+      pipelineNodes: {},
+      thinkingLog: [],
+      pipelineType: "analysis_update",
+      chatHistory: [],
+      chatInput: "",
+      activeViewportTab: { kind: "output", id: "progress" },
+      lastOutputTab: "progress",
+    });
+    get().sendWsMessage("analyze", {
+      idea: memoText,
+      context: resultData?.raw_output || "",
+      api_key: apiKey || "",
+      model: model || "gemini-3.1-flash-lite-preview",
+      action_type: "UPDATE",
+      source_dir: projectFolder || "",
     });
   },
 

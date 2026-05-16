@@ -25,7 +25,21 @@ export default function LoginScreen({ isFirstRun = false }) {
   const [ghLoading, setGhLoading] = useState(false);
   const [ghError, setGhError] = useState("");
   const [copied, setCopied] = useState(false);
+  
+  // First run setup state
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const [setupConfig, setSetupConfig] = useState({ client_id: "", client_secret: "" });
+  const [setupLoading, setSetupLoading] = useState(false);
+  
   const pollRef = useRef(null);
+  const expireRef = useRef(null);
+  const pollIntervalRef = useRef(5000);
+
+  const GH_ERRORS = {
+    access_denied: "인증이 취소되었습니다. GitHub에서 승인을 거부했습니다.",
+    expired_token: "인증 코드가 만료되었습니다. 다시 시도하세요.",
+    incorrect_client_credentials: "OAuth 클라이언트 설정이 잘못되었습니다.",
+  };
 
   const [form, setForm] = useState({
     name: "",
@@ -38,39 +52,82 @@ export default function LoginScreen({ isFirstRun = false }) {
 
   const setField = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
 
-  // Cleanup poll interval on unmount
-  useEffect(() => () => clearInterval(pollRef.current), []);
+  // Cleanup on unmount
+  useEffect(() => () => {
+    clearInterval(pollRef.current);
+    clearTimeout(expireRef.current);
+  }, []);
+
+  const stopPolling = (errMsg = null) => {
+    clearInterval(pollRef.current);
+    clearTimeout(expireRef.current);
+    setGhFlow(null);
+    if (errMsg) setGhError(errMsg);
+  };
 
   const startGithubLogin = async () => {
+    clearInterval(pollRef.current);
+    clearTimeout(expireRef.current);
     setGhLoading(true); setGhError("");
     try {
       const data = await startGithubDeviceFlow();
       setGhFlow(data);
       window.open(data.verification_uri, "_blank");
-      // Start polling
-      const intervalMs = (data.interval || 5) * 1000;
-      pollRef.current = setInterval(async () => {
-        const result = await pollGithubDeviceFlow(data.device_code);
-        if (result.status === "ok") {
-          clearInterval(pollRef.current);
-          setGhFlow(null);
-        } else if (result.status === "error") {
-          clearInterval(pollRef.current);
-          setGhError(result.error || "인증 실패");
-          setGhFlow(null);
-        }
-      }, intervalMs);
+      pollIntervalRef.current = (data.interval || 5) * 1000;
+
+      const doPoll = async () => {
+        try {
+          const result = await pollGithubDeviceFlow(data.device_code);
+          if (result.status === "ok") {
+            stopPolling();
+          } else if (result.status === "error") {
+            stopPolling(GH_ERRORS[result.error] || result.error || "인증 실패");
+          } else if (result.error === "slow_down") {
+            clearInterval(pollRef.current);
+            pollIntervalRef.current += 5000;
+            pollRef.current = setInterval(doPoll, pollIntervalRef.current);
+          }
+        } catch (_) {}
+      };
+
+      pollRef.current = setInterval(doPoll, pollIntervalRef.current);
+
+      expireRef.current = setTimeout(() => {
+        stopPolling("인증 코드가 만료되었습니다. 다시 시도하세요.");
+      }, (data.expires_in || 900) * 1000);
     } catch (err) {
+      // 어떤 에러가 나더라도(404, 422, 500 등), 설정이 잘못되었을 가능성이 크므로
+      // 사용자에게 직접 입력할 수 있는 폼을 보여줍니다.
+      setNeedsSetup(true);
       setGhError(err.message);
     } finally {
       setGhLoading(false);
     }
   };
 
-  const cancelGithubLogin = () => {
-    clearInterval(pollRef.current);
-    setGhFlow(null); setGhError("");
+  const submitSetup = async () => {
+    setSetupLoading(true); setGhError("");
+    try {
+      const port = useAppStore.getState().backendPort || 8000;
+      const res = await fetch(`http://127.0.0.1:${port}/auth/setup-oauth`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(setupConfig),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "설정 실패");
+      
+      // 설정 성공 시 바로 로그인 플로우 시작
+      setNeedsSetup(false);
+      startGithubLogin();
+    } catch (err) {
+      setGhError(err.message);
+    } finally {
+      setSetupLoading(false);
+    }
   };
+
+  const cancelGithubLogin = () => stopPolling();
 
   const copyCode = () => {
     navigator.clipboard.writeText(ghFlow?.user_code || "");
@@ -250,6 +307,41 @@ export default function LoginScreen({ isFirstRun = false }) {
             </div>
             {ghError && <p className="text-xs text-red-400 text-center">{ghError}</p>}
           </div>
+        ) : needsSetup ? (
+          <div className={`mt-4 p-4 rounded-xl border space-y-3 ${isDarkMode ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200"}`}>
+            <p className={`text-xs font-bold ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
+              시스템 초기화: GitHub OAuth 구성
+            </p>
+            <input
+              type="text"
+              placeholder="Client ID"
+              value={setupConfig.client_id}
+              onChange={(e) => setSetupConfig(p => ({...p, client_id: e.target.value}))}
+              className={`w-full rounded-lg px-3 py-2 text-xs border outline-none transition-colors ${input}`}
+            />
+            <input
+              type="password"
+              placeholder="Client Secret"
+              value={setupConfig.client_secret}
+              onChange={(e) => setSetupConfig(p => ({...p, client_secret: e.target.value}))}
+              className={`w-full rounded-lg px-3 py-2 text-xs border outline-none transition-colors ${input}`}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={submitSetup}
+                disabled={setupLoading || !setupConfig.client_id || !setupConfig.client_secret}
+                className="flex-1 py-2 text-xs font-bold rounded-lg bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 transition-colors"
+              >
+                {setupLoading ? "저장 중..." : "저장 후 로그인 계속"}
+              </button>
+              <button
+                onClick={() => { setNeedsSetup(false); setGhError(""); }}
+                className={`px-3 text-xs font-bold rounded-lg transition-colors ${isDarkMode ? "bg-white/5 hover:bg-white/10 text-slate-400" : "bg-slate-100 hover:bg-slate-200 text-slate-600"}`}
+              >
+                취소
+              </button>
+            </div>
+          </div>
         ) : (
           <button
             type="button"
@@ -265,9 +357,10 @@ export default function LoginScreen({ isFirstRun = false }) {
             GitHub로 로그인
           </button>
         )}
-        {ghError && !ghFlow && (
+        {ghError && !ghFlow && !needsSetup && (
           <p className="text-xs text-red-400 text-center mt-2">{ghError}</p>
         )}
+
 
         {/* 모드 전환 */}
         <div className="mt-5 text-center">

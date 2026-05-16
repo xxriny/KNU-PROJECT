@@ -13,10 +13,6 @@ from version import DEFAULT_MODEL
 
 logger = get_logger()
 
-from pipeline.domain.rag.nodes.project_db import get_session_inventory
-
-logger = get_logger()
-
 # RECOVERY_PROMPT: 분석 및 복구 모드 (설정 파일을 통한 기술 스택 100% 복구)
 RECOVERY_PROMPT = """# Role: Strict Technology Forensic Auditor (Recovery Mode)
 
@@ -78,68 +74,27 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
     action_type = sget("action_type", "CREATE")
     run_id = sget("run_id", sget("session_id", "stack_session"))
     
-    # 2. 인벤토리 및 RAG 컨텍스트 준비
-    inventory = {}
+    # 2. 소스 디렉토리에서 의존성 파일 직접 읽기 (ChromaDB 없이)
     snippets_text = ""
-    if action_type != "CREATE":
-        search_session_id = sget("session_id", run_id)
-        try:
-            inventory = get_session_inventory(search_session_id)
-            
-            # [HYBRID EXTRACTION]
-            # Priority 1: Deterministic Targeting (via Forensic Profiler)
-            from pipeline.domain.rag.nodes.project_db import get_file_chunks, query_project_code
-            
-            seen_ids = set()
-            all_chunks = []
-            
-            # 1. ForensicProfiler 결과 활용
-            forensic_profile = sget("forensic_profile", {})
-            
-            target_files = []
-            if forensic_profile:
-                # [DYNAMIC] CONFIG 및 DB 정보를 합쳐 기술 스택의 결정적 증거 확보
-                target_files = [path for path, role in forensic_profile.items() if role in ("CONFIG", "DB", "UTIL")]
-                logger.info(f"[stack_planner] Priority 1 (Forensic): {len(target_files)} config/db files.")
-            else:
-                # [MINIMAL FALLBACK]
-                config_patterns = ["package", "requirements", "lock", "docker", "setup", "pyproject"]
-                target_files = [path for path in inventory.keys() if any(p in path.lower() for p in config_patterns)]
-            
-            for t_file in target_files:
-                direct_chunks = get_file_chunks(t_file, session_id=search_session_id)
-                for c in direct_chunks:
-                    cid = c.get("chunk_id")
-                    if cid and cid not in seen_ids:
-                        seen_ids.add(cid)
-                        all_chunks.append(c)
+    source_dir = sget("source_dir", "")
+    if source_dir and action_type != "CREATE":
+        import os
+        dep_files = ["package.json", "requirements.txt", "pyproject.toml", "package-lock.json"]
+        found_lines = ["<source_code_dependency_evidence>"]
+        for fname in dep_files:
+            fpath = os.path.join(source_dir, fname)
+            try:
+                if os.path.isfile(fpath):
+                    with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read(8000)
+                    found_lines.append(f"File: {fname}\nContent:\n{content}")
+            except Exception:
+                pass
+        if len(found_lines) > 1:
+            found_lines.append("</source_code_dependency_evidence>")
+            snippets_text = "\n".join(found_lines)
 
-            # Priority 2: Semantic RAG Search (supplementary)
-            queries = ["requirements.txt dependencies version package.json", "database connection string config"]
-            for q in queries:
-                try:
-                    # [FIX] NO LIMITS: Increase n_results for update/reverse modes
-                    n_res = 50 if action_type in ("UPDATE", "REVERSE_ENGINEER") else 15
-                    res_chunks = query_project_code(q, session_id=search_session_id, n_results=n_res, api_key=sget("api_key", ""))
-                    for c in res_chunks:
-                        cid = c.get("chunk_id")
-                        if cid and cid not in seen_ids:
-                            seen_ids.add(cid)
-                            all_chunks.append(c)
-                except Exception as e:
-                    logger.warning(f"[stack_planner] Semantic RAG failed: {e}")
-            
-            if all_chunks:
-                lines = ["<source_code_dependency_evidence>"]
-                limit = 1000 if action_type in ("UPDATE", "REVERSE_ENGINEER") else 60
-                for c in all_chunks[:limit]:
-                    lines.append(f"File: {c.get('file_path')}\nContent: {c.get('content_text', '')}")
-                lines.append("</source_code_dependency_evidence>")
-                snippets_text = "\n".join(lines)
-        except Exception as e:
-            logger.warning(f"[stack_planner] RAG search failed: {e}")
-
-    base_rag_context = sget("stack_rag_context", "No approved stacks found in RAG.")
+    base_rag_context = "Guardian crawling results below."
     guardian_out = sget("guardian_output", {})
     new_knowledge = ""
     if guardian_out.get("status") == "APPROVED" and guardian_out.get("final_data"):
@@ -154,20 +109,9 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
             "loop_count": current_loop + 1
         }
 
-    # 3. 인벤토리 포맷팅
-    inventory_str = ""
-    if inventory:
-        lines = ["<project_inventory>"]
-        for p, items in sorted(inventory.items()):
-            # [FIX] Remove truncation to see all functions
-            lines.append(f"- {p}: {[it.get('name') for it in items]}")
-        lines.append("</project_inventory>")
-        inventory_str = "\n".join(lines)
-
-    # 4. 사용자 메시지 조립
+    # 3. 사용자 메시지 조립
     feature_ids = [f.get("id") for f in features]
-    user_msg = f"""{inventory_str}
-{snippets_text}
+    user_msg = f"""{snippets_text}
 
 ### [요구사항 기능 목록 (총 {len(features)}개)]
 {features}

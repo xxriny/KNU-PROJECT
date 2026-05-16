@@ -34,5 +34,5 @@ def get_db():
 
 
 def init_db():
-    from auth.models import User, Team, AnalysisSession, DesignChangeRequest  # noqa: F401
+    from auth.models import User, Team, AnalysisSession, DesignChangeRequest, MemoItem  # noqa: F401
     Base.metadata.create_all(bind=engine)

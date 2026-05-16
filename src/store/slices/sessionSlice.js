@@ -20,6 +20,7 @@ export const createSessionSlice = (set, get) => ({
       id,
       name: initialTitle && initialTitle !== "새 프로젝트" ? initialTitle : `세션 ${now.toLocaleDateString("ko")} ${now.toLocaleTimeString("ko", { hour: "2-digit", minute: "2-digit" })}`,
       createdAt: now.getTime(),
+      team_id: state.currentUser?.team_id || null,
       projectFolder: state.projectFolder,
       fileTree: state.fileTree,
       openFiles: state.openFiles,

@@ -16,6 +16,7 @@
   "dependencies": {
     "@dbml/core": "^7.1.1",
     "@monaco-editor/react": "^4.6.0",
+    "@supabase/supabase-js": "^2.105.4",
     "@tisoap/react-flow-smart-edge": "^4.0.1",
     "@xyflow/react": "^12.10.2",
     "dagre": "^0.8.5",

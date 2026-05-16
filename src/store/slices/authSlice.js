@@ -140,10 +140,21 @@ export const createAuthSlice = (set, get) => ({
     const data = await res.json();
     if (data.status === "ok") {
       get().setAuth(data.access_token, data.user);
-      if (data.github_token) {
-        set({ githubToken: data.github_token });
-      }
     }
     return data;
+  },
+
+  disconnectGithub: async () => {
+    const { backendPort, authToken } = get();
+    try {
+      await fetch(`http://127.0.0.1:${backendPort}/auth/github/disconnect`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+    } catch (_) {}
+    set((s) => ({
+      currentUser: s.currentUser ? { ...s.currentUser, github_id: null, github_login: null } : null,
+      githubToken: "",
+    }));
   },
 });
