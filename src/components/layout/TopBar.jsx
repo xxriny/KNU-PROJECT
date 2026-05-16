@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ChevronRight, Library, Settings } from "lucide-react";
+import { ChevronRight, Library, Settings, LogOut } from "lucide-react";
 import useAppStore from "../../store/useAppStore";
 
 export default function TopBar({
@@ -8,7 +8,7 @@ export default function TopBar({
   showSessions, setShowSessions,
   showSettings, setShowSettings,
 }) {
-  const { isDarkMode, currentSessionId, sessions, updateSessionName } = useAppStore();
+  const { isDarkMode, currentSessionId, sessions, updateSessionName, currentUser, logout } = useAppStore();
   const currentSession = sessions.find(s => s.id === currentSessionId);
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
@@ -88,6 +88,15 @@ export default function TopBar({
           <Settings size={16} />
           <span>설정</span>
         </button>
+        {currentUser && (
+          <button
+            onClick={logout}
+            title={`${currentUser.name || currentUser.email} 로그아웃`}
+            className={`flex items-center gap-2 px-3 py-2 text-[13px] font-bold rounded-xl border transition-all border-[var(--border)] text-[var(--text-secondary)] hover:text-red-400 hover:border-red-500/30 ${isDarkMode ? "hover:bg-red-500/5" : "hover:bg-red-50"}`}
+          >
+            <LogOut size={16} />
+          </button>
+        )}
       </div>
     </div>
   );

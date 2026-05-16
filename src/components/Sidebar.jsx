@@ -1,56 +1,18 @@
-/**
- * Sidebar — 좌측 패널
- * - 프로젝트 로고/타이틀
- * - 파일 트리 (프로젝트 구조)
- * - 하단: API 키 입력 + 모델 선택
- */
-
 import React, { useState } from "react";
 import useAppStore from "../store/useAppStore";
 import {
   FolderTree,
-  FolderOpen,
   FileCode,
   ChevronRight,
   ChevronDown,
-  Settings,
-  Key,
-  Cpu,
-  Sun,
-  Moon,
 } from "lucide-react";
 
 export default function Sidebar() {
-  const {
-    fileTree,
-    apiKey,
-    setApiKey,
-    model,
-    setModel,
-    availableModels,
-    backendHasKey,
-    projectFolder,
-    selectAndScanFolder,
-    isDarkMode,
-    toggleDarkMode,
-    startDevelop,
-    pipelineStatus,
-    resultData,
-  } = useAppStore();
-
-  const [showSettings, setShowSettings] = useState(false);
-
-  const handleRunDev = () => {
-    startDevelop(apiKey, model);
-  };
+  const { fileTree, projectFolder } = useAppStore();
 
   return (
     <div className="h-full flex flex-col bg-transparent border-r border-[var(--border)] text-[15px] transition-colors duration-300">
-
-      {/* ── 스크롤 영역 (프로젝트 트리) ───── */}
       <div className="flex-1 overflow-y-auto">
-
-        {/* ── 파일 트리 ─────────────────────── */}
         <div className="px-2 py-2">
           <div className="flex items-center gap-1.5 px-2 py-1.5 text-[12px] text-slate-400 uppercase tracking-wider">
             <FolderTree size={12} />
@@ -72,29 +34,10 @@ export default function Sidebar() {
           )}
         </div>
       </div>
-
-      {/* ── 개발 파이프라인 (임시 UI) ───── */}
-      <div className="p-3 border-t border-[var(--border)]">
-        <button
-          onClick={handleRunDev}
-          disabled={pipelineStatus === "running" || !resultData}
-          className={`w-full py-2 px-4 flex items-center justify-center gap-2 rounded text-sm font-semibold transition-colors ${
-            pipelineStatus === "running" || !resultData
-              ? "bg-slate-700/50 text-slate-500 cursor-not-allowed"
-              : "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20"
-          }`}
-        >
-          <Cpu size={16} />
-          {pipelineStatus === "running" ? "실행 중..." : "Dev 파이프라인 실행"}
-        </button>
-      </div>
     </div>
   );
 }
 
-/**
- * 파일 트리 노드 (재귀 컴포넌트).
- */
 function FileTreeNode({ nodes, depth }) {
   return (
     <div>
@@ -107,16 +50,15 @@ function FileTreeNode({ nodes, depth }) {
 
 function FileTreeItem({ node, depth }) {
   const [expanded, setExpanded] = useState(false);
-  const { openProjectFile, selectedFile, setSelectedFile } = useAppStore();
+  const { selectedFile, setSelectedFile } = useAppStore();
   const isFolder = node.type === "folder";
   const isSelected = selectedFile?.path === node.path;
 
-  const handleClick = async () => {
+  const handleClick = () => {
     if (isFolder) {
       setExpanded(!expanded);
     } else {
       setSelectedFile(node);
-      await openProjectFile(node);
     }
   };
 

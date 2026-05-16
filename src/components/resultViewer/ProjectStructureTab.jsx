@@ -10,6 +10,7 @@ export default function ProjectStructureTab() {
   const [view, setView] = useState("tree"); // "tree" | "mapping"
 
   const projectStructure =
+    resultData?.sa_project_structure_output ||
     resultData?.sa_project_structure ||
     sa_output?.data?.project_structure ||
     sa_output?.project_structure ||

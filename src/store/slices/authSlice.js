@@ -117,4 +117,33 @@ export const createAuthSlice = (set, get) => ({
   logout: () => {
     get().clearAuth();
   },
+
+  /** GitHub Device Flow 시작 */
+  startGithubDeviceFlow: async () => {
+    const { backendPort } = get();
+    const res = await fetch(`http://127.0.0.1:${backendPort}/auth/github/device-start`, {
+      method: "POST",
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "GitHub 인증 시작 실패");
+    return data;
+  },
+
+  /** GitHub Device Flow 폴링 */
+  pollGithubDeviceFlow: async (device_code) => {
+    const { backendPort } = get();
+    const res = await fetch(`http://127.0.0.1:${backendPort}/auth/github/device-poll`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_code }),
+    });
+    const data = await res.json();
+    if (data.status === "ok") {
+      get().setAuth(data.access_token, data.user);
+      if (data.github_token) {
+        set({ githubToken: data.github_token });
+      }
+    }
+    return data;
+  },
 });

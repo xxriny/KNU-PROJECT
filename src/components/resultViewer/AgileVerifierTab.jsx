@@ -16,12 +16,15 @@ export default function AgileVerifierTab() {
   const resultData = useAppStore((s) => s.resultData);
   const apiKey = useAppStore((s) => s.apiKey);
   const backendPort = useAppStore((s) => s.backendPort);
+  const storedVerifyResult = useAppStore((s) => s.agileVerifyResult);
+  const setAgileVerifyResult = useAppStore((s) => s.setAgileVerifyResult);
   const port = backendPort || 8000;
 
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState(storedVerifyResult);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const [useDeepLlm, setUseDeepLlm] = useState(false);
 
   const saData = resultData?.sa_output?.data || resultData?.sa_output || {};
 
@@ -51,11 +54,13 @@ export default function AgileVerifierTab() {
           },
           api_key: apiKey || "",
           use_llm: !!apiKey,
+          use_deep_llm: useDeepLlm && !!apiKey,
         }),
       });
       const json = await res.json();
       if (json.status === "ok") {
         setResult(json.data);
+        setAgileVerifyResult(json.data);
       } else {
         setError(json.error || "검증 실패");
       }
@@ -77,27 +82,46 @@ export default function AgileVerifierTab() {
   return (
     <div className={`h-full flex flex-col p-6 space-y-6 ${isDarkMode ? "text-slate-300" : "text-slate-800"}`}>
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className={`text-2xl font-black tracking-tight ${isDarkMode ? "text-white" : "text-slate-900"}`}>
             SA 일관성 검증
           </h2>
           <p className="text-sm opacity-60 mt-1">
-            V-001~V-006 규칙으로 SA 결과물의 논리적 일관성을 검증합니다.
+            휴리스틱(V-001~V-005) + LLM(V-006~V-009) 하이브리드로 SA 결과물의 논리적 일관성을 검증합니다.
           </p>
         </div>
-        <button
-          onClick={runVerify}
-          disabled={loading}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg transition-all ${
-            loading
-              ? "bg-white/5 text-slate-500 cursor-not-allowed"
-              : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-500/20 hover:scale-[1.02] active:scale-[0.99]"
-          }`}
-        >
-          {loading ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
-          {loading ? "검증 중..." : "검증 실행"}
-        </button>
+        <div className="flex items-center gap-3 shrink-0">
+          {/* Deep LLM 토글 */}
+          <div className="flex flex-col items-end gap-1">
+            <label className="flex items-center gap-2 cursor-pointer select-none" title="V-007~V-009 LLM 심층 검증 활성화">
+              <div
+                onClick={() => setUseDeepLlm((v) => !v)}
+                className={`w-9 h-5 rounded-full transition-colors cursor-pointer ${useDeepLlm ? "bg-purple-500" : isDarkMode ? "bg-white/10" : "bg-slate-200"}`}
+              >
+                <div className={`w-4 h-4 rounded-full bg-white shadow-sm mt-0.5 transition-transform ${useDeepLlm ? "translate-x-4 ml-0.5" : "translate-x-0.5"}`} />
+              </div>
+              <span className={`text-xs font-bold ${useDeepLlm ? "text-purple-400" : "opacity-40"}`}>
+                심층 LLM
+              </span>
+            </label>
+            {useDeepLlm && !apiKey && (
+              <p className="text-xs text-amber-400">⚠ API 키 없음 — LLM 비활성화</p>
+            )}
+          </div>
+          <button
+            onClick={runVerify}
+            disabled={loading}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg transition-all ${
+              loading
+                ? "bg-white/5 text-slate-500 cursor-not-allowed"
+                : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-500/20 hover:scale-[1.02] active:scale-[0.99]"
+            }`}
+          >
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
+            {loading ? "검증 중..." : "검증 실행"}
+          </button>
+        </div>
       </div>
 
       {/* Error */}

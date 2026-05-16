@@ -71,3 +71,7 @@ class ChangeRequestResponse(BaseModel):
 
 class ChangeRequestUpdate(BaseModel):
     status: str
+
+
+class DevicePollRequest(BaseModel):
+    device_code: str

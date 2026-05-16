@@ -12,7 +12,7 @@ def _now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 from typing import Optional
 
-from sqlalchemy import Column, String, Text, DateTime, create_engine
+from sqlalchemy import Column, String, Text, DateTime, create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 import os
 
@@ -39,6 +39,8 @@ class AgileTask(_Base):
     title = Column(String(255), nullable=False)
     description = Column(Text, default="")
     status = Column(String(32), default="pending")  # pending | approved | rejected | completed | failed
+    area = Column(String(32), default="")           # backend | frontend | fullstack | devops
+    assignee = Column(String(255), default="")
     payload = Column(Text, default="{}")  # JSON
     result = Column(Text, default="")
     created_by = Column(String(36), default="")
@@ -49,6 +51,13 @@ class AgileTask(_Base):
 
 def init_tasks_db():
     _Base.metadata.create_all(bind=_engine)
+    with _engine.connect() as conn:
+        for col_def in ["area TEXT DEFAULT ''", "assignee TEXT DEFAULT ''"]:
+            try:
+                conn.execute(text(f"ALTER TABLE agile_tasks ADD COLUMN {col_def}"))
+                conn.commit()
+            except Exception:
+                pass
 
 
 # ── CRUD ────────────────────────────────────────────────────
@@ -59,6 +68,8 @@ def create_task(
     description: str = "",
     payload: dict | None = None,
     created_by: str = "",
+    area: str = "",
+    assignee: str = "",
 ) -> dict:
     import json
     init_tasks_db()
@@ -68,6 +79,8 @@ def create_task(
             task_type=task_type,
             title=title,
             description=description,
+            area=area,
+            assignee=assignee,
             payload=json.dumps(payload or {}),
             created_by=created_by,
         )
@@ -91,6 +104,17 @@ def get_task(task_id: str) -> dict | None:
     with _Session() as session:
         task = session.query(AgileTask).filter(AgileTask.id == task_id).first()
         return _task_to_dict(task) if task else None
+
+
+def delete_task(task_id: str) -> bool:
+    init_tasks_db()
+    with _Session() as session:
+        task = session.query(AgileTask).filter(AgileTask.id == task_id).first()
+        if not task:
+            return False
+        session.delete(task)
+        session.commit()
+        return True
 
 
 def update_task_status(
@@ -122,6 +146,8 @@ def _task_to_dict(task: AgileTask) -> dict:
         "title": task.title,
         "description": task.description,
         "status": task.status,
+        "area": task.area or "",
+        "assignee": task.assignee or "",
         "payload": json.loads(task.payload or "{}"),
         "result": task.result,
         "created_by": task.created_by,
@@ -163,8 +189,15 @@ def execute_approved_task(task: dict) -> str:
         elif task_type == "import_issues":
             return json.dumps({"imported": len(payload.get("issues", []))})
 
+        elif task_type in ("feature", "bugfix", "refactor", "infra", "doc_sync"):
+            return json.dumps({
+                "message": f"'{task_type}' 태스크가 승인되었습니다. 담당자에게 알림이 전송됩니다.",
+                "area": task.get("area", ""),
+                "assignee": task.get("assignee", ""),
+            })
+
         else:
             return json.dumps({"message": f"태스크 타입 '{task_type}' 실행됨"})
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return json.dumps({"error": str(e) or repr(e) or f"{type(e).__name__} (메시지 없음)"})

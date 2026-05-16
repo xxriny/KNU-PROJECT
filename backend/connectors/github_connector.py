@@ -116,6 +116,14 @@ class GitHubConnector:
         resp = requests.put(wiki_api, json=payload, headers=headers, timeout=15)
         return resp.status_code in (200, 201)
 
+    def _ensure_label(self, owner: str, repo: str, label: str, headers: dict) -> None:
+        """라벨이 없으면 자동 생성."""
+        import requests
+        labels_url = f"https://api.github.com/repos/{owner}/{repo}/labels"
+        resp = requests.get(f"{labels_url}/{label}", headers=headers, timeout=10)
+        if resp.status_code == 404:
+            requests.post(labels_url, json={"name": label, "color": "0075ca"}, headers=headers, timeout=10)
+
     def publish_markdown_to_wiki(self, owner: str, repo: str, page_title: str, markdown: str) -> dict:
         """Issues 방식으로 설계 문서를 퍼블리시 (wiki API 제한 우회용)."""
         import requests
@@ -123,25 +131,42 @@ class GitHubConnector:
             "Authorization": f"token {self._token}",
             "Accept": "application/vnd.github.v3+json",
         }
+
+        # 토큰 유효성 사전 확인
+        me_resp = requests.get("https://api.github.com/user", headers=headers, timeout=10)
+        if me_resp.status_code == 401:
+            raise ValueError("GitHub 토큰이 유효하지 않습니다. 설정에서 토큰을 확인하세요.")
+        if me_resp.status_code not in (200, 304):
+            raise ValueError(f"GitHub API 오류: HTTP {me_resp.status_code}")
+
+        # design-doc 라벨 자동 생성
+        self._ensure_label(owner, repo, "design-doc", headers)
+
         # 기존 issue에서 같은 제목 탐색 후 업데이트, 없으면 생성
         list_url = f"https://api.github.com/repos/{owner}/{repo}/issues"
         resp = requests.get(list_url, headers=headers, params={"state": "open", "labels": "design-doc"}, timeout=10)
+        if resp.status_code not in (200, 304):
+            raise ValueError(f"이슈 목록 조회 실패: HTTP {resp.status_code} — {resp.text[:200]}")
+
         existing_number = None
-        if resp.status_code == 200:
-            for issue in resp.json():
-                if issue.get("title") == page_title:
-                    existing_number = issue["number"]
-                    break
+        for issue in resp.json():
+            if issue.get("title") == page_title:
+                existing_number = issue["number"]
+                break
 
         body = f"<!-- navigator-design-doc -->\n\n{markdown}"
         if existing_number:
             patch_url = f"{list_url}/{existing_number}"
             r = requests.patch(patch_url, json={"body": body}, headers=headers, timeout=10)
-            return {"action": "updated", "number": existing_number, "success": r.status_code == 200}
+            if r.status_code not in (200, 201):
+                raise ValueError(f"이슈 업데이트 실패: HTTP {r.status_code} — {r.text[:200]}")
+            return {"action": "updated", "number": existing_number, "success": True}
         else:
             r = requests.post(list_url, json={"title": page_title, "body": body, "labels": ["design-doc"]}, headers=headers, timeout=10)
+            if r.status_code not in (200, 201):
+                raise ValueError(f"이슈 생성 실패: HTTP {r.status_code} — {r.text[:200]}")
             data = r.json()
-            return {"action": "created", "number": data.get("number"), "success": r.status_code == 201}
+            return {"action": "created", "number": data.get("number"), "success": True}
 
 
 def verify_token(token: str) -> dict:

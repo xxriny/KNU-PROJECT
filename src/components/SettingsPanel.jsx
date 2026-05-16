@@ -53,7 +53,7 @@ export default function SettingsPanel() {
   };
 
   return (
-    <div className="p-5 space-y-5 max-w-md mx-auto mt-4">
+    <div className="p-5 space-y-5 max-w-md mx-auto mt-4 overflow-x-hidden">
       <h2 className="text-base font-semibold text-[var(--text-primary)] mb-1">설정</h2>
 
       {/* API Key */}

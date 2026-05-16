@@ -3,7 +3,7 @@ import useAppStore from "../../store/useAppStore";
 import {
   ClipboardList, Check, X, Clock, Loader2, RefreshCw,
   ChevronDown, ChevronRight, Zap, AlertTriangle, CheckCircle,
-  XCircle, Github, Plus,
+  XCircle, Github, Plus, Trash2,
 } from "lucide-react";
 
 const STATUS_CONFIG = {
@@ -19,7 +19,21 @@ const TASK_TYPE_LABEL = {
   verify_sa:     "SA 검증",
   import_issues: "GitHub Issues 임포트",
   doc_sync:      "문서 동기화",
+  feature:       "기능 개발",
+  bugfix:        "버그 수정",
+  refactor:      "리팩토링",
+  infra:         "인프라/DevOps",
 };
+
+const AREA_LABEL = {
+  backend:   "백엔드",
+  frontend:  "프론트엔드",
+  fullstack: "풀스택",
+  devops:    "DevOps",
+};
+
+const TASK_TYPES = ["feature", "bugfix", "refactor", "infra", "publish_docs", "verify_sa"];
+const AREAS = ["backend", "frontend", "fullstack", "devops"];
 
 export default function TaskApprovalPanel() {
   const isDarkMode   = useAppStore((s) => s.isDarkMode);
@@ -38,6 +52,13 @@ export default function TaskApprovalPanel() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [importLoading, setImportLoading] = useState(false);
   const [importMsg, setImportMsg] = useState("");
+
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [createForm, setCreateForm] = useState({
+    task_type: "feature", title: "", description: "", area: "backend", assignee: "",
+  });
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createMsg, setCreateMsg] = useState("");
 
   const port    = backendPort || 8000;
   const isPM    = !userRole || userRole === "pm";
@@ -101,6 +122,28 @@ export default function TaskApprovalPanel() {
     } catch (e) { setError("서버 연결 실패: " + e.message); }
   };
 
+  const handleCreateCustomTask = async () => {
+    if (!createForm.title.trim()) { setCreateMsg("제목을 입력하세요."); return; }
+    setCreateLoading(true); setCreateMsg("");
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...createForm, created_by: userId }),
+      });
+      const json = await res.json();
+      if (json.status === "ok") {
+        setCreateMsg("태스크가 생성되었습니다.");
+        setCreateForm({ task_type: "feature", title: "", description: "", area: "backend", assignee: "" });
+        setShowCreateForm(false);
+        fetchTasks();
+      } else {
+        setCreateMsg("실패: " + (json.error || "unknown"));
+      }
+    } catch (e) { setCreateMsg("연결 실패: " + e.message); }
+    finally { setCreateLoading(false); }
+  };
+
   const handleImportIssues = async () => {
     if (!githubToken || !githubOwner || !githubRepo) {
       setImportMsg("GitHub 설정이 필요합니다. 설정 패널에서 입력하세요.");
@@ -122,6 +165,18 @@ export default function TaskApprovalPanel() {
       }
     } catch (e) { setImportMsg("연결 실패: " + e.message); }
     finally { setImportLoading(false); }
+  };
+
+  const handleDelete = async (taskId) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, { method: "DELETE" });
+      const json = await res.json();
+      if (json.status === "ok") {
+        setTasks((prev) => prev.filter((t) => t.id !== taskId));
+      } else {
+        setError(json.error || "삭제 실패");
+      }
+    } catch (e) { setError("서버 연결 실패: " + e.message); }
   };
 
   const toggleExpand = (id) =>
@@ -162,18 +217,24 @@ export default function TaskApprovalPanel() {
       {/* Quick Actions (PM only) */}
       {isPM && (
         <div className={`p-4 rounded-2xl border space-y-3 ${isDarkMode ? "bg-white/5 border-white/10" : "bg-white border-slate-200 shadow-sm"}`}>
-          <p className="text-xs font-bold uppercase tracking-wider opacity-60">빠른 태스크 생성</p>
+          <p className="text-xs font-bold uppercase tracking-wider opacity-60">태스크 생성</p>
           <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => { setShowCreateForm((v) => !v); setCreateMsg(""); }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-500/10"
+            >
+              <Plus size={12} /> 새 태스크 만들기
+            </button>
             <button
               onClick={handleCreatePublishTask}
               disabled={!resultData}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
                 resultData
                   ? "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/10"
-                  : "bg-white/5 text-slate-500 cursor-not-allowed"
+                  : isDarkMode ? "bg-white/5 text-slate-500 cursor-not-allowed" : "bg-slate-100 text-slate-400 cursor-not-allowed"
               }`}
             >
-              <Plus size={12} /> 설계 문서 퍼블리시 태스크
+              <Plus size={12} /> 설계 문서 퍼블리시
             </button>
             <button
               onClick={handleImportIssues}
@@ -181,13 +242,107 @@ export default function TaskApprovalPanel() {
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
                 githubToken && !importLoading
                   ? "bg-slate-700 hover:bg-slate-600 text-white"
-                  : "bg-white/5 text-slate-500 cursor-not-allowed"
+                  : isDarkMode ? "bg-white/5 text-slate-500 cursor-not-allowed" : "bg-slate-100 text-slate-400 cursor-not-allowed"
               }`}
             >
               {importLoading ? <Loader2 size={12} className="animate-spin" /> : <Github size={12} />}
               GitHub Issues 임포트
             </button>
           </div>
+
+          {/* 커스텀 태스크 생성 폼 */}
+          {showCreateForm && (
+            <div className={`mt-3 p-4 rounded-xl border space-y-3 ${isDarkMode ? "bg-black/20 border-white/10" : "bg-slate-50 border-slate-200"}`}>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold opacity-60 mb-1">태스크 유형</label>
+                  <select
+                    value={createForm.task_type}
+                    onChange={(e) => setCreateForm((f) => ({ ...f, task_type: e.target.value }))}
+                    style={{ colorScheme: "light" }}
+                    className={`w-full px-3 py-2 rounded-lg text-xs font-semibold border outline-none ${
+                      isDarkMode ? "bg-slate-800 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-800"
+                    }`}
+                  >
+                    {TASK_TYPES.map((t) => <option key={t} value={t}>{TASK_TYPE_LABEL[t] || t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold opacity-60 mb-1">담당 영역</label>
+                  <select
+                    value={createForm.area}
+                    onChange={(e) => setCreateForm((f) => ({ ...f, area: e.target.value }))}
+                    style={{ colorScheme: "light" }}
+                    className={`w-full px-3 py-2 rounded-lg text-xs font-semibold border outline-none ${
+                      isDarkMode ? "bg-slate-800 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-800"
+                    }`}
+                  >
+                    {AREAS.map((a) => <option key={a} value={a}>{AREA_LABEL[a] || a}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold opacity-60 mb-1">제목 *</label>
+                <input
+                  type="text"
+                  value={createForm.title}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, title: e.target.value }))}
+                  placeholder="태스크 제목을 입력하세요"
+                  className={`w-full px-3 py-2 rounded-lg text-xs border outline-none ${
+                    isDarkMode ? "bg-white/5 border-white/10 text-white placeholder:text-slate-500" : "bg-white border-slate-200 text-slate-800"
+                  }`}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold opacity-60 mb-1">설명</label>
+                <textarea
+                  value={createForm.description}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
+                  placeholder="태스크에 대한 상세 설명"
+                  rows={2}
+                  className={`w-full px-3 py-2 rounded-lg text-xs border outline-none resize-none ${
+                    isDarkMode ? "bg-white/5 border-white/10 text-white placeholder:text-slate-500" : "bg-white border-slate-200 text-slate-800"
+                  }`}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold opacity-60 mb-1">담당자</label>
+                <input
+                  type="text"
+                  value={createForm.assignee}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, assignee: e.target.value }))}
+                  placeholder="담당자 이름 또는 이메일"
+                  className={`w-full px-3 py-2 rounded-lg text-xs border outline-none ${
+                    isDarkMode ? "bg-white/5 border-white/10 text-white placeholder:text-slate-500" : "bg-white border-slate-200 text-slate-800"
+                  }`}
+                />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={handleCreateCustomTask}
+                  disabled={createLoading}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white transition-all"
+                >
+                  {createLoading ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                  생성
+                </button>
+                <button
+                  onClick={() => { setShowCreateForm(false); setCreateMsg(""); }}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                    isDarkMode ? "bg-white/5 hover:bg-white/10 text-slate-400" : "bg-slate-100 hover:bg-slate-200 text-slate-600"
+                  }`}
+                >
+                  취소
+                </button>
+              </div>
+              {createMsg && (
+                <p className={`text-xs ${createMsg.startsWith("실패") || createMsg.startsWith("연결") || createMsg.startsWith("제목") ? "text-red-400" : "text-emerald-400"}`}>
+                  {createMsg}
+                </p>
+              )}
+            </div>
+          )}
+
           {importMsg && (
             <p className={`text-xs ${importMsg.startsWith("실패") || importMsg.startsWith("연결") ? "text-red-400" : "text-emerald-400"}`}>
               {importMsg}
@@ -269,6 +424,8 @@ export default function TaskApprovalPanel() {
                   </div>
                   <p className="text-xs opacity-50 mt-0.5">
                     {task.created_at?.slice(0, 16).replace("T", " ")}
+                    {task.area && ` · ${AREA_LABEL[task.area] || task.area}`}
+                    {task.assignee && ` · ${task.assignee}`}
                     {task.reviewed_by && ` · 검토: ${task.reviewed_by}`}
                   </p>
                 </div>
@@ -301,6 +458,17 @@ export default function TaskApprovalPanel() {
                         className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all"
                       >
                         <X size={12} /> 거절
+                      </button>
+                    </div>
+                  )}
+                  {/* 삭제 — 완료/거절 상태에서만 */}
+                  {(task.status === "completed" || task.status === "rejected" || task.status === "failed") && (
+                    <div className="flex justify-end pt-1">
+                      <button
+                        onClick={() => handleDelete(task.id)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-slate-500 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all"
+                      >
+                        <Trash2 size={12} /> 삭제
                       </button>
                     </div>
                   )}

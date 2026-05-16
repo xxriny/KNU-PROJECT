@@ -101,6 +101,7 @@ def run_impact_analyzer(
                    for t in sa_data.get("tables", [])[:10]],
     }, ensure_ascii=False)
 
+    rag_section = f"## 관련 RAG 컨텍스트\n{rag_context}" if rag_context else ""
     prompt = f"""당신은 소프트웨어 아키텍처 변경 영향 분석 전문가입니다.
 
 ## 변경 사항
@@ -109,7 +110,7 @@ def run_impact_analyzer(
 ## 현재 SA 구조 요약
 {sa_summary}
 
-{f"## 관련 RAG 컨텍스트\n{rag_context}" if rag_context else ""}
+{rag_section}
 
 위 변경 사항이 시스템에 미치는 영향을 분석하여 다음 JSON 형식으로 반환하세요:
 
@@ -138,7 +139,14 @@ JSON만 반환:"""
 
         llm = _get_llm(api_key, model)
         response = llm.invoke(prompt)
-        text = response.content if hasattr(response, "content") else str(response)
+        content = response.content if hasattr(response, "content") else response
+        if isinstance(content, list):
+            text = " ".join(
+                item.get("text", str(item)) if isinstance(item, dict) else str(item)
+                for item in content
+            )
+        else:
+            text = str(content)
         parsed = _parse_impact_json(text)
 
         components = [

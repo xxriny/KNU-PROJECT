@@ -42,6 +42,9 @@ class User(Base):
         default="engineer",
     )
     github_username = Column(String(255), nullable=True)
+    github_id = Column(String(64), unique=True, nullable=True)
+    github_login = Column(String(255), nullable=True)
+    github_oauth_token = Column(String(500), nullable=True)
     password_hash = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 

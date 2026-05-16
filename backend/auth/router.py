@@ -17,6 +17,7 @@ PATCH /api/change-requests/{id}   — 승인/거절
 
 from __future__ import annotations
 
+import os
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -25,11 +26,13 @@ from auth.database import get_db
 from auth.models import User, Team, DesignChangeRequest
 from auth.schemas import (
     RegisterRequest, LoginRequest, TeamUpdateRequest,
-    ChangeRequestCreate, ChangeRequestUpdate,
+    ChangeRequestCreate, ChangeRequestUpdate, DevicePollRequest,
 )
 from auth.service import (
     authenticate_user, create_user, build_user_response,
     create_access_token, count_users, get_user_by_email,
+    start_github_device_flow, poll_github_device_token,
+    get_github_user_info, create_or_update_github_user,
 )
 from auth.deps import get_current_user, require_pm, require_engineer, get_current_user_optional
 
@@ -78,6 +81,76 @@ async def login(req: LoginRequest, db: Session = Depends(get_db)):
 @auth_router.get("/auth/me")
 async def me(current_user: User = Depends(get_current_user)):
     return build_user_response(current_user)
+
+
+# ── GitHub OAuth Device Flow ─────────────────────────────────
+
+@auth_router.post("/auth/github/device-start")
+async def github_device_start():
+    """GitHub Device Flow 시작. user_code와 verification_uri를 반환."""
+    client_id = os.environ.get("GITHUB_OAUTH_CLIENT_ID", "")
+    if not client_id:
+        raise HTTPException(
+            status_code=503,
+            detail="GitHub OAuth가 설정되지 않았습니다. GITHUB_OAUTH_CLIENT_ID 환경변수를 설정하세요.",
+        )
+    try:
+        data = start_github_device_flow(client_id)
+        if "error" in data:
+            raise HTTPException(status_code=400, detail=data.get("error_description", data["error"]))
+        return {
+            "user_code": data["user_code"],
+            "verification_uri": data.get("verification_uri", "https://github.com/login/device"),
+            "device_code": data["device_code"],
+            "expires_in": data.get("expires_in", 900),
+            "interval": data.get("interval", 5),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"GitHub 인증 시작 실패: {e}")
+
+
+@auth_router.post("/auth/github/device-poll")
+async def github_device_poll(req: DevicePollRequest, db: Session = Depends(get_db)):
+    """GitHub Device Flow 폴링. 사용자가 승인하면 JWT + github_token 반환."""
+    client_id = os.environ.get("GITHUB_OAUTH_CLIENT_ID", "")
+    client_secret = os.environ.get("GITHUB_OAUTH_CLIENT_SECRET", "")
+    if not client_id:
+        raise HTTPException(status_code=503, detail="GitHub OAuth 미설정")
+    try:
+        token_data = poll_github_device_token(client_id, client_secret, req.device_code)
+        error = token_data.get("error")
+        if error in ("authorization_pending", "slow_down"):
+            return {"status": "pending", "error": error}
+        if error:
+            return {"status": "error", "error": token_data.get("error_description", error)}
+
+        access_token = token_data.get("access_token")
+        if not access_token:
+            return {"status": "error", "error": "토큰 없음"}
+
+        gh_info = get_github_user_info(access_token)
+        user = create_or_update_github_user(
+            db,
+            github_id=gh_info["id"],
+            github_login=gh_info["login"],
+            email=gh_info["email"],
+            name=gh_info["name"],
+            oauth_token=access_token,
+        )
+        jwt_token = create_access_token(user.id, user.email, user.role)
+        return {
+            "status": "ok",
+            "access_token": jwt_token,
+            "token_type": "bearer",
+            "user": build_user_response(user),
+            "github_token": access_token,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"GitHub 인증 폴링 실패: {e}")
 
 
 # ── 팀 관리 ──────────────────────────────────────────────────

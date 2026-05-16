@@ -449,6 +449,7 @@ class AgileVerifyRequest(BaseModel):
     api_key: str = ""
     model: str = DEFAULT_MODEL
     use_llm: bool = True
+    use_deep_llm: bool = False  # V-007~V-009 추가 LLM 검증
 
 
 class AgileImpactRequest(BaseModel):
@@ -461,7 +462,7 @@ class AgileImpactRequest(BaseModel):
 
 @rest_router.post("/api/agile/verify")
 async def agile_verify(req: AgileVerifyRequest):
-    """SA 결과물 일관성 검증 (V-001 ~ V-006)."""
+    """SA 결과물 일관성 검증 (V-001~V-009, 하이브리드)."""
     try:
         from pipeline.domain.agile.nodes.verifier import run_verifier
         result = run_verifier(
@@ -469,6 +470,7 @@ async def agile_verify(req: AgileVerifyRequest):
             api_key=req.api_key,
             model=req.model,
             use_llm=req.use_llm,
+            use_deep_llm=req.use_deep_llm,
         )
         return {"status": "ok", "data": result.model_dump()}
     except Exception as e:
@@ -617,6 +619,8 @@ class TaskCreateRequest(BaseModel):
     task_type: str
     title: str
     description: str = ""
+    area: str = ""       # backend | frontend | fullstack | devops
+    assignee: str = ""
     payload: dict = {}
     created_by: str = ""
 
@@ -655,6 +659,8 @@ async def create_task_endpoint(req: TaskCreateRequest):
             task_type=req.task_type,
             title=req.title,
             description=req.description,
+            area=req.area,
+            assignee=req.assignee,
             payload=req.payload,
             created_by=req.created_by,
         )
@@ -699,6 +705,21 @@ async def update_task_endpoint(task_id: str, req: TaskUpdateRequest):
         return {"status": "ok", "data": task}
     except Exception as e:
         get_logger().exception(f"update_task endpoint failed for {task_id}")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.delete("/api/tasks/{task_id}")
+async def delete_task_endpoint(task_id: str):
+    """완료/거절된 태스크 삭제."""
+    try:
+        from pipeline.domain.agile.task_coordinator import delete_task, init_tasks_db
+        init_tasks_db()
+        deleted = delete_task(task_id)
+        if not deleted:
+            return {"status": "error", "error": "Task not found"}
+        return {"status": "ok"}
+    except Exception as e:
+        get_logger().exception(f"delete_task endpoint failed for {task_id}")
         return {"status": "error", "error": str(e)}
 
 

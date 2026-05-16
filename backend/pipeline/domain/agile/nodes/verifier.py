@@ -1,5 +1,8 @@
 """
-SA 결과물 일관성 검증기 (V-001 ~ V-005).
+SA 결과물 일관성 검증기 (V-001 ~ V-009).
+
+V-001~V-005: 휴리스틱 규칙 (빠른 사전 필터)
+V-006~V-009: LLM 기반 의미론적 검증
 
 coherence_score: 통과 규칙 비율 (0.0 ~ 1.0)
 passed: score >= 0.7 이면 True
@@ -204,6 +207,141 @@ JSON만 반환:"""
         return []
 
 
+# ── V-007: API 명명 일관성 (LLM) ─────────────────────────────
+
+def _v007_api_naming_consistency_llm(sa_data: dict, api_key: str, model: str) -> list[ViolationItem]:
+    """REST 컨벤션 및 명명 일관성 검증."""
+    try:
+        apis = sa_data.get("apis", [])
+        if len(apis) < 2:
+            return []
+        endpoints = [a.get("endpoint", a.get("path", "")) for a in apis[:20]]
+        llm = _get_llm(api_key, model)
+        prompt = f"""다음 REST API 엔드포인트 목록에서 명명 일관성 문제를 찾아주세요.
+검토 항목: 동사/명사 혼용, 복수/단수 혼용, 케이스 혼용 (camelCase vs snake_case), 계층 구조 불일치.
+
+엔드포인트: {json.dumps(endpoints, ensure_ascii=False)}
+
+문제가 있는 경우만 JSON 배열로 반환하세요. 없으면 [] 반환.
+형식: [{{"issue": "설명", "location": "문제 엔드포인트", "suggestion": "수정 제안"}}]
+JSON만 반환:"""
+        response = llm.invoke(prompt)
+        text = response.content if hasattr(response, "content") else str(response)
+        match = re.search(r"\[.*\]", text, re.DOTALL)
+        if not match:
+            return []
+        items = json.loads(match.group())
+        return [
+            ViolationItem(
+                rule_id="V-007",
+                rule_name="API 명명 일관성",
+                severity=Severity.minor,
+                description=item.get("issue", ""),
+                location=item.get("location", ""),
+                suggestion=item.get("suggestion", ""),
+            )
+            for item in items[:3]
+            if isinstance(item, dict) and "issue" in item
+        ]
+    except Exception:
+        return []
+
+
+# ── V-008: 컴포넌트 단일 책임 원칙 (LLM) ─────────────────────
+
+def _v008_srp_check_llm(sa_data: dict, api_key: str, model: str) -> list[ViolationItem]:
+    """SRP(단일 책임 원칙) 위반 감지."""
+    try:
+        components = sa_data.get("components", [])
+        if not components:
+            return []
+        comp_summary = [
+            {"name": c.get("name", ""), "responsibilities": c.get("responsibilities", c.get("description", ""))}
+            for c in components[:15]
+        ]
+        llm = _get_llm(api_key, model)
+        prompt = f"""다음 소프트웨어 컴포넌트 목록에서 단일 책임 원칙(SRP) 위반 가능성을 찾아주세요.
+책임이 너무 광범위하거나, 여러 도메인을 처리하거나, 분리되어야 할 기능이 하나에 포함된 경우를 찾으세요.
+
+컴포넌트: {json.dumps(comp_summary, ensure_ascii=False)}
+
+SRP 위반이 의심되는 경우만 반환하세요. 없으면 [].
+형식: [{{"issue": "설명", "location": "컴포넌트명", "suggestion": "분리 제안"}}]
+JSON만 반환:"""
+        response = llm.invoke(prompt)
+        text = response.content if hasattr(response, "content") else str(response)
+        match = re.search(r"\[.*\]", text, re.DOTALL)
+        if not match:
+            return []
+        items = json.loads(match.group())
+        return [
+            ViolationItem(
+                rule_id="V-008",
+                rule_name="단일 책임 원칙(SRP)",
+                severity=Severity.minor,
+                description=item.get("issue", ""),
+                location=item.get("location", ""),
+                suggestion=item.get("suggestion", ""),
+            )
+            for item in items[:3]
+            if isinstance(item, dict) and "issue" in item
+        ]
+    except Exception:
+        return []
+
+
+# ── V-009: 보안 설계 심층 검토 (LLM) ────────────────────────
+
+def _v009_security_depth_llm(sa_data: dict, api_key: str, model: str) -> list[ViolationItem]:
+    """인증 플로우 및 보안 설계의 논리적 완결성 검토."""
+    try:
+        llm = _get_llm(api_key, model)
+        security_comps = [
+            c for c in sa_data.get("components", [])
+            if any(kw in c.get("name", "").lower() or kw in c.get("type", "").lower()
+                   for kw in ("auth", "security", "jwt", "token", "oauth", "guard", "session"))
+        ]
+        auth_apis = [
+            a for a in sa_data.get("apis", [])
+            if any(kw in a.get("endpoint", a.get("path", "")).lower()
+                   for kw in ("login", "logout", "token", "auth", "refresh", "register"))
+        ]
+        if not security_comps and not auth_apis:
+            return []
+        context = {
+            "security_components": [c.get("name") for c in security_comps],
+            "auth_apis": [a.get("endpoint", a.get("path")) for a in auth_apis],
+        }
+        prompt = f"""다음 보안/인증 관련 설계를 검토하여 논리적 완결성 문제를 찾아주세요.
+검토 항목: 토큰 갱신 플로우 누락, 로그아웃/세션 만료 처리 누락, 권한 검증 레이어 누락, HTTPS/암호화 명세 부재.
+
+보안 설계: {json.dumps(context, ensure_ascii=False)}
+
+심각한 보안 설계 누락만 반환하세요. 없으면 [].
+형식: [{{"issue": "설명", "location": "위치", "suggestion": "개선 방법"}}]
+JSON만 반환:"""
+        response = llm.invoke(prompt)
+        text = response.content if hasattr(response, "content") else str(response)
+        match = re.search(r"\[.*\]", text, re.DOTALL)
+        if not match:
+            return []
+        items = json.loads(match.group())
+        return [
+            ViolationItem(
+                rule_id="V-009",
+                rule_name="보안 설계 완결성",
+                severity=Severity.major,
+                description=item.get("issue", ""),
+                location=item.get("location", ""),
+                suggestion=item.get("suggestion", ""),
+            )
+            for item in items[:3]
+            if isinstance(item, dict) and "issue" in item
+        ]
+    except Exception:
+        return []
+
+
 # ── 진입점 ───────────────────────────────────────────────────
 
 def run_verifier(
@@ -211,8 +349,13 @@ def run_verifier(
     api_key: str = "",
     model: str = "gemini-1.5-flash",
     use_llm: bool = True,
+    use_deep_llm: bool = False,
 ) -> VerifierResult:
-    """SA 데이터 검증. sa_data는 components/apis/tables 키를 포함한 dict."""
+    """SA 데이터 검증. sa_data는 components/apis/tables 키를 포함한 dict.
+
+    use_llm: V-006 의미론적 일관성 (기본 LLM)
+    use_deep_llm: V-007~V-009 추가 LLM 검증 (더 깊은 분석)
+    """
     violations: list[ViolationItem] = []
     violations += _v001_api_component_ref(sa_data)
     violations += _v002_circular_dependency(sa_data)
@@ -221,8 +364,17 @@ def run_verifier(
     violations += _v005_external_interface(sa_data)
     if use_llm and api_key:
         violations += _v006_semantic_coherence_llm(sa_data, api_key, model)
+    if use_deep_llm and api_key:
+        violations += _v007_api_naming_consistency_llm(sa_data, api_key, model)
+        violations += _v008_srp_check_llm(sa_data, api_key, model)
+        violations += _v009_security_depth_llm(sa_data, api_key, model)
 
-    total_rules = 6 if use_llm and api_key else 5
+    if use_deep_llm and api_key:
+        total_rules = 9
+    elif use_llm and api_key:
+        total_rules = 6
+    else:
+        total_rules = 5
     rule_ids_violated = {v.rule_id for v in violations}
     passed_count = total_rules - len(rule_ids_violated)
     score = round(passed_count / total_rules, 3)
@@ -233,9 +385,9 @@ def run_verifier(
 
     summary = (
         f"총 {len(violations)}개 위반 감지 (치명적: {critical_count}, 주요: {major_count}). "
-        f"일관성 점수: {score:.1%}"
+        f"일관성 점수: {score:.1%} [{total_rules}개 규칙 적용]"
         if violations
-        else f"모든 규칙 통과. 일관성 점수: {score:.1%}"
+        else f"모든 규칙 통과. 일관성 점수: {score:.1%} [{total_rules}개 규칙 적용]"
     )
 
     return VerifierResult(

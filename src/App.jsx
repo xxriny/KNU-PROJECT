@@ -1,10 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import useAppStore from "./store/useAppStore";
 import GlobalErrorBoundary from "./components/GlobalErrorBoundary";
-import Sidebar from "./components/Sidebar";
 import ChatPanel from "./components/ChatPanel";
-import CodeViewer from "./components/CodeViewer";
 import ResultViewer from "./components/ResultViewer";
 import HomeScreen from "./components/HomeScreen";
 import PipelineProgress from "./components/PipelineProgress";
@@ -21,7 +18,7 @@ import ToastContainer from "./components/ui/ToastContainer";
 import { ICON_PANELS } from "./constants/uiConstants";
 
 import {
-  X, Code2, Bot, PanelRightClose, PanelRightOpen
+  X, Bot, PanelRightClose, PanelRightOpen
 } from "lucide-react";
 
 export default function App() {
@@ -31,9 +28,6 @@ export default function App() {
   const fetchConfig = useAppStore((state) => state.fetchConfig);
   const activeViewportTab = useAppStore((state) => state.activeViewportTab);
   const activateOutputTab = useAppStore((state) => state.activateOutputTab);
-  const activateCodeTab = useAppStore((state) => state.activateCodeTab);
-  const openFiles = useAppStore((state) => state.openFiles);
-  const closeFile = useAppStore((state) => state.closeFile);
   const pipelineStatus = useAppStore((state) => state.pipelineStatus);
   const pipelineType = useAppStore((state) => state.pipelineType);
   const thinkingLog = useAppStore((state) => state.thinkingLog);
@@ -52,7 +46,6 @@ export default function App() {
   const [showSidebarChat, setShowSidebarChat] = useState(false);
 
   const activeOutputId = activeViewportTab?.kind === "output" ? activeViewportTab.id : null;
-  const isCodeView = activeViewportTab?.kind === "code";
 
   const SA_PIPELINE_TYPES = ["analysis_create", "analysis_reverse", "analysis_update"];
   const hasSaData = Boolean(sa_artifacts || resultData?.sa_output) ||
@@ -129,14 +122,25 @@ export default function App() {
         </PanelWrapper>
       );
     }
-    if (isCodeView) return <CodeViewer />;
-    
     switch (activeOutputId) {
       case "progress": return <PipelineProgress />;
       case "home":
       default: return <HomeScreen />;
     }
   };
+
+  // 인증 체크 전 — 백엔드 응답 대기 중 앱 접근 차단
+  if (!authChecked) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center"
+        style={{ background: "var(--bg-root)" }}>
+        <div className="flex flex-col items-center gap-3 opacity-40">
+          <div className="w-8 h-8 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+          <span className="text-sm font-medium">초기화 중...</span>
+        </div>
+      </div>
+    );
+  }
 
   // 인증 체크 완료 후 로그인 필요 시 LoginScreen 표시
   if (authChecked && hasUsers && !authToken) {
@@ -163,51 +167,13 @@ export default function App() {
       />
 
       <div className="flex-1 min-h-0 overflow-hidden flex app-no-drag">
-        <PanelGroup direction="horizontal" className="h-full w-full min-h-0">
-          <Panel defaultSize={15} minSize={10} maxSize={25}
-            className="glass-panel border-r border-[var(--border)] border-t-0 border-b-0 border-l-0">
-            <Sidebar />
-          </Panel>
-
-          <PanelResizeHandle />
-
-          <Panel defaultSize={85} minSize={40} className="flex flex-col bg-transparent min-h-0">
-            {openFiles.length > 0 && (
-              <div className="flex items-center border-b border-[var(--border)] min-h-10 px-2 bg-[rgba(255,255,255,0.02)] shrink-0">
-                <div className="flex items-center gap-0.5 overflow-x-auto w-full py-1">
-                  {openFiles.map((file) => {
-                    const isActive = activeViewportTab?.kind === "code" && activeViewportTab.id === file.id;
-                    return (
-                      <div
-                        key={file.id}
-                        className={`group flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-t cursor-pointer transition-colors shrink-0 ${isActive
-                          ? "bg-[var(--accent)]/15 text-[var(--accent)] border-b-2 border-[var(--accent)]"
-                          : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/5"
-                          }`}
-                        onClick={() => { activateCodeTab(file.id); setActiveIconPanel(null); }}
-                      >
-                        <Code2 size={11} />
-                        <span className="truncate max-w-[140px] text-xs">{file.name}</span>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); closeFile(file.id); }}
-                          className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity ml-1"
-                        >
-                          <X size={10} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <GlobalErrorBoundary>
-                {renderCenter()}
-              </GlobalErrorBoundary>
-            </div>
-          </Panel>
-        </PanelGroup>
+        <div className="flex-1 flex flex-col bg-transparent min-h-0 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <GlobalErrorBoundary>
+              {renderCenter()}
+            </GlobalErrorBoundary>
+          </div>
+        </div>
 
         <div
           className={`relative h-full flex flex-col border-l border-[var(--border)] overflow-hidden transition-all duration-250 ease-out ${isStudioOpen ? "w-[360px]" : "w-[72px]"

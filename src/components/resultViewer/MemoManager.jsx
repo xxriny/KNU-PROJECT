@@ -4,7 +4,7 @@ import { synthesizeMemoIdea } from "../../store/storeHelpers";
 import {
   StickyNote, Trash2, Search, Filter, RefreshCw, Zap,
   CheckSquare, Square, Archive, ListChecks, X, Eye,
-  ChevronDown, ChevronRight, FileText,
+  ChevronDown, ChevronRight, FileText, Plus,
 } from "lucide-react";
 
 const SECTION_MAP = {
@@ -23,6 +23,7 @@ const SECTION_MAP = {
 export default function MemoManager() {
   const isDarkMode = useAppStore((s) => s.isDarkMode);
   const userComments = useAppStore((s) => s.userComments);
+  const addComment = useAppStore((s) => s.addComment);
   const removeComment = useAppStore((s) => s.removeComment);
   const syncMemos = useAppStore((s) => s.syncMemos);
   const startMemoDrivenUpdate = useAppStore((s) => s.startMemoDrivenUpdate);
@@ -36,6 +37,9 @@ export default function MemoManager() {
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [expandedIds, setExpandedIds] = useState(() => new Set()); // detail 펼침 토글
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newMemoText, setNewMemoText] = useState("");
+  const [newMemoSection, setNewMemoSection] = useState("Global");
 
   const toggleExpand = (id) => {
     setExpandedIds((prev) => {
@@ -102,6 +106,13 @@ export default function MemoManager() {
     setSelectedIds(new Set());
   };
 
+  const handleAddMemo = async () => {
+    if (!newMemoText.trim()) return;
+    await addComment({ text: newMemoText.trim(), section: newMemoSection, selectedText: "", detail: "" });
+    setNewMemoText("");
+    setShowAddForm(false);
+  };
+
   const previewIdea = useMemo(
     () => (selectedMemos.length > 0 ? synthesizeMemoIdea(selectedMemos) : ""),
     [selectedMemos]
@@ -110,12 +121,73 @@ export default function MemoManager() {
   return (
     <div className={`h-full flex flex-col p-6 space-y-6 ${isDarkMode ? "text-slate-300" : "text-slate-800"}`}>
       <div className="flex flex-col gap-4">
-        <h2 className={`text-2xl font-black tracking-tight ${isDarkMode ? "text-white" : "text-slate-900"}`}>
-          전체 메모 관리
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className={`text-2xl font-black tracking-tight ${isDarkMode ? "text-white" : "text-slate-900"}`}>
+            전체 메모 관리
+          </h2>
+          {canEdit && (
+            <button
+              onClick={() => setShowAddForm((v) => !v)}
+              title="메모 직접 추가"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                showAddForm
+                  ? isDarkMode ? "bg-blue-500/20 text-blue-400" : "bg-blue-100 text-blue-600"
+                  : isDarkMode ? "bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white" : "bg-slate-100 hover:bg-slate-200 text-slate-600"
+              }`}
+            >
+              <Plus size={13} />
+              메모 추가
+            </button>
+          )}
+        </div>
         <p className="text-sm opacity-60">
           프로젝트 수행 중 기록된 모든 지적사항과 메모를 중앙에서 관리합니다.
         </p>
+
+        {/* ── 메모 직접 입력 폼 ─────────────────── */}
+        {showAddForm && (
+          <div className={`p-4 rounded-xl border space-y-3 animate-fade-in ${isDarkMode ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200"}`}>
+            <textarea
+              value={newMemoText}
+              onChange={(e) => setNewMemoText(e.target.value)}
+              placeholder="메모 내용을 입력하세요..."
+              rows={3}
+              className={`w-full px-3 py-2 rounded-lg text-sm border outline-none resize-none transition-colors ${
+                isDarkMode
+                  ? "bg-black/20 border-white/10 text-white placeholder:text-slate-500 focus:border-blue-500/60"
+                  : "bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-blue-400"
+              }`}
+            />
+            <div className="flex items-center gap-2">
+              <select
+                value={newMemoSection}
+                onChange={(e) => setNewMemoSection(e.target.value)}
+                style={{ colorScheme: "light" }}
+                className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-semibold border outline-none ${
+                  isDarkMode ? "bg-slate-800 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-800"
+                }`}
+              >
+                <option value="Global">Global</option>
+                {Object.entries(SECTION_MAP).map(([k, v]) => (
+                  <option key={k} value={k}>{v}</option>
+                ))}
+              </select>
+              <button
+                onClick={handleAddMemo}
+                disabled={!newMemoText.trim()}
+                className="px-4 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white transition-colors"
+              >
+                저장
+              </button>
+              <button
+                onClick={() => { setShowAddForm(false); setNewMemoText(""); }}
+                className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? "hover:bg-white/10 text-slate-400" : "hover:bg-slate-200 text-slate-500"}`}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── 뷰 모드 토글 ─────────────────────── */}
