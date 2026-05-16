@@ -315,6 +315,20 @@ def shape_result(raw_result: dict) -> dict:
     sanitized["gaps"] = sa_advisor.get("gaps", [])
     sanitized["sa_output"] = sa_output_raw # UI 탭 활성화(hasSaData)를 위해 필수
 
+    # ── SA 확장 노드 산출물 패스스루 ──
+    # sa_output.data 우선, 없으면 sa_arch_bundle.data에서 추출
+    sa_arch_bundle = sanitized.get("sa_arch_bundle") or {}
+    sa_arch_data = sa_arch_bundle.get("data") if isinstance(sa_arch_bundle, dict) else {}
+    sa_arch_data = sa_arch_data or {}
+
+    for src in (sa_data, sa_arch_data):
+        if not isinstance(src, dict):
+            continue
+        if "test_strategy" in src and "sa_test_strategy" not in sanitized:
+            sanitized["sa_test_strategy"] = src["test_strategy"]
+        if "project_structure" in src and "sa_project_structure" not in sanitized:
+            sanitized["sa_project_structure"] = src["project_structure"]
+
     skipped_phases = _collect_skipped_phases(sanitized)
     rag_warnings = sanitized.get("rag_warnings") or []
 

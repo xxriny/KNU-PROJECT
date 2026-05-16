@@ -68,6 +68,8 @@ class AnalysisRequest(BaseModel):
     model: str = DEFAULT_MODEL
     action_type: str = "CREATE"
     source_dir: str = ""
+    user_id: Optional[str] = None
+    team_id: Optional[str] = None
 
 
 class IdeaChatRequest(BaseModel):
@@ -437,4 +439,317 @@ async def delete_memo_endpoint(memo_id: str):
         delete_memo(memo_id)
         return {"status": "ok"}
     except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+# ── Agile Layer ───────────────────────────────────────────
+
+class AgileVerifyRequest(BaseModel):
+    sa_data: dict
+    api_key: str = ""
+    model: str = DEFAULT_MODEL
+    use_llm: bool = True
+
+
+class AgileImpactRequest(BaseModel):
+    change_description: str
+    sa_data: dict
+    api_key: str = ""
+    model: str = DEFAULT_MODEL
+    session_id: Optional[str] = None
+
+
+@rest_router.post("/api/agile/verify")
+async def agile_verify(req: AgileVerifyRequest):
+    """SA 결과물 일관성 검증 (V-001 ~ V-006)."""
+    try:
+        from pipeline.domain.agile.nodes.verifier import run_verifier
+        result = run_verifier(
+            sa_data=req.sa_data,
+            api_key=req.api_key,
+            model=req.model,
+            use_llm=req.use_llm,
+        )
+        return {"status": "ok", "data": result.model_dump()}
+    except Exception as e:
+        get_logger().exception("agile_verify endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/agile/impact")
+async def agile_impact(req: AgileImpactRequest):
+    """변경 영향 분석 (RAG + LLM 2-stage)."""
+    if not req.change_description.strip():
+        return {"status": "error", "error": "change_description이 비어있습니다."}
+    try:
+        from pipeline.domain.agile.nodes.impact import run_impact_analyzer
+        result = run_impact_analyzer(
+            change_description=req.change_description,
+            sa_data=req.sa_data,
+            api_key=req.api_key,
+            model=req.model,
+            session_id=req.session_id,
+        )
+        return {"status": "ok", "data": result.model_dump()}
+    except Exception as e:
+        get_logger().exception("agile_impact endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+# ── GitHub Integration ────────────────────────────────────
+
+class GitHubVerifyRequest(BaseModel):
+    token: str
+    owner: str
+    repo: str
+
+
+class GitHubPublishRequest(BaseModel):
+    token: str
+    owner: str
+    repo: str
+    result_data: dict
+    page_title: str = "SA 설계 문서"
+    project_name: str = "Project"
+
+
+class GitHubAnalyticsRequest(BaseModel):
+    token: str
+    owner: str
+    repo: str
+    branch: str = "main"
+    limit: int = 30
+
+
+class GitHubIssuesRequest(BaseModel):
+    token: str
+    owner: str
+    repo: str
+    state: str = "open"
+
+
+@rest_router.post("/api/github/verify")
+async def github_verify(req: GitHubVerifyRequest):
+    """GitHub 토큰 + 레포지토리 접근 확인."""
+    try:
+        from connectors.github_connector import verify_token, GitHubConnector
+        token_info = verify_token(req.token)
+        if not token_info["valid"]:
+            return {"status": "error", "error": token_info.get("error", "Invalid token")}
+        connector = GitHubConnector(req.token)
+        repo_obj = connector.get_repo(req.owner, req.repo)
+        return {
+            "status": "ok",
+            "user": token_info["login"],
+            "repo": repo_obj.full_name,
+            "private": repo_obj.private,
+            "default_branch": repo_obj.default_branch,
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/github/publish")
+async def github_publish(req: GitHubPublishRequest):
+    """SA 설계 문서를 GitHub Issues(design-doc)에 퍼블리시."""
+    if not req.token:
+        return {"status": "error", "error": "GitHub 토큰이 없습니다."}
+    try:
+        from pipeline.domain.agile.wiki_publisher import publish_to_github
+        result = publish_to_github(
+            result_data=req.result_data,
+            owner=req.owner,
+            repo=req.repo,
+            token=req.token,
+            page_title=req.page_title,
+            project_name=req.project_name,
+        )
+        return {"status": "ok", **result}
+    except Exception as e:
+        get_logger().exception("github_publish endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/github/analytics")
+async def github_analytics(req: GitHubAnalyticsRequest):
+    """커밋 히스토리 분석."""
+    try:
+        from connectors.github_connector import GitHubConnector
+        from pipeline.domain.agile.commit_analyzer import analyze_commits
+        connector = GitHubConnector(req.token)
+        commits = connector.get_commits(req.owner, req.repo, req.branch, req.limit)
+        analytics = analyze_commits(commits)
+        return {
+            "status": "ok",
+            "data": {
+                "total_commits": analytics.total_commits,
+                "by_author": analytics.by_author,
+                "by_date": analytics.by_date,
+                "top_keywords": analytics.top_keywords,
+                "recent_commits": analytics.recent_commits,
+                "activity_trend": analytics.activity_trend,
+                "contributors": [
+                    c.__dict__ for c in connector.get_contributors(req.owner, req.repo)
+                ],
+            },
+        }
+    except Exception as e:
+        get_logger().exception("github_analytics endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/github/issues")
+async def github_issues(req: GitHubIssuesRequest):
+    """GitHub Issues 목록 조회."""
+    try:
+        from connectors.github_connector import GitHubConnector
+        connector = GitHubConnector(req.token)
+        issues = connector.get_issues(req.owner, req.repo, req.state)
+        return {"status": "ok", "data": [i.__dict__ for i in issues]}
+    except Exception as e:
+        get_logger().exception("github_issues endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+# ── Phase 5: Task Coordinator + Doc Sync ────────────────────
+
+class TaskCreateRequest(BaseModel):
+    task_type: str
+    title: str
+    description: str = ""
+    payload: dict = {}
+    created_by: str = ""
+
+
+class TaskUpdateRequest(BaseModel):
+    status: str
+    reviewed_by: str = ""
+    result: str = ""
+
+
+class DocSyncRequest(BaseModel):
+    result_data: dict
+    github_token: str
+    owner: str
+    repo: str
+    previous_hash: str = ""
+    page_title: str = "SA 설계 문서"
+    project_name: str = "Project"
+
+
+class GitHubIssuesImportRequest(BaseModel):
+    token: str
+    owner: str
+    repo: str
+    api_key: str = ""
+    model: str = DEFAULT_MODEL
+
+
+@rest_router.post("/api/tasks")
+async def create_task_endpoint(req: TaskCreateRequest):
+    """새 태스크 생성 (PM 승인 대기)."""
+    try:
+        from pipeline.domain.agile.task_coordinator import create_task, init_tasks_db
+        init_tasks_db()
+        task = create_task(
+            task_type=req.task_type,
+            title=req.title,
+            description=req.description,
+            payload=req.payload,
+            created_by=req.created_by,
+        )
+        return {"status": "ok", "data": task}
+    except Exception as e:
+        get_logger().exception("create_task endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.get("/api/tasks")
+async def list_tasks_endpoint(status: Optional[str] = None):
+    """태스크 목록 조회."""
+    try:
+        from pipeline.domain.agile.task_coordinator import list_tasks, init_tasks_db
+        init_tasks_db()
+        tasks = list_tasks(status=status)
+        return {"status": "ok", "data": tasks}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.patch("/api/tasks/{task_id}")
+async def update_task_endpoint(task_id: str, req: TaskUpdateRequest):
+    """태스크 상태 업데이트 (승인/거절/완료)."""
+    allowed_statuses = {"pending", "approved", "rejected", "completed", "failed"}
+    if req.status not in allowed_statuses:
+        return {"status": "error", "error": f"Invalid status. Allowed: {allowed_statuses}"}
+    try:
+        from pipeline.domain.agile.task_coordinator import update_task_status, get_task, execute_approved_task, init_tasks_db
+        init_tasks_db()
+        task = update_task_status(task_id, req.status, req.reviewed_by, req.result)
+        if not task:
+            return {"status": "error", "error": "Task not found"}
+
+        # 승인 시 자동 실행
+        if req.status == "approved":
+            exec_result = execute_approved_task(task)
+            update_task_status(task_id, "completed", result=exec_result)
+            task["status"] = "completed"
+            task["result"] = exec_result
+
+        return {"status": "ok", "data": task}
+    except Exception as e:
+        get_logger().exception(f"update_task endpoint failed for {task_id}")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/doc-sync")
+async def doc_sync_endpoint(req: DocSyncRequest):
+    """SA 결과물을 GitHub에 자동 동기화."""
+    try:
+        from pipeline.domain.agile.nodes.doc_sync import sync_docs
+        result = sync_docs(
+            result_data=req.result_data,
+            github_token=req.github_token,
+            owner=req.owner,
+            repo=req.repo,
+            previous_hash=req.previous_hash,
+            page_title=req.page_title,
+            project_name=req.project_name,
+        )
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        get_logger().exception("doc_sync endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/github/issues/import")
+async def github_issues_import(req: GitHubIssuesImportRequest):
+    """GitHub Issues를 requirements로 변환하는 태스크 생성."""
+    try:
+        from connectors.github_connector import GitHubConnector
+        from pipeline.domain.agile.task_coordinator import create_task, init_tasks_db
+        init_tasks_db()
+        connector = GitHubConnector(req.token)
+        issues = connector.get_issues(req.owner, req.repo, state="open")
+        issue_list = [i.__dict__ for i in issues]
+
+        task = create_task(
+            task_type="import_issues",
+            title=f"GitHub Issues Import ({req.owner}/{req.repo})",
+            description=f"{len(issue_list)}개 이슈를 요구사항으로 변환",
+            payload={
+                "issues": issue_list,
+                "owner": req.owner,
+                "repo": req.repo,
+                "api_key": req.api_key,
+            },
+        )
+        return {
+            "status": "ok",
+            "task_id": task["id"],
+            "issue_count": len(issue_list),
+            "message": "태스크가 생성되었습니다. PM 승인 후 실행됩니다.",
+        }
+    except Exception as e:
+        get_logger().exception("github_issues_import endpoint failed")
         return {"status": "error", "error": str(e)}

@@ -11,6 +11,7 @@ import PipelineProgress from "./components/PipelineProgress";
 import StatusBar from "./components/StatusBar";
 import SessionPanel from "./components/SessionPanel";
 import SettingsPanel from "./components/SettingsPanel";
+import LoginScreen from "./components/auth/LoginScreen";
 
 // Extracted Components
 import TopBar from "./components/layout/TopBar";
@@ -39,6 +40,11 @@ export default function App() {
   const resultData = useAppStore((state) => state.resultData);
   const sa_artifacts = useAppStore((state) => state.sa_artifacts);
 
+  const authToken = useAppStore((state) => state.authToken);
+  const authChecked = useAppStore((state) => state.authChecked);
+  const hasUsers = useAppStore((state) => state.hasUsers);
+  const checkAuthStatus = useAppStore((state) => state.checkAuthStatus);
+
   const [activeIconPanel, setActiveIconPanel] = useState(null);
   const [showSessions, setShowSessions] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -61,6 +67,8 @@ export default function App() {
       setBackendPort(port);
       connectWebSocket(port);
       fetchConfig(port);
+      // auth 상태 체크는 backendPort 설정 후 별도 호출
+      setTimeout(() => checkAuthStatus(), 300);
     }
     initBackend();
   }, []);
@@ -129,6 +137,14 @@ export default function App() {
       default: return <HomeScreen />;
     }
   };
+
+  // 인증 체크 완료 후 로그인 필요 시 LoginScreen 표시
+  if (authChecked && hasUsers && !authToken) {
+    return <LoginScreen isFirstRun={false} />;
+  }
+  if (authChecked && hasUsers === false && !authToken) {
+    return <LoginScreen isFirstRun={true} />;
+  }
 
   return (
     <div className={`h-screen w-screen flex flex-col overflow-hidden ${!isDarkMode ? "light" : ""}`}

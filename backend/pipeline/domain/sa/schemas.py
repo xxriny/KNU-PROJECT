@@ -159,5 +159,5 @@ class SAProjectStructureOutput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     thinking: str = Field(alias="th", default="")
     tree: DirectoryNode = Field(alias="tr")
-    component_mapping: Dict[str, List[str]] = Field(alias="cm")
-    conventions: List[str] = Field(alias="cv")
+    component_mapping: Dict[str, List[str]] = Field(alias="cm", default_factory=dict)
+    conventions: List[str] = Field(alias="cv", default_factory=list)

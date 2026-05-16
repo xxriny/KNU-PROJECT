@@ -1,5 +1,6 @@
 import {
   House, Activity, Table2, Layers, Globe, Database, StickyNote, FileText,
+  ShieldCheck, FolderTree, GitBranch, ClipboardCheck, Github, ClipboardList,
 } from "lucide-react";
 
 export const ICON_PANELS = [
@@ -11,6 +12,12 @@ export const ICON_PANELS = [
   { id: "sa_components", label: "Components", Icon: Layers, group: "sa", color: "text-teal-400", bg: "bg-teal-500/10" },
   { id: "sa_api", label: "API Spec", Icon: Globe, group: "sa", color: "text-blue-400", bg: "bg-blue-500/10" },
   { id: "sa_db", label: "Database", Icon: Database, group: "sa", color: "text-rose-400", bg: "bg-rose-500/10" },
+  { id: "sa_test_strategy", label: "Test Strategy", Icon: ShieldCheck, group: "sa", color: "text-emerald-400", bg: "bg-emerald-500/10" },
+  { id: "project_structure", label: "Proj Structure", Icon: FolderTree, group: "sa", color: "text-violet-400", bg: "bg-violet-500/10" },
+  { id: "agile_verify", label: "SA Verify", Icon: ClipboardCheck, group: "agile", color: "text-emerald-400", bg: "bg-emerald-500/10" },
+  { id: "agile_impact", label: "Impact Analysis", Icon: GitBranch, group: "agile", color: "text-blue-400", bg: "bg-blue-500/10" },
+  { id: "github_dashboard", label: "GitHub", Icon: Github, group: "github", color: "text-slate-400", bg: "bg-slate-500/10" },
+  { id: "task_approval", label: "Tasks", Icon: ClipboardList, group: "github", color: "text-amber-400", bg: "bg-amber-500/10" },
 ];
 
 export const THEME_MAP = {

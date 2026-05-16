@@ -9,6 +9,12 @@ import SAAnalysisTab from "./resultViewer/SAAnalysisTab";
 import SAComponentsTab from "./resultViewer/SAComponentsTab";
 import SAApiTab from "./resultViewer/SAApiTab";
 import SADatabaseTab from "./resultViewer/SADatabaseTab";
+import SATestStrategyTab from "./resultViewer/SATestStrategyTab";
+import ProjectStructureTab from "./resultViewer/ProjectStructureTab";
+import AgileVerifierTab from "./resultViewer/AgileVerifierTab";
+import AgileImpactTab from "./resultViewer/AgileImpactTab";
+import GitHubDashboard from "./github/GitHubDashboard";
+import TaskApprovalPanel from "./resultViewer/TaskApprovalPanel";
 import MemoManager from "./resultViewer/MemoManager";
 import Card from "./ui/Card";
 import Button from "./ui/Button";
@@ -22,6 +28,12 @@ const TAB_COMPONENTS = {
   sa_components: SAComponentsTab,
   sa_api: SAApiTab,
   sa_db: SADatabaseTab,
+  sa_test_strategy: SATestStrategyTab,
+  project_structure: ProjectStructureTab,
+  agile_verify: AgileVerifierTab,
+  agile_impact: AgileImpactTab,
+  github_dashboard: GitHubDashboard,
+  task_approval: TaskApprovalPanel,
   memo: MemoManager,
 };
 

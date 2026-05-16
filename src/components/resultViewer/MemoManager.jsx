@@ -27,6 +27,8 @@ export default function MemoManager() {
   const syncMemos = useAppStore((s) => s.syncMemos);
   const startMemoDrivenUpdate = useAppStore((s) => s.startMemoDrivenUpdate);
   const pipelineStatus = useAppStore((s) => s.pipelineStatus);
+  const userRole = useAppStore((s) => s.userRole);
+  const canEdit = !userRole || userRole === "pm" || userRole === "engineer";
 
   const [searchTerm, setSearchTerm] = useState("");
   const [filterSection, setFilterSection] = useState("All");
@@ -92,7 +94,7 @@ export default function MemoManager() {
   const clearSelection = () => setSelectedIds(new Set());
 
   const canTriggerUpdate =
-    viewMode === "active" && selectedIds.size > 0 && !isRunning;
+    viewMode === "active" && selectedIds.size > 0 && !isRunning && canEdit;
 
   const handleConfirm = () => {
     setShowConfirmModal(false);
@@ -300,6 +302,11 @@ export default function MemoManager() {
       {/* ── 하단 액션 (active 모드에서만) ───── */}
       {viewMode === "active" && userComments.filter((m) => !m.applied).length > 0 && (
         <div className="pt-4 border-t border-white/10">
+          {!canEdit && (
+            <p className={`text-center text-xs mb-3 py-2 px-4 rounded-xl ${isDarkMode ? "bg-amber-500/10 text-amber-300" : "bg-amber-50 text-amber-700 border border-amber-200"}`}>
+              viewer 역할은 메모 반영 업데이트를 실행할 수 없습니다.
+            </p>
+          )}
           <button
             onClick={() => setShowConfirmModal(true)}
             disabled={!canTriggerUpdate}

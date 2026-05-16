@@ -93,10 +93,10 @@ def sa_project_structure_node(ctx: NodeContext) -> dict:
     user_msg = _build_user_msg(sa_bundle, pm_bundle, rtm, action_type)
 
     res = call_structured(
+        api_key=ctx.api_key, model=ctx.model,
         schema=SAProjectStructureOutput,
         system_prompt=SYSTEM_PROMPT,
         user_msg=user_msg,
-        ctx=ctx,
         compress_prompt=False,
         temperature=0.0,
     )
