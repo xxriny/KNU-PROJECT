@@ -109,7 +109,7 @@ export default function App() {
     if (activeIconPanel) {
       if (activeIconPanel === "home") return <HomeScreen />;
       if (activeIconPanel === "progress") return <PipelineProgress />;
-      
+
       const panel = ICON_PANELS.find(p => p.id === activeIconPanel);
       if (!panel) {
         setTimeout(() => setActiveIconPanel(null), 0);
@@ -151,7 +151,7 @@ export default function App() {
   return (
     <div className={`h-screen w-screen flex flex-col overflow-hidden ${!isDarkMode ? "light" : ""}`}
       style={{ background: "var(--bg-root)", color: "var(--text-primary)" }}>
-      
+
       <TopBar
         activeOutputId={activeOutputId}
         activateOutputTab={activateOutputTab}

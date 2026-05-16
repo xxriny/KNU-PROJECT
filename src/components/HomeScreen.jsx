@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import useAppStore from "../store/useAppStore";
-import { Sparkles, Layers, ScanSearch, Send, Paperclip, ChevronRight, X, FolderOpen, FileCode, ChevronDown } from "lucide-react";
+import { Sparkles, Layers, ScanSearch, Send, Paperclip, X, GitBranch, Loader2, Search } from "lucide-react";
 
 const MODES = [
   {
@@ -40,9 +40,14 @@ export default function HomeScreen() {
     selectedMode,
     setSelectedMode,
     projectFolder,
-    selectAndScanFolder,
+    setProjectFolder,
     isDarkMode,
-    fileTree,
+    authToken,
+    backendPort,
+    githubToken,
+    githubOwner,
+    githubRepo,
+    setGithubSettings,
   } = useAppStore();
 
   const [inputText, setInputText] = useState("");
@@ -50,6 +55,65 @@ export default function HomeScreen() {
   const [showContext, setShowContext] = useState(false);
   const [projectTitle, setProjectTitle] = useState("새 프로젝트");
   const textareaRef = useRef(null);
+
+  const [repoList, setRepoList] = useState([]);
+  const [repoLoading, setRepoLoading] = useState(false);
+  const [repoSearch, setRepoSearch] = useState("");
+  const [showRepoPicker, setShowRepoPicker] = useState(false);
+  const [repoScopeError, setRepoScopeError] = useState(false);
+  const [selectedRepo, setSelectedRepo] = useState(null);
+
+  // 전역 스토어의 레포 정보와 동기화
+  useEffect(() => {
+    if (githubOwner && githubRepo) {
+      setSelectedRepo({ full_name: `${githubOwner}/${githubRepo}`, owner: githubOwner, name: githubRepo });
+      if (projectFolder !== `${githubOwner}/${githubRepo}`) {
+        setProjectFolder(`${githubOwner}/${githubRepo}`);
+      }
+    }
+  }, [githubOwner, githubRepo, projectFolder, setProjectFolder]);
+
+  const loadRepos = async () => {
+    if (!authToken) return;
+    setRepoLoading(true);
+    setRepoScopeError(false);
+    try {
+      const port = backendPort || 8000;
+      const res = await fetch(`http://127.0.0.1:${port}/auth/github/repos`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const data = await res.json();
+      if (data.status === "ok") {
+        setRepoList(data.repos);
+        setShowRepoPicker(true);
+      } else {
+        setRepoScopeError(true);
+      }
+    } catch (_) {
+      setRepoScopeError(true);
+    } finally {
+      setRepoLoading(false);
+    }
+  };
+
+  const selectRepo = async (repo) => {
+    setSelectedRepo(repo);
+    setProjectFolder(repo.full_name);
+    // 전역 스토어 동기화
+    setGithubSettings(githubToken, repo.owner, repo.name);
+    setShowRepoPicker(false);
+    setRepoSearch("");
+
+    // 팀 기본 레포지토리로 백엔드에도 즉시 반영 (동기화 요구사항)
+    try {
+      const port = backendPort || 8000;
+      await fetch(`http://127.0.0.1:${port}/api/teams/me/github`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+        body: JSON.stringify({ github_repo: repo.full_name }),
+      });
+    } catch (_) {}
+  };
 
   const isReverseMode = selectedMode === "reverse";
   const trimmedInput = inputText.trim();
@@ -210,39 +274,82 @@ export default function HomeScreen() {
 
             {/* Body */}
             <div className="p-6 flex flex-col gap-6">
-              {/* Main Box for Project Tree */}
-              <div className="bg-[#131317] border border-white/5 rounded-xl h-[280px] p-4 flex flex-col relative overflow-hidden">
-                <div className="absolute top-4 right-4 z-10">
-                  <button onClick={selectAndScanFolder} className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm font-medium transition-colors">
-                    <FolderOpen size={16} />
-                    <span>파일 선택</span>
+              {/* Repo Picker */}
+              <div className="bg-[#131317] border border-white/5 rounded-xl flex flex-col overflow-hidden">
+                {/* Selected repo display + button */}
+                <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5">
+                  <div className="flex-1 min-w-0">
+                    {selectedRepo ? (
+                      <div className="flex items-center gap-2">
+                        <GitBranch size={15} className="text-slate-400 shrink-0" />
+                        <span className="text-sm font-semibold text-slate-200 truncate">{selectedRepo.full_name}</span>
+                        {selectedRepo.private && <span className="text-[10px] text-amber-400 border border-amber-400/30 px-1.5 py-0.5 rounded shrink-0">private</span>}
+                        {selectedRepo.language && <span className="text-[11px] text-slate-500 shrink-0">{selectedRepo.language}</span>}
+                      </div>
+                    ) : (
+                      <span className="text-sm text-slate-500 opacity-60">선택된 레포지토리 없음</span>
+                    )}
+                  </div>
+                  <button
+                    onClick={loadRepos}
+                    disabled={repoLoading || !authToken}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
+                  >
+                    {repoLoading ? <Loader2 size={14} className="animate-spin" /> : <GitBranch size={14} />}
+                    <span>레포 선택</span>
                   </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto mt-2">
-                  {!projectFolder ? (
-                    <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-60">
-                      <FolderOpen size={48} className="mb-4" />
-                      <p>선택된 프로젝트 폴더가 없습니다</p>
-                    </div>
-                  ) : (
-                    <div className="text-sm text-slate-300">
-                      <div className="flex items-center gap-2 mb-4 px-2 py-1.5 bg-white/5 rounded-lg border border-white/5">
-                        <FolderOpen size={16} className="text-blue-400 shrink-0" />
-                        <span className="font-bold truncate">{projectFolder}</span>
+                {repoScopeError && (
+                  <p className="text-xs text-amber-400 px-4 py-2 border-b border-white/5">
+                    GitHub 재연결이 필요합니다. 설정에서 연결 해제 후 다시 연결하세요.
+                  </p>
+                )}
+
+                {!authToken && (
+                  <p className="text-xs text-slate-500 px-4 py-2 border-b border-white/5">
+                    GitHub에 로그인하면 레포지토리를 선택할 수 있습니다.
+                  </p>
+                )}
+
+                {/* Inline picker */}
+                {showRepoPicker && repoList.length > 0 && (
+                  <div className="flex flex-col">
+                    <div className="px-3 py-2 border-b border-white/5">
+                      <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-1.5">
+                        <Search size={13} className="text-slate-500 shrink-0" />
+                        <input
+                          autoFocus
+                          value={repoSearch}
+                          onChange={(e) => setRepoSearch(e.target.value)}
+                          placeholder="레포 검색..."
+                          className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-slate-600"
+                        />
                       </div>
-                      <div className="pl-2 space-y-1">
-                        {fileTree && fileTree.length > 0 ? (
-                          fileTree.map((node, idx) => (
-                            <FileTreeItem key={idx} node={node} isLast={idx === fileTree.length - 1} prefix="" />
-                          ))
-                        ) : (
-                          <div className="py-10 text-center opacity-40 italic">스캔된 파일이 없습니다.</div>
-                        )}
-                      </div>
                     </div>
-                  )}
-                </div>
+                    <ul className="max-h-48 overflow-y-auto divide-y divide-white/5">
+                      {repoList
+                        .filter(r => r.full_name.toLowerCase().includes(repoSearch.toLowerCase()))
+                        .map(repo => (
+                          <li
+                            key={repo.full_name}
+                            onClick={() => selectRepo(repo)}
+                            className="flex items-center gap-2 px-4 py-2.5 hover:bg-white/5 cursor-pointer transition-colors"
+                          >
+                            <GitBranch size={13} className="text-slate-500 shrink-0" />
+                            <span className="text-sm font-medium text-slate-200 truncate flex-1">{repo.name}</span>
+                            <span className="text-xs text-slate-500 shrink-0">{repo.owner}</span>
+                            {repo.private && <span className="text-[10px] text-amber-400 shrink-0">private</span>}
+                            {repo.language && <span className="text-[10px] text-slate-600 shrink-0">{repo.language}</span>}
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                )}
+
+                {!showRepoPicker && selectedRepo?.description && (
+                  <p className="text-xs text-slate-500 px-4 py-2">{selectedRepo.description}</p>
+                )}
               </div>
 
               {/* Title Input */}
@@ -270,36 +377,6 @@ export default function HomeScreen() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function FileTreeItem({ node, isLast = false, prefix = "" }) {
-  const isDirectory = node.kind === "directory";
-  const branch = isLast ? "└─ " : "├─ ";
-  const childPrefix = prefix + (isLast ? "   " : "│  ");
-
-  return (
-    <div className="font-mono text-[12px] leading-[1.6] whitespace-pre flex flex-col">
-      <div className="flex items-center gap-1.5 hover:bg-white/5 rounded transition-colors px-1">
-        <span className="text-slate-600/80 shrink-0">{prefix}{branch}</span>
-        {isDirectory ? (
-          <FolderOpen size={13} className="text-blue-400/80 shrink-0" />
-        ) : (
-          <FileCode size={13} className="text-slate-500/80 shrink-0" />
-        )}
-        <span className={`truncate ${isDirectory ? "font-bold text-slate-200" : "text-slate-400"}`}>
-          {node.name}
-        </span>
-      </div>
-      {isDirectory && node.children && node.children.map((child, idx) => (
-        <FileTreeItem
-          key={idx}
-          node={child}
-          isLast={idx === node.children.length - 1}
-          prefix={childPrefix}
-        />
-      ))}
     </div>
   );
 }

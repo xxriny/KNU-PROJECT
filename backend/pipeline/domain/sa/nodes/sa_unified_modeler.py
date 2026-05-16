@@ -180,8 +180,9 @@ def sa_unified_modeler_node(ctx: NodeContext) -> dict:
                 logger.info(f"[sa_unified_modeler] Priority 1 (Forensic): {len(target_files)} files identified.")
             else:
                 # [MINIMAL FALLBACK] 프로파일 실패시에만 작동
-                arch_patterns = ["db", "model", "schema", "router", "controller", "api", "main"]
+                arch_patterns = ["db", "model", "schema", "router", "controller", "api", "main", "handler", "service", "connector", "repository", "provider"]
                 target_files = [path for path in inventory.keys() if any(p in path.lower() for p in arch_patterns)]
+                logger.info(f"[sa_unified_modeler] Priority 2 (Fallback): {len(target_files)} files identified by patterns.")
 
             all_chunks = []
             seen_ids = set()

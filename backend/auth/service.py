@@ -117,7 +117,7 @@ def start_github_device_flow(client_id: str) -> dict:
     """GitHub Device Flow 시작."""
     # 공식 경로로 복귀
     url = "https://github.com/login/device/code"
-    payload = {"client_id": client_id, "scope": "user:email read:user"}
+    payload = {"client_id": client_id, "scope": "user:email read:user repo"}
     
     # User-Agent는 GitHub API 호출 시 필수적인 경우가 많습니다.
     headers = {
@@ -209,17 +209,29 @@ def create_or_update_github_user(
         if not user.github_username:
             user.github_username = github_login
     else:
+        # 최초 가입자는 관리자(pm) 권한을 부여합니다.
+        is_first = db.query(User).count() == 0
         user = User(
             name=name,
             email=email,
             password_hash=hash_password(str(uuid.uuid4())),
-            role="engineer",
+            role="pm" if is_first else "engineer",
             github_username=github_login,
             github_id=github_id,
             github_login=github_login,
             github_oauth_token=oauth_token,
         )
         db.add(user)
+
+    # 팀이 없는 사용자는 기존 팀에 배정하거나 기본 팀을 생성합니다.
+    if not user.team_id:
+        team = db.query(Team).first()
+        if not team:
+            team = Team(name="Default Team")
+            db.add(team)
+            db.flush()
+        user.team_id = team.id
+
     db.commit()
     db.refresh(user)
     return user

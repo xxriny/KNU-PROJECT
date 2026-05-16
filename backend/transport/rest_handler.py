@@ -11,7 +11,12 @@ import os
 import re
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from fastapi.security import OAuth2PasswordBearer
+from auth.deps import get_current_user, get_current_user_optional
+from auth.database import get_db
+from sqlalchemy.orm import Session
+from auth.models import User
 from pydantic import BaseModel
 from version import APP_VERSION, DEFAULT_MODEL
 from observability.logger import get_logger
@@ -572,7 +577,7 @@ class GitHubVerifyRequest(BaseModel):
 
 
 class GitHubPublishRequest(BaseModel):
-    token: str
+    token: Optional[str] = None  # 호환성 유지 (deprecated, JWT 우선)
     owner: str
     repo: str
     result_data: dict
@@ -581,7 +586,7 @@ class GitHubPublishRequest(BaseModel):
 
 
 class GitHubAnalyticsRequest(BaseModel):
-    token: str
+    token: Optional[str] = None  # deprecated
     owner: str
     repo: str
     branch: str = "main"
@@ -589,7 +594,7 @@ class GitHubAnalyticsRequest(BaseModel):
 
 
 class GitHubIssuesRequest(BaseModel):
-    token: str
+    token: Optional[str] = None  # deprecated
     owner: str
     repo: str
     state: str = "open"
@@ -617,17 +622,23 @@ async def github_verify(req: GitHubVerifyRequest):
 
 
 @rest_router.post("/api/github/publish")
-async def github_publish(req: GitHubPublishRequest):
+async def github_publish(
+    req: GitHubPublishRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """SA 설계 문서를 GitHub Issues(design-doc)에 퍼블리시."""
-    if not req.token:
-        return {"status": "error", "error": "GitHub 토큰이 없습니다."}
+    # JWT로 인증한 사용자의 DB OAuth 토큰 우선, 없으면 body.token 폴백
+    token = (current_user.github_oauth_token if current_user else None) or req.token
+    if not token:
+        return {"status": "error", "error": "GitHub OAuth 토큰이 없습니다. GitHub 연결 후 다시 시도하세요."}
     try:
         from pipeline.domain.agile.wiki_publisher import publish_to_github
         result = publish_to_github(
             result_data=req.result_data,
             owner=req.owner,
             repo=req.repo,
-            token=req.token,
+            token=token,
             page_title=req.page_title,
             project_name=req.project_name,
         )
@@ -638,12 +649,18 @@ async def github_publish(req: GitHubPublishRequest):
 
 
 @rest_router.post("/api/github/analytics")
-async def github_analytics(req: GitHubAnalyticsRequest):
+async def github_analytics(
+    req: GitHubAnalyticsRequest,
+    current_user: User = Depends(get_current_user),
+):
     """커밋 히스토리 분석."""
+    token = (current_user.github_oauth_token if current_user else None) or req.token
+    if not token:
+        return {"status": "error", "error": "GitHub OAuth 토큰이 필요합니다."}
     try:
         from connectors.github_connector import GitHubConnector
         from pipeline.domain.agile.commit_analyzer import analyze_commits
-        connector = GitHubConnector(req.token)
+        connector = GitHubConnector(token)
         commits = connector.get_commits(req.owner, req.repo, req.branch, req.limit)
         analytics = analyze_commits(commits)
         return {
@@ -666,11 +683,17 @@ async def github_analytics(req: GitHubAnalyticsRequest):
 
 
 @rest_router.post("/api/github/issues")
-async def github_issues(req: GitHubIssuesRequest):
+async def github_issues(
+    req: GitHubIssuesRequest,
+    current_user: User = Depends(get_current_user),
+):
     """GitHub Issues 목록 조회."""
+    token = (current_user.github_oauth_token if current_user else None) or req.token
+    if not token:
+        return {"status": "error", "error": "GitHub OAuth 토큰이 필요합니다."}
     try:
         from connectors.github_connector import GitHubConnector
-        connector = GitHubConnector(req.token)
+        connector = GitHubConnector(token)
         issues = connector.get_issues(req.owner, req.repo, req.state)
         return {"status": "ok", "data": [i.__dict__ for i in issues]}
     except Exception as e:

@@ -148,6 +148,41 @@ async def github_disconnect(
     return {"status": "ok"}
 
 
+@auth_router.get("/auth/github/repos")
+async def list_github_repos(current_user: User = Depends(get_current_user)):
+    """현재 로그인한 GitHub 사용자의 레포 목록 반환."""
+    if not current_user.github_oauth_token:
+        raise HTTPException(status_code=400, detail="GitHub 연결이 필요합니다.")
+    try:
+        from githubkit import GitHub
+        repos = []
+        page = 1
+        with GitHub(current_user.github_oauth_token) as gh:
+            while True:
+                resp = gh.rest.repos.list_for_authenticated_user(
+                    sort="updated", per_page=100, page=page
+                )
+                batch = resp.parsed_data
+                if not batch:
+                    break
+                for r in batch:
+                    repos.append({
+                        "full_name": r.full_name,
+                        "name": r.name,
+                        "owner": r.owner.login,
+                        "description": getattr(r, "description", "") or "",
+                        "private": r.private,
+                        "language": getattr(r, "language", "") or "",
+                        "pushed_at": str(getattr(r, "pushed_at", "") or ""),
+                    })
+                if len(batch) < 100:
+                    break
+                page += 1
+        return {"status": "ok", "repos": repos}
+    except Exception as e:
+        return {"status": "scope_error", "error": str(e)}
+
+
 class OauthSetupRequest(BaseModel):
     client_id: str
     client_secret: str
@@ -204,7 +239,7 @@ class TeamOAuthConfigUpdate(BaseModel):
 @auth_router.patch("/api/teams/me/github")
 async def update_team_github_config(
     req: TeamOAuthConfigUpdate,
-    current_user: User = Depends(require_pm),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """팀의 GitHub OAuth 및 저장소 설정을 업데이트합니다."""
@@ -222,6 +257,70 @@ async def update_team_github_config(
     
     db.commit()
     return {"status": "ok", "message": "GitHub 구성이 업데이트되었습니다."}
+
+
+class TeamNameUpdate(BaseModel):
+    name: str
+
+@auth_router.patch("/api/teams/me")
+async def update_team_name(
+    req: TeamNameUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not current_user.team_id:
+        raise HTTPException(status_code=404, detail="팀 정보를 찾을 수 없습니다.")
+    team = db.query(Team).filter(Team.id == current_user.team_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="팀을 찾을 수 없습니다.")
+    team.name = req.name.strip()
+    db.commit()
+    return {"status": "ok"}
+
+
+@auth_router.get("/api/teams/me/members")
+async def get_team_members(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not current_user.team_id:
+        return {"members": []}
+    members = db.query(User).filter(User.team_id == current_user.team_id).all()
+    return {
+        "members": [
+            {
+                "id": m.id,
+                "name": m.name,
+                "email": m.email,
+                "role": m.role,
+                "github_login": m.github_login,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in members
+        ]
+    }
+
+
+class UserRoleUpdate(BaseModel):
+    role: str
+
+@auth_router.patch("/api/users/{user_id}/role")
+async def update_user_role(
+    user_id: str,
+    req: UserRoleUpdate,
+    current_user: User = Depends(require_pm),
+    db: Session = Depends(get_db),
+):
+    if req.role not in ("pm", "engineer", "viewer"):
+        raise HTTPException(status_code=400, detail="유효하지 않은 역할입니다. pm / engineer / viewer 중 선택하세요.")
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    if target.team_id != current_user.team_id:
+        raise HTTPException(status_code=403, detail="같은 팀원의 권한만 변경할 수 있습니다.")
+    target.role = req.role
+    db.commit()
+    return {"status": "ok", "user_id": user_id, "role": req.role}
 
 
 # ── 설계 변경 요청 (Agile) ─────────────────────────────────────

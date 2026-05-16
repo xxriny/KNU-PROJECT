@@ -144,7 +144,7 @@ def get_session_inventory(session_id: str) -> Dict[str, List[Dict[str, str]]]:
         if path not in inventory:
             inventory[path] = []
             
-        inventory[path].append({"name": func, "summary": ds})
+        inventory[path].append({"name": func, "docstring": ds})
             
     return inventory
 

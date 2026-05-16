@@ -13,6 +13,7 @@ import re
 from typing import Any, Dict, List
 
 from pipeline.core.state import PipelineState, make_sget
+from pipeline.core.node_base import pipeline_node, NodeContext
 from pipeline.domain.rag.schemas import CodeChunk
 from observability.logger import get_logger
 
@@ -206,8 +207,9 @@ def _process_file(
 
 # ── LangGraph 노드 ──────────────────────────────────────────
 
-def code_chunker_node(state: PipelineState) -> Dict[str, Any]:
-    sget = make_sget(state)
+@pipeline_node("code_chunker")
+def code_chunker_node(ctx: NodeContext) -> Dict[str, Any]:
+    sget = ctx.sget
     action_type = (sget("action_type", "") or "").strip().upper()
     source_dir = sget("source_dir", "")
     session_id = sget("session_id", "") or sget("run_id", "unknown")
@@ -240,6 +242,7 @@ def code_chunker_node(state: PipelineState) -> Dict[str, Any]:
 
     all_chunks: List[CodeChunk] = []
 
+    file_count = 0
     for dirpath, dirnames, filenames in os.walk(source_dir):
         # 무시 디렉터리 가지치기 (in-place 수정으로 os.walk 재귀 방지)
         dirnames[:] = [d for d in dirnames if not _should_ignore(d)]
@@ -248,7 +251,11 @@ def code_chunker_node(state: PipelineState) -> Dict[str, Any]:
             full_path = os.path.join(dirpath, filename)
             rel_path = os.path.relpath(full_path, source_dir).replace("\\", "/")
             chunks = _process_file(full_path, rel_path, session_id, version)
-            all_chunks.extend(chunks)
+            if chunks:
+                all_chunks.extend(chunks)
+                file_count += 1
+    
+    logger.info(f"[code_chunker] Walk finished. Total files scanned: {file_count}, total chunks: {len(all_chunks)}")
 
     # >>> [EXPERIMENT-RAG-VIS] BEGIN — 추후 원복 시 이 블록을 다음 한 줄로 교체:
     #     thinking = f"총 {len(all_chunks)}개 코드 청크 추출 완료 (source_dir: {source_dir})"

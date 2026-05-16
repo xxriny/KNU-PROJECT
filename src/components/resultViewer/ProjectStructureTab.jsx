@@ -64,6 +64,8 @@ export default function ProjectStructureTab() {
           <Card variant="glass" className="p-6 font-mono text-sm overflow-x-auto">
             {tree ? (
               <TreeNode node={tree} depth={0} isDarkMode={isDarkMode} />
+            ) : projectStructure?.directories || projectStructure?.files ? (
+              <FlatToTree directories={projectStructure.directories || []} files={projectStructure.files || []} isDarkMode={isDarkMode} />
             ) : (
               <p className="text-slate-500 italic">트리 데이터 없음</p>
             )}
@@ -201,5 +203,43 @@ function MappingCard({ component, files, isDarkMode }) {
         </div>
       )}
     </Card>
+  );
+}
+
+// ── Flat 리스트 -> 트리 변환 컴포넌트 ─────────────────────────────────
+
+function FlatToTree({ directories, files, isDarkMode }) {
+  const root = { name: "Project", type: "dir", children: [] };
+  
+  const ensurePath = (path) => {
+    let current = root;
+    const parts = path.split('/').filter(Boolean);
+    for (const part of parts) {
+      let child = current.children.find(c => c.name === part);
+      if (!child) {
+        child = { name: part, type: "dir", children: [] };
+        current.children.push(child);
+      }
+      current = child;
+    }
+    return current;
+  };
+
+  directories.forEach(d => ensurePath(d));
+  files.forEach(f => {
+    const parts = f.split('/').filter(Boolean);
+    const fileName = parts.pop();
+    if (fileName) {
+      const parent = ensurePath(parts.join('/'));
+      parent.children.push({ name: fileName, type: "file" });
+    }
+  });
+
+  return (
+    <div>
+      {root.children.map((child, i) => (
+        <TreeNode key={i} node={child} depth={0} isDarkMode={isDarkMode} />
+      ))}
+    </div>
   );
 }

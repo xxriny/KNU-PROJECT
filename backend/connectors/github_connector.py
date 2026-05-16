@@ -59,7 +59,7 @@ class GitHubConnector:
                     sha=c.sha[:7],
                     message=c.commit.message.split("\n")[0],
                     author=c.commit.author.name if c.commit.author else "Unknown",
-                    date=c.commit.author.date if c.commit.author else "",
+                    date=c.commit.author.date.isoformat() if (c.commit.author and c.commit.author.date) else "",
                     url=c.html_url,
                     files_changed=0, # 상세 통계는 추가 호출 필요하므로 생략
                 ))

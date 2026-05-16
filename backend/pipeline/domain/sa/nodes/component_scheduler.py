@@ -24,10 +24,12 @@ Your goal is to reconstruct the complete system component map.
 - **Evidence-First**: Use the <project_inventory> as your map.
 - **Logical Mapping**: Map each component to its corresponding RTM features.
 - **Dependency Inference**: If `main.py` exists and `nodes/` exist, infer that `main` depends on `nodes`.
+- **NO EMPTY NAMES**: Do NOT use "?" or "Unknown" for names. If a logical name is unclear, use the primary filename or class name (e.g., `rest_handler.py` -> `RestHandlerComponent`).
 
 ## Output Rules
 - **thinking**: Explain how you grouped the files into these components (In Korean).
 - **Output Language**: All specification fields must be written in professional Korean.
+- **Literal Naming**: Ensure `nm` (Name) is descriptive and non-empty.
 """
 
 CREATION_PROMPT = """# Role: Senior Component Architect (New Design Mode)
@@ -117,8 +119,9 @@ def component_scheduler_node(ctx: NodeContext) -> dict:
                 logger.info(f"[component_scheduler] Priority 1 (Forensic): {len(target_files)} UI/Service files identified.")
             else:
                 # [MINIMAL FALLBACK]
-                comp_patterns = ["app", "index", "main", "service", "handler", "router", "view", "component"]
+                comp_patterns = ["app", "index", "main", "service", "handler", "router", "view", "component", "store", "slice", "context", "layout", "page"]
                 target_files = [path for path in inventory.keys() if any(p in path.lower() for p in comp_patterns)]
+                logger.info(f"[component_scheduler] Fallback: {len(target_files)} files identified by patterns.")
             
             for t_file in target_files:
                 direct_chunks = get_file_chunks(t_file, session_id=search_session_id)

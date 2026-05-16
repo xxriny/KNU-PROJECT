@@ -143,21 +143,10 @@ class SATestAnalysisOutput(BaseModel):
     automation_priority: List[str] = Field(alias="ap")
 
 
-# ── SA Project Structure ──────────────────────────────────
-
-class DirectoryNode(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    name: str = Field(alias="nm")
-    type_: str = Field(alias="tp", description="dir|file")
-    component_id: str = Field(alias="ci", default="")
-    children: List["DirectoryNode"] = Field(alias="ch", default_factory=list)
-    rationale: str = Field(alias="rt", default="")
-
-DirectoryNode.model_rebuild()
-
 class SAProjectStructureOutput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     thinking: str = Field(alias="th", default="")
-    tree: DirectoryNode = Field(alias="tr")
+    directories: List[str] = Field(alias="dr", description="List of directory paths to create")
+    files: List[str] = Field(alias="fl", description="List of file paths to create")
     component_mapping: Dict[str, List[str]] = Field(alias="cm", default_factory=dict)
     conventions: List[str] = Field(alias="cv", default_factory=list)

@@ -78,7 +78,7 @@ export const createSessionSlice = (set, get) => ({
       pipelineStatus: session.resultData ? "done" : "idle",
       userComments: session.userComments || [],
     });
-    
+
     // RAG 복구는 백그라운드에서 조용히 수행 (로딩 인디케이터 없음)
     get().restoreSessionFromRag(id);
   },

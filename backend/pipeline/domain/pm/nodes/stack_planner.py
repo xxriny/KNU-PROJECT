@@ -142,12 +142,14 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
         out = res.parsed
         total_retries = res.retry_count
         
-        # 6. 자가 치유 로직 (누락 체크)
+        # 6. 자가 치유 로직 — 누락이 전체의 30% 초과일 때만 2차 LLM 호출
+        # (소수 누락은 정상 범주로 처리하여 불필요한 38초 지연 방지)
         mapped_ids = {item.f_id for item in out.m}
         missing_ids = set(feature_ids) - mapped_ids
-        
-        if missing_ids:
-            logger.warning(f"Detected {len(missing_ids)} missing mappings. Initiating self-healing...")
+        heal_threshold = max(1, int(len(feature_ids) * 0.3))
+
+        if missing_ids and len(missing_ids) > heal_threshold:
+            logger.warning(f"Detected {len(missing_ids)} missing mappings (>{heal_threshold}). Initiating self-healing...")
             missing_features = [f for f in features if f.get("id") in missing_ids]
             healing_user_msg = f"다음 누락된 기능들에 대해 추가로 기술 스택을 매핑하십시오:\n{missing_features}"
             
@@ -166,6 +168,8 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
             final_mapping_dict = {item.f_id: item for item in out.m + out_heal.m if item.f_id in feature_ids}
             out.m = list(final_mapping_dict.values())
         else:
+            if missing_ids:
+                logger.info(f"[stack_planner] {len(missing_ids)}개 누락은 허용 범위({heal_threshold}개 이하). 자가치유 생략.")
             final_mapping_dict = {item.f_id: item for item in out.m if item.f_id in feature_ids}
             out.m = list(final_mapping_dict.values())
 

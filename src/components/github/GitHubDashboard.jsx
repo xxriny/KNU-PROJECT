@@ -21,11 +21,12 @@ const TREND_ICON = {
 
 export default function GitHubDashboard() {
   const isDarkMode = useAppStore((s) => s.isDarkMode);
-  const githubToken = useAppStore((s) => s.githubToken);
   const githubOwner = useAppStore((s) => s.githubOwner);
   const githubRepo  = useAppStore((s) => s.githubRepo);
   const resultData  = useAppStore((s) => s.resultData);
   const backendPort = useAppStore((s) => s.backendPort);
+  const authToken   = useAppStore((s) => s.authToken);
+  const currentUser = useAppStore((s) => s.currentUser);
 
   const [activeTab, setActiveTab] = useState("commits");
   const [analytics, setAnalytics] = useState(null);
@@ -36,15 +37,20 @@ export default function GitHubDashboard() {
   const [publishMsg, setPublishMsg] = useState("");
 
   const port = backendPort || 8000;
-  const hasConfig = githubToken && githubOwner && githubRepo;
+  // githubToken은 DB에 저장된 GitHub OAuth 토큰 (backend가 관리)
+  // 클라이언트에서 직접 githubToken 없이 현재 사용자의 github_id로 연결 여부 판단
+  const isGithubConnected = !!currentUser?.github_id;
+  const hasRepoConfig = githubOwner && githubRepo;
+  const hasConfig = isGithubConnected && hasRepoConfig;
+  const authHeader = { Authorization: `Bearer ${authToken}` };
 
   const fetchAnalytics = async () => {
     setLoading(true); setError("");
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/github/analytics`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: githubToken, owner: githubOwner, repo: githubRepo }),
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({ owner: githubOwner, repo: githubRepo }),
       });
       const json = await res.json();
       if (json.status === "ok") setAnalytics(json.data);
@@ -58,8 +64,8 @@ export default function GitHubDashboard() {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/github/issues`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: githubToken, owner: githubOwner, repo: githubRepo }),
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({ owner: githubOwner, repo: githubRepo }),
       });
       const json = await res.json();
       if (json.status === "ok") setIssues(json.data);
@@ -82,9 +88,9 @@ export default function GitHubDashboard() {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/github/publish`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeader },
         body: JSON.stringify({
-          token: githubToken, owner: githubOwner, repo: githubRepo,
+          owner: githubOwner, repo: githubRepo,
           result_data: resultData,
           page_title: "SA 설계 문서",
           project_name: resultData?.pm_bundle?.project_name || "Project",
@@ -101,12 +107,22 @@ export default function GitHubDashboard() {
     } catch (e) { setPublishStatus("error"); setPublishMsg("연결 실패: " + e.message); }
   };
 
-  if (!hasConfig) {
+  if (!isGithubConnected) {
     return (
       <div className={`h-full flex flex-col items-center justify-center gap-4 p-8 opacity-60 ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
         <Github size={64} />
-        <p className="text-lg font-bold">GitHub 설정이 필요합니다</p>
-        <p className="text-sm text-center">설정 패널에서 GitHub 토큰, 소유자, 레포지토리를 입력하세요.</p>
+        <p className="text-lg font-bold">GitHub 로그인이 필요합니다</p>
+        <p className="text-sm text-center">설정 패널에서 GitHub 계정을 연결하세요.</p>
+      </div>
+    );
+  }
+
+  if (!hasRepoConfig) {
+    return (
+      <div className={`h-full flex flex-col items-center justify-center gap-4 p-8 opacity-60 ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
+        <Github size={64} />
+        <p className="text-lg font-bold">대상 레포지토리가 필요합니다</p>
+        <p className="text-sm text-center">설정 패널에서 분석할 레포지토리를 선택하세요.</p>
       </div>
     );
   }

@@ -128,6 +128,7 @@ export const createPipelineSlice = (set, get) => ({
       idea, context, api_key: apiKey, model,
       action_type: MODE_TO_ACTION_TYPE[normalizedMode],
       source_dir: sourceDir,
+      auth_token: get().authToken,
     });
   },
 
@@ -162,6 +163,7 @@ export const createPipelineSlice = (set, get) => ({
       model: model || "gemini-3.1-flash-lite-preview",
       action_type: "UPDATE",
       source_dir: projectFolder || "",
+      auth_token: get().authToken,
     });
   },
 

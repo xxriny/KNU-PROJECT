@@ -7,6 +7,7 @@ project_code_knowledge 컬렉션에 저장합니다.
 from typing import Any, Dict
 
 from pipeline.core.state import PipelineState, make_sget
+from pipeline.core.node_base import pipeline_node, NodeContext
 from pipeline.core.models.google_embed_model import get_google_embeddings_batch, MODEL_NAME
 from pipeline.domain.rag.schemas import CodeChunk, RAGIngestOutput
 from pipeline.domain.rag.nodes.project_db import upsert_code_chunks_batch
@@ -15,8 +16,9 @@ from observability.logger import get_logger
 logger = get_logger()
 
 
-def code_embedding_node(state: PipelineState) -> Dict[str, Any]:
-    sget = make_sget(state)
+@pipeline_node("code_embedding")
+def code_embedding_node(ctx: NodeContext) -> Dict[str, Any]:
+    sget = ctx.sget
     action_type = (sget("action_type", "") or "").strip().upper()
     api_key = sget("api_key", "")
     # session_id는 source_dir 해시 기반 영속 키. 없으면 run_id로 폴백.

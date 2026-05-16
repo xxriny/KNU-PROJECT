@@ -65,7 +65,8 @@ def pipeline_node(node_name: str):
                 wrapper._logger_setup_done = True
 
             logger = get_logger(run_id=run_id, node_name=node_name)
-            logger.info(f"[START] Node Entry: {node_name}")
+            session_id = state.get("session_id", "unknown")
+            logger.info(f"[START] Node Entry: {node_name}", run_id=run_id, session_id=session_id)
             
             sget = make_sget(state)
             ctx = NodeContext(
@@ -107,7 +108,14 @@ def pipeline_node(node_name: str):
                 if "current_step" not in result:
                     result["current_step"] = f"{node_name}_done"
 
-                logger.info(f"[SUCCESS] Node: {node_name}", cost=f"${node_cost:.4f}")
+                inventory_size = 0
+                try:
+                    inventory = get_session_inventory(session_id)
+                    inventory_size = len(inventory)
+                except:
+                    pass
+
+                logger.info(f"[SUCCESS] Node: {node_name}", cost=f"${node_cost:.4f}", session_id=session_id, inventory_size=inventory_size)
                 return result
 
             except Exception as e:

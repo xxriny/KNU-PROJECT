@@ -329,6 +329,15 @@ def shape_result(raw_result: dict) -> dict:
         if "project_structure" in src and "sa_project_structure" not in sanitized:
             sanitized["sa_project_structure"] = src["project_structure"]
 
+    # sa_project_structure_output 직접 주입 (새 flat 스키마 우선)
+    ps_out = sanitized.get("sa_project_structure_output")
+    if ps_out and isinstance(ps_out, dict):
+        # directories/files 키가 있는 새 스키마면 그대로 사용
+        if "directories" in ps_out or "files" in ps_out:
+            sanitized["sa_project_structure"] = ps_out
+        elif "tree" in ps_out and "sa_project_structure" not in sanitized:
+            sanitized["sa_project_structure"] = ps_out
+
     skipped_phases = _collect_skipped_phases(sanitized)
     rag_warnings = sanitized.get("rag_warnings") or []
 

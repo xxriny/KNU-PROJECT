@@ -34,12 +34,8 @@ Every directory and file must map to a specific component or architectural conce
 
 ## Output Fields
 - thinking (th): Rationale for structure decisions (Korean)
-- tree (tr): Root DirectoryNode with full recursive structure
-  - name (nm): directory or file name
-  - type_ (tp): "dir" or "file"
-  - component_id (ci): which component this path belongs to (empty if shared)
-  - children (ch): child nodes (only for dirs)
-  - rationale (rt): why this path exists (optional, 1 sentence)
+- directories (dr): List of all necessary directory paths (e.g., "src/components/auth")
+- files (fl): List of all necessary file paths (e.g., "src/components/auth/Login.jsx")
 - component_mapping (cm): {component_name: [file_path_list]} for GitHub Commit Analyzer
 - conventions (cv): List of naming/placement conventions used
 

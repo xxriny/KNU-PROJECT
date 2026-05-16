@@ -34,6 +34,11 @@ from observability.metrics import track_node
 from transport.connection_manager import manager
 from version import DEFAULT_MODEL
 
+# 인증 및 레포 캐시 추가
+from auth.database import SessionLocal
+from auth.service import decode_token, get_user_by_id
+from connectors.repo_cache import is_github_repo_format, get_local_repo_path
+
 
 # ─── 입력 검증 ────────────────────────────────────────────
 
@@ -128,6 +133,45 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
     context = payload.get("context", "")
     action_type = normalize_action_type(payload.get("action_type", "CREATE"))
     source_dir = payload.get("source_dir", "")
+    auth_token = payload.get("auth_token", "")
+    
+    get_logger().info("run_analysis_payload", action_type=action_type, source_dir=source_dir, idea=idea[:50])
+
+    # ── 사용자 인증 및 GitHub 토큰 추출 ──
+    github_oauth_token = None
+    if auth_token:
+        db = SessionLocal()
+        try:
+            decoded = decode_token(auth_token)
+            if decoded:
+                user = get_user_by_id(db, decoded.get("sub", ""))
+                if user:
+                    github_oauth_token = user.github_oauth_token
+        except Exception:
+            get_logger().warning("Failed to resolve user from auth_token in pipeline")
+        finally:
+            db.close()
+
+    # ── GitHub 레포지토리인 경우 캐싱 처리 ──
+    if is_github_repo_format(source_dir):
+        try:
+            await manager.send_json(ws, {
+                "type": "thinking",
+                "node": "repo_loader",
+                "data": {"text": f"GitHub 저장소({source_dir})를 준비 중입니다..."}
+            })
+            owner, repo = source_dir.split("/")
+            # 동기 함수이므로 asyncio.to_thread 사용 (git clone/pull은 블로킹 작업)
+            source_dir = await asyncio.to_thread(
+                get_local_repo_path, owner, repo, github_oauth_token
+            )
+            get_logger().info("github_repo_cached", path=source_dir)
+        except Exception as e:
+            await manager.send_json(ws, {
+                "type": "error",
+                "data": {"message": f"저장소 준비 실패: {str(e)}"}
+            })
+            return
 
     validation_error = validate_analysis_inputs(action_type, idea, source_dir)
     if validation_error:
