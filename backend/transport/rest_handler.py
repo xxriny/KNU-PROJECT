@@ -583,6 +583,9 @@ class GitHubPublishRequest(BaseModel):
     result_data: dict
     page_title: str = "SA 설계 문서"
     project_name: str = "Project"
+    publish_mode: str = "wiki"  # "wiki" | "issue"
+    api_key: str = ""
+    model: str = "gemini-2.0-flash-lite"
 
 
 class GitHubAnalyticsRequest(BaseModel):
@@ -641,11 +644,20 @@ async def github_publish(
             token=token,
             page_title=req.page_title,
             project_name=req.project_name,
+            mode=req.publish_mode,
+            api_key=req.api_key,
+            model=req.model,
         )
         return {"status": "ok", **result}
     except Exception as e:
         get_logger().exception("github_publish endpoint failed")
-        return {"status": "error", "error": str(e)}
+        err_str = str(e)
+        wiki_disabled = "wiki_disabled=true" in err_str
+        return {
+            "status": "error",
+            "error": err_str.replace(" | wiki_disabled=true", ""),
+            "wiki_disabled": wiki_disabled,
+        }
 
 
 @rest_router.post("/api/github/analytics")

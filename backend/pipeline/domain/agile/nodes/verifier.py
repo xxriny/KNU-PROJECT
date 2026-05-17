@@ -21,6 +21,23 @@ from pipeline.domain.agile.schemas import (
     ViolationItem,
 )
 
+# ── 필드명 호환성 헬퍼 ───────────────────────────────────────
+# result_shaper: table_name / columns / column_name / component_name
+# 레거시:        name      / fields  / name         / name
+
+def _cname(c: dict) -> str:
+    return c.get("component_name") or c.get("name", "")
+
+def _tname(t: dict) -> str:
+    return t.get("table_name") or t.get("name", "?")
+
+def _tcols(t: dict) -> list:
+    return t.get("columns") or t.get("fields", [])
+
+def _colname(col: dict) -> str:
+    return col.get("column_name") or col.get("name", "")
+
+
 # ── LLM 의존성 (지연 임포트) ─────────────────────────────────
 
 def _get_llm(api_key: str, model: str):
@@ -33,7 +50,8 @@ def _get_llm(api_key: str, model: str):
 
 def _v001_api_component_ref(sa_data: dict) -> list[ViolationItem]:
     violations: list[ViolationItem] = []
-    components = {c.get("name", "") for c in sa_data.get("components", [])}
+    components = {_cname(c) for c in sa_data.get("components", [])}
+    components.discard("")
     for api in sa_data.get("apis", []):
         owner = api.get("owner_component", "")
         if owner and owner not in components:
@@ -54,7 +72,7 @@ def _v002_circular_dependency(sa_data: dict) -> list[ViolationItem]:
     violations: list[ViolationItem] = []
     graph: dict[str, set[str]] = {}
     for comp in sa_data.get("components", []):
-        name = comp.get("name", "")
+        name = _cname(comp)
         deps = comp.get("dependencies", [])
         if isinstance(deps, list):
             graph[name] = set(deps)
@@ -99,8 +117,9 @@ def _v003_table_fields(sa_data: dict) -> list[ViolationItem]:
     violations: list[ViolationItem] = []
     required = {"id", "created_at"}
     for table in sa_data.get("tables", []):
-        name = table.get("name", "?")
-        fields = {f.get("name", "").lower() for f in table.get("fields", [])}
+        name = _tname(table)
+        cols = _tcols(table)
+        fields = {_colname(c).lower() for c in cols}
         missing = required - fields
         if missing:
             violations.append(ViolationItem(
@@ -120,7 +139,7 @@ def _v004_security_layer(sa_data: dict) -> list[ViolationItem]:
     violations: list[ViolationItem] = []
     security_keywords = {"auth", "security", "jwt", "token", "oauth", "guard", "middleware"}
     has_security = any(
-        any(kw in comp.get("name", "").lower() or kw in comp.get("type", "").lower() for kw in security_keywords)
+        any(kw in _cname(comp).lower() or kw in comp.get("type", "").lower() for kw in security_keywords)
         for comp in sa_data.get("components", [])
     )
     has_user_api = any(
@@ -146,7 +165,7 @@ def _v005_external_interface(sa_data: dict) -> list[ViolationItem]:
     external_keywords = {"gateway", "external", "thirdparty", "third_party", "integration"}
     external_comps = [
         c for c in sa_data.get("components", [])
-        if any(kw in c.get("type", "").lower() or kw in c.get("name", "").lower() for kw in external_keywords)
+        if any(kw in c.get("type", "").lower() or kw in _cname(c).lower() for kw in external_keywords)
     ]
     for comp in external_comps:
         has_interface = bool(comp.get("interface") or comp.get("protocol") or comp.get("api_spec"))
@@ -155,8 +174,8 @@ def _v005_external_interface(sa_data: dict) -> list[ViolationItem]:
                 rule_id="V-005",
                 rule_name="외부 서비스 인터페이스 명세 누락",
                 severity=Severity.minor,
-                description=f"외부 서비스 컴포넌트 '{comp.get('name', '?')}' 에 인터페이스 명세가 없습니다.",
-                location=f"Component: {comp.get('name', '?')}",
+                description=f"외부 서비스 컴포넌트 '{_cname(comp)}' 에 인터페이스 명세가 없습니다.",
+                location=f"Component: {_cname(comp)}",
                 suggestion="외부 서비스와의 통신 프로토콜, API spec, 또는 interface 필드를 명세하세요.",
             ))
     return violations
@@ -171,7 +190,7 @@ def _v006_semantic_coherence_llm(sa_data: dict, api_key: str, model: str) -> lis
         summary = json.dumps({
             "component_names": [c.get("name") for c in sa_data.get("components", [])[:10]],
             "api_endpoints": [a.get("endpoint", a.get("path")) for a in sa_data.get("apis", [])[:10]],
-            "table_names": [t.get("name") for t in sa_data.get("tables", [])[:10]],
+            "table_names": [_tname(t) for t in sa_data.get("tables", [])[:10]],
         }, ensure_ascii=False)
 
         prompt = f"""다음 SA(시스템 아키텍처) 요약을 분석하여 의미론적 불일치가 있는지 확인하세요.
@@ -256,7 +275,7 @@ def _v008_srp_check_llm(sa_data: dict, api_key: str, model: str) -> list[Violati
         if not components:
             return []
         comp_summary = [
-            {"name": c.get("name", ""), "responsibilities": c.get("responsibilities", c.get("description", ""))}
+            {"name": _cname(c), "responsibilities": c.get("responsibilities", c.get("description", ""))}
             for c in components[:15]
         ]
         llm = _get_llm(api_key, model)
@@ -298,7 +317,7 @@ def _v009_security_depth_llm(sa_data: dict, api_key: str, model: str) -> list[Vi
         llm = _get_llm(api_key, model)
         security_comps = [
             c for c in sa_data.get("components", [])
-            if any(kw in c.get("name", "").lower() or kw in c.get("type", "").lower()
+            if any(kw in _cname(c).lower() or kw in c.get("type", "").lower()
                    for kw in ("auth", "security", "jwt", "token", "oauth", "guard", "session"))
         ]
         auth_apis = [

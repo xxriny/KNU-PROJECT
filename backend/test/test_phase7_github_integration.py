@@ -61,6 +61,25 @@ class TestWikiPublisher:
         assert "/api/login" in md
         assert "users" in md
 
+    def test_build_design_doc_markdown_new_keys(self):
+        from pipeline.domain.agile.wiki_publisher import build_design_doc_markdown
+        result_data = {
+            "sa_output": {
+                "data": {
+                    "components": [{"component_name": "AuthService", "domain": "security", "dependencies": ["DB"]}],
+                    "apis": [{"endpoint": "/api/login", "method": "POST", "description": "로그인"}],
+                    "tables": [{"table_name": "users", "columns": [{"column_name": "id", "type": "uuid"}, {"column_name": "email", "type": "text"}]}],
+                }
+            }
+        }
+        md = build_design_doc_markdown(result_data, project_name="TestProject")
+        assert "TestProject" in md
+        assert "AuthService" in md
+        assert "security" in md
+        assert "/api/login" in md
+        assert "users" in md
+        assert "id" in md
+
     def test_build_design_doc_markdown_empty(self):
         from pipeline.domain.agile.wiki_publisher import build_design_doc_markdown
         md = build_design_doc_markdown({})

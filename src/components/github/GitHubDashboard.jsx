@@ -3,7 +3,7 @@ import useAppStore from "../../store/useAppStore";
 import {
   Github, GitCommit, Users, AlertCircle, BookOpen,
   Loader2, RefreshCw, TrendingUp, TrendingDown, Minus,
-  ExternalLink, Tag, Upload, Check, X,
+  ExternalLink, Tag, Upload, Check, X, Info,
 } from "lucide-react";
 
 const TABS = [
@@ -28,6 +28,8 @@ export default function GitHubDashboard() {
   const backendPort = useAppStore((s) => s.backendPort);
   const authToken   = useAppStore((s) => s.authToken);
   const currentUser = useAppStore((s) => s.currentUser);
+  const apiKey      = useAppStore((s) => s.apiKey);
+  const model       = useAppStore((s) => s.model);
 
   const [activeTab, setActiveTab] = useState("commits");
   const [analytics, setAnalytics] = useState(null);
@@ -36,6 +38,8 @@ export default function GitHubDashboard() {
   const [error, setError]         = useState("");
   const [publishStatus, setPublishStatus] = useState(null); // null | "loading" | "ok" | "error"
   const [publishMsg, setPublishMsg] = useState("");
+  const [publishMode, setPublishMode] = useState("wiki"); // "wiki" | "issue"
+  const [wikiDisabled, setWikiDisabled] = useState(false);
 
   const port = backendPort || 8000;
   // githubToken은 DB에 저장된 GitHub OAuth 토큰 (backend가 관리)
@@ -98,6 +102,7 @@ export default function GitHubDashboard() {
   const handlePublish = async () => {
     if (!resultData) { setPublishMsg("분석 결과가 없습니다."); setPublishStatus("error"); return; }
     setPublishStatus("loading");
+    setWikiDisabled(false);
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/github/publish`, {
         method: "POST",
@@ -107,15 +112,23 @@ export default function GitHubDashboard() {
           result_data: resultData,
           page_title: "SA 설계 문서",
           project_name: resultData?.pm_bundle?.project_name || "Project",
+          publish_mode: publishMode,
+          api_key: apiKey || "",
+          model: model || "gemini-2.0-flash-lite",
         }),
       });
       const json = await res.json();
       if (json.status === "ok") {
         setPublishStatus("ok");
-        setPublishMsg(`${json.action === "created" ? "생성" : "업데이트"} 완료 (Issue #${json.number})`);
+        if (json.mode === "wiki") {
+          setPublishMsg(`Wiki ${json.action === "created" ? "페이지 생성" : "페이지 업데이트"} 완료`);
+        } else {
+          setPublishMsg(`Issue #${json.number} ${json.action === "created" ? "생성" : "업데이트"} 완료`);
+        }
       } else {
         setPublishStatus("error");
         setPublishMsg(json.error || "퍼블리시 실패");
+        if (json.wiki_disabled) setWikiDisabled(true);
       }
     } catch (e) { setPublishStatus("error"); setPublishMsg("연결 실패: " + e.message); }
   };
@@ -289,14 +302,54 @@ export default function GitHubDashboard() {
             <div className={`p-5 rounded-2xl border ${isDarkMode ? "bg-white/5 border-white/10" : "bg-white border-slate-200 shadow-sm"}`}>
               <h3 className="font-bold text-base mb-2">SA 설계 문서 퍼블리시</h3>
               <p className="text-sm opacity-60 mb-4">
-                현재 분석 결과(컴포넌트, API, DB)를 GitHub Issues의 `design-doc` 라벨로 퍼블리시합니다.
-                이미 같은 제목의 이슈가 있으면 업데이트합니다.
+                현재 분석 결과(컴포넌트, API, DB)를 GitHub에 퍼블리시합니다.
               </p>
+
+              {/* 퍼블리시 방식 선택 */}
+              <div className="flex gap-2 mb-4">
+                {[
+                  { id: "wiki", label: "Wiki 페이지", desc: "레포 Wiki에 문서 페이지 생성" },
+                  { id: "issue", label: "Issue", desc: "design-doc 라벨 이슈로 등록" },
+                ].map(({ id, label, desc }) => (
+                  <button
+                    key={id}
+                    onClick={() => { setPublishMode(id); setPublishStatus(null); setWikiDisabled(false); }}
+                    className={`flex-1 p-3 rounded-xl border text-left transition-all ${
+                      publishMode === id
+                        ? isDarkMode
+                          ? "border-blue-500 bg-blue-500/10 text-blue-300"
+                          : "border-blue-500 bg-blue-50 text-blue-700"
+                        : isDarkMode
+                          ? "border-white/10 text-slate-400 hover:border-white/20"
+                          : "border-slate-200 text-slate-500 hover:border-slate-300"
+                    }`}
+                  >
+                    <div className="font-bold text-sm">{label}</div>
+                    <div className="text-xs opacity-60 mt-0.5">{desc}</div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Wiki 비활성화 안내 */}
+              {wikiDisabled && (
+                <div className={`flex gap-2 p-3 rounded-xl border-l-4 border-amber-400 text-sm mb-4 ${isDarkMode ? "bg-amber-500/10 text-amber-300" : "bg-amber-50 text-amber-700"}`}>
+                  <Info size={16} className="shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">레포 Wiki가 비활성화 상태입니다.</p>
+                    <p className="opacity-80 mt-0.5">
+                      GitHub 레포 → <strong>Settings</strong> → <strong>Features</strong> → <strong>Wikis</strong> 체크박스를 켜거나,
+                      퍼블리시 방식을 <strong>Issue</strong>로 전환하세요.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {!resultData && (
                 <div className={`p-3 rounded-xl text-sm mb-4 ${isDarkMode ? "bg-amber-500/10 text-amber-300" : "bg-amber-50 text-amber-700"}`}>
                   분석 결과가 없습니다. 먼저 SA 분석을 실행하세요.
                 </div>
               )}
+
               <button
                 onClick={handlePublish}
                 disabled={publishStatus === "loading" || !resultData}
@@ -311,14 +364,14 @@ export default function GitHubDashboard() {
                 ) : (
                   <Upload size={16} />
                 )}
-                {publishStatus === "loading" ? "퍼블리시 중..." : "GitHub에 퍼블리시"}
+                {publishStatus === "loading" ? "퍼블리시 중..." : `${publishMode === "wiki" ? "Wiki" : "Issue"}로 퍼블리시`}
               </button>
               {publishStatus === "ok" && (
                 <p className="mt-3 text-sm text-emerald-400 flex items-center gap-1">
                   <Check size={14} /> {publishMsg}
                 </p>
               )}
-              {publishStatus === "error" && (
+              {publishStatus === "error" && !wikiDisabled && (
                 <p className="mt-3 text-sm text-red-400 flex items-center gap-1">
                   <X size={14} /> {publishMsg}
                 </p>

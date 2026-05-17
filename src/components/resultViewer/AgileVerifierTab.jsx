@@ -7,8 +7,8 @@ import {
 
 const SEVERITY_CONFIG = {
   critical: { label: "치명적", color: "text-red-500", bg: "bg-red-500/10", border: "border-red-500/30", Icon: ShieldX },
-  major:    { label: "주요",   color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/30", Icon: AlertTriangle },
-  minor:    { label: "경미",   color: "text-yellow-400", bg: "bg-yellow-500/10", border: "border-yellow-500/30", Icon: AlertCircle },
+  major: { label: "주요", color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/30", Icon: AlertTriangle },
+  minor: { label: "경미", color: "text-yellow-400", bg: "bg-yellow-500/10", border: "border-yellow-500/30", Icon: AlertCircle },
 };
 
 export default function AgileVerifierTab() {
@@ -81,8 +81,8 @@ export default function AgileVerifierTab() {
     ? result.coherence_score >= 0.8
       ? "text-emerald-400"
       : result.coherence_score >= 0.6
-      ? "text-yellow-400"
-      : "text-red-400"
+        ? "text-yellow-400"
+        : "text-red-400"
     : "";
 
   return (
@@ -132,11 +132,10 @@ export default function AgileVerifierTab() {
           <button
             onClick={runVerify}
             disabled={loading}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg transition-all ${
-              loading
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg transition-all ${loading
                 ? "bg-white/5 text-slate-500 cursor-not-allowed"
                 : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-500/20 hover:scale-[1.02] active:scale-[0.99]"
-            }`}
+              }`}
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
             {loading ? "검증 중..." : "검증 실행"}
@@ -177,10 +176,9 @@ export default function AgileVerifierTab() {
                 <p className="text-sm opacity-70">{result.summary}</p>
                 <div className="mt-3 w-full bg-white/10 rounded-full h-2">
                   <div
-                    className={`h-2 rounded-full transition-all ${
-                      result.coherence_score >= 0.8 ? "bg-emerald-400" :
-                      result.coherence_score >= 0.6 ? "bg-yellow-400" : "bg-red-400"
-                    }`}
+                    className={`h-2 rounded-full transition-all ${result.coherence_score >= 0.8 ? "bg-emerald-400" :
+                        result.coherence_score >= 0.6 ? "bg-yellow-400" : "bg-red-400"
+                      }`}
                     style={{ width: `${result.coherence_score * 100}%` }}
                   />
                 </div>
@@ -234,11 +232,10 @@ export default function AgileVerifierTab() {
                         type="button"
                         onClick={handleAddToMemo}
                         title="메모로 추가"
-                        className={`p-1.5 rounded-lg transition-colors ${
-                          alreadyAdded
+                        className={`p-1.5 rounded-lg transition-colors ${alreadyAdded
                             ? "text-emerald-400 bg-emerald-500/10"
                             : "text-white/30 hover:text-white/70 hover:bg-white/10"
-                        }`}
+                          }`}
                       >
                         <StickyNote size={14} />
                       </button>
