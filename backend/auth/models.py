@@ -5,7 +5,7 @@ SQLAlchemy ORM 모델: User, Team, AnalysisSession, DesignChangeRequest
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, ForeignKey, DateTime, Text, CheckConstraint, Boolean, Index
+from sqlalchemy import Column, String, ForeignKey, DateTime, Text, CheckConstraint, Boolean, Index, Integer
 from sqlalchemy.orm import relationship
 
 from auth.database import Base
@@ -42,7 +42,7 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False)
     role = Column(
         String(20),
-        CheckConstraint("role IN ('pm', 'engineer', 'viewer')"),
+        CheckConstraint("role IN ('pm', 'engineer', 'viewer', 'backend', 'frontend', 'devops')"),
         nullable=False,
         default="engineer",
     )
@@ -117,4 +117,37 @@ class MemoItem(Base):
 
     __table_args__ = (
         Index("ix_memo_items_session_id", "session_id"),
+    )
+
+
+class AnalysisResult(Base):
+    """로컬 분석 결과 저장 — 파이프라인 완료 시 자동 저장."""
+    __tablename__ = "analysis_results"
+
+    run_id = Column(String(255), ForeignKey("analysis_sessions.run_id", ondelete="CASCADE"), primary_key=True)
+    shaped_result = Column(Text, nullable=False)  # JSON
+    saved_at = Column(DateTime, default=datetime.utcnow)
+
+    session = relationship("AnalysisSession")
+
+
+class PublishedSnapshot(Base):
+    """공유 DB 스냅샷 — GitHub 커밋과 동일 개념."""
+    __tablename__ = "published_snapshots"
+
+    id = Column(String(36), primary_key=True, default=_new_uuid)
+    run_id = Column(String(255), nullable=True)           # 원본 run_id
+    team_id = Column(String(36), ForeignKey("teams.id"), nullable=True)
+    published_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    title = Column(String(500), nullable=False)            # "커밋 메시지" 역할
+    description = Column(Text, nullable=True)
+    version = Column(Integer, nullable=False, default=1)  # 팀 내 자동 증가
+    snapshot_data = Column(Text, nullable=False)           # JSON (PM + SA 산출물)
+    published_at = Column(DateTime, default=datetime.utcnow)
+
+    team = relationship("Team")
+    publisher = relationship("User", foreign_keys=[published_by])
+
+    __table_args__ = (
+        Index("ix_published_snapshots_team_id", "team_id"),
     )

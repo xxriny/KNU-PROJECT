@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import useAppStore from "../../store/useAppStore";
 import {
   Github, GitCommit, Users, AlertCircle, BookOpen,
@@ -21,8 +21,9 @@ const TREND_ICON = {
 
 export default function GitHubDashboard() {
   const isDarkMode = useAppStore((s) => s.isDarkMode);
-  const githubOwner = useAppStore((s) => s.githubOwner);
-  const githubRepo  = useAppStore((s) => s.githubRepo);
+  const githubOwner  = useAppStore((s) => s.githubOwner);
+  const githubRepo   = useAppStore((s) => s.githubRepo);
+  const githubBranch = useAppStore((s) => s.githubBranch) || "main";
   const resultData  = useAppStore((s) => s.resultData);
   const backendPort = useAppStore((s) => s.backendPort);
   const authToken   = useAppStore((s) => s.authToken);
@@ -50,7 +51,7 @@ export default function GitHubDashboard() {
       const res = await fetch(`http://127.0.0.1:${port}/api/github/analytics`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeader },
-        body: JSON.stringify({ owner: githubOwner, repo: githubRepo }),
+        body: JSON.stringify({ owner: githubOwner, repo: githubRepo, branch: githubBranch }),
       });
       const json = await res.json();
       if (json.status === "ok") setAnalytics(json.data);
@@ -73,6 +74,18 @@ export default function GitHubDashboard() {
     } catch (e) { setError("연결 실패: " + e.message); }
     finally { setLoading(false); }
   };
+
+  // 컴포넌트 마운트 또는 GitHub 설정/브랜치 변경 시 현재 탭 데이터 자동 로드
+  useEffect(() => {
+    if (!hasConfig) return;
+    setAnalytics(null);
+    setIssues(null);
+    if (activeTab === "commits" || activeTab === "contributors") {
+      fetchAnalytics();
+    } else if (activeTab === "issues") {
+      fetchIssues();
+    }
+  }, [hasConfig, githubBranch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleTabChange = (tab) => {
     setActiveTab(tab);

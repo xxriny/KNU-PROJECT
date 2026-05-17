@@ -45,7 +45,7 @@ export default function StackTab() {
                 const featureId = stack.feature_id || stack.fid || `FEAT_${String(idx + 1).padStart(3, "0")}`;
                 const pkg = stack.pkg || stack.package || stack.name || "N/A";
                 const version = stack.version || stack.ver || "-";
-                const source = stack.source || stack.src || "RAG";
+                const source = stack.source || stack.src || "LLM";
 
                 return (
                   <tr

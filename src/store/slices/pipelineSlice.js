@@ -86,6 +86,76 @@ export const createPipelineSlice = (set, get) => ({
       }
     }
 
+    // UPDATE 모드에서 RTM은 전체 교체가 아닌 feature_id 기반 upsert 병합
+    if (get().pipelineType === "analysis_update" && data.requirements_rtm?.length) {
+      const existing = get().requirements_rtm || [];
+      const incoming = data.requirements_rtm;
+      const merged = [...existing];
+      incoming.forEach((item) => {
+        const idx = merged.findIndex((e) => e.feature_id === item.feature_id);
+        if (idx >= 0) merged[idx] = item;
+        else merged.push(item);
+      });
+      data = { ...data, requirements_rtm: merged };
+    }
+
+    // UPDATE 모드에서 components/apis/tables도 전체 교체 방지 — name/endpoint 기준 upsert 병합
+    if (get().pipelineType === "analysis_update") {
+      if (data.components?.length) {
+        const existing = get().components || [];
+        const merged = [...existing];
+        data.components.forEach((comp) => {
+          const idx = merged.findIndex((e) => e.name === comp.name);
+          if (idx >= 0) merged[idx] = comp;
+          else merged.push(comp);
+        });
+        data = { ...data, components: merged };
+      }
+      if (data.apis?.length) {
+        const existing = get().apis || [];
+        const merged = [...existing];
+        data.apis.forEach((api) => {
+          const key = api.endpoint || api.name;
+          const idx = merged.findIndex((e) => (e.endpoint || e.name) === key);
+          if (idx >= 0) merged[idx] = api;
+          else merged.push(api);
+        });
+        data = { ...data, apis: merged };
+      }
+      if (data.tables?.length) {
+        const existing = get().tables || [];
+        const merged = [...existing];
+        data.tables.forEach((tbl) => {
+          const idx = merged.findIndex((e) => e.name === tbl.name);
+          if (idx >= 0) merged[idx] = tbl;
+          else merged.push(tbl);
+        });
+        data = { ...data, tables: merged };
+      }
+
+      // sa_output 내 components/apis/tables도 병합된 데이터로 동기화
+      // (SAComponentsTab 등이 sa_output에서 읽을 경우에도 올바른 병합 결과를 보여주기 위함)
+      if (data.sa_output) {
+        data = {
+          ...data,
+          sa_output: {
+            ...data.sa_output,
+            components: data.components,
+            apis: data.apis,
+            tables: data.tables,
+            data: data.sa_output.data
+              ? {
+                  ...data.sa_output.data,
+                  components: data.components,
+                  apis: data.apis,
+                  tables: data.tables,
+                }
+              : data.sa_output.data,
+          },
+        };
+      }
+    }
+
     const nextResultData = {
       pipelineStatus: "done",
       pipelineType: inferPipelineTypeFromResult(data),
@@ -102,6 +172,10 @@ export const createPipelineSlice = (set, get) => ({
     const { currentUser } = get();
     if (!currentUser?.github_id) {
       get().addNotification("GitHub 로그인이 필요합니다. 설정에서 연결하세요.", "error");
+      return;
+    }
+    if (currentUser.role !== "pm") {
+      get().addNotification("LLM 분석은 PM 권한이 필요합니다. PM에게 문의하세요.", "error");
       return;
     }
     const normalizedMode = normalizeMode(selectedMode);
@@ -138,12 +212,22 @@ export const createPipelineSlice = (set, get) => ({
       get().addNotification("GitHub 로그인이 필요합니다. 설정에서 연결하세요.", "error");
       return;
     }
-    const { userComments, resultData, apiKey, model, createSession, projectFolder } = get();
+    if (currentUser.role !== "pm") {
+      get().addNotification("LLM 분석은 PM 권한이 필요합니다. PM에게 문의하세요.", "error");
+      return;
+    }
+    const { userComments, apiKey, model, createSession, projectFolder } = get();
     const memos = (userComments || []).filter((c) => memoIds.includes(c.id));
     const memoText = memos
       .map((m, i) => `${i + 1}. [${m.section || "일반"}] ${m.text}`)
       .join('\n');
 
+    // 기존 미적용 메모를 아카이브(applied=true)로 마킹한 후 새 세션 시작
+    const prevMemos = get().userComments || [];
+    const archivedMemos = prevMemos.map((m) =>
+      m.applied ? m : { ...m, applied: true, appliedAt: new Date().toISOString() }
+    );
+    set({ userComments: archivedMemos });
     createSession("지적사항 반영 업데이트");
     set({
       pipelineStatus: "running",
@@ -153,12 +237,23 @@ export const createPipelineSlice = (set, get) => ({
       pipelineType: "analysis_update",
       chatHistory: [],
       chatInput: "",
+      agileImpactResult: null,
       activeViewportTab: { kind: "output", id: "progress" },
       lastOutputTab: "progress",
     });
+    // 이전 분석 결과를 JSON으로 직렬화하여 SA 파이프라인이 기존 설계를 인식하도록 전달
+    const prevDesign = {
+      requirements_rtm: get().requirements_rtm || [],
+      components: get().components || [],
+      apis: get().apis || [],
+      tables: get().tables || [],
+      tech_stacks: get().tech_stacks || [],
+    };
+    const prevContext = `[이전 분석 결과 — 반드시 아래 설계를 기반으로 업데이트하세요]\n${JSON.stringify(prevDesign, null, 2)}`;
+
     get().sendWsMessage("analyze", {
       idea: memoText,
-      context: resultData?.raw_output || "",
+      context: prevContext,
       api_key: apiKey || "",
       model: model || "gemini-3.1-flash-lite-preview",
       action_type: "UPDATE",

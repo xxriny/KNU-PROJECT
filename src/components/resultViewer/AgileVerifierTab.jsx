@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import useAppStore from "../../store/useAppStore";
 import {
   ShieldCheck, ShieldX, AlertTriangle, AlertCircle, Info,
-  ChevronDown, ChevronRight, Loader2, RefreshCw,
+  ChevronDown, ChevronRight, Loader2, StickyNote,
 } from "lucide-react";
 
 const SEVERITY_CONFIG = {
@@ -21,12 +21,15 @@ export default function AgileVerifierTab() {
   const backendPort = useAppStore((s) => s.backendPort);
   const storedVerifyResult = useAppStore((s) => s.agileVerifyResult);
   const setAgileVerifyResult = useAppStore((s) => s.setAgileVerifyResult);
+  const addComment = useAppStore((s) => s.addComment);
   const port = backendPort || 8000;
+  const [addedToMemo, setAddedToMemo] = useState(() => new Set());
 
   const [result, setResult] = useState(storedVerifyResult);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const [useLlm, setUseLlm] = useState(true);
   const [useDeepLlm, setUseDeepLlm] = useState(false);
 
   const saData = resultData?.sa_output?.data || resultData?.sa_output || {};
@@ -56,8 +59,8 @@ export default function AgileVerifierTab() {
             tables: saData.tables || [],
           },
           api_key: apiKey || "",
-          use_llm: (!!apiKey || backendHasKey) && isGithubConnected,
-          use_deep_llm: useDeepLlm && (!!apiKey || backendHasKey) && isGithubConnected,
+          use_llm: useLlm && (!!apiKey || backendHasKey) && isGithubConnected,
+          use_deep_llm: useDeepLlm && useLlm && (!!apiKey || backendHasKey) && isGithubConnected,
         }),
       });
       const json = await res.json();
@@ -95,11 +98,22 @@ export default function AgileVerifierTab() {
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          {/* Deep LLM 토글 */}
-          <div className="flex flex-col items-end gap-1">
-            <label className="flex items-center gap-2 cursor-pointer select-none" title="V-007~V-009 LLM 심층 검증 활성화">
+          {/* LLM / Deep LLM 토글 */}
+          <div className="flex flex-col items-end gap-1.5">
+            <label className="flex items-center gap-2 cursor-pointer select-none" title="V-006~V-009 LLM 검증 활성화">
               <div
-                onClick={() => setUseDeepLlm((v) => !v)}
+                onClick={() => { setUseLlm((v) => !v); if (useLlm) setUseDeepLlm(false); }}
+                className={`w-9 h-5 rounded-full transition-colors cursor-pointer ${useLlm ? "bg-emerald-500" : isDarkMode ? "bg-white/10" : "bg-slate-200"}`}
+              >
+                <div className={`w-4 h-4 rounded-full bg-white shadow-sm mt-0.5 transition-transform ${useLlm ? "translate-x-4 ml-0.5" : "translate-x-0.5"}`} />
+              </div>
+              <span className={`text-xs font-bold ${useLlm ? "text-emerald-400" : "opacity-40"}`}>
+                LLM 검증
+              </span>
+            </label>
+            <label className={`flex items-center gap-2 cursor-pointer select-none ${!useLlm ? "opacity-30 pointer-events-none" : ""}`} title="V-007~V-009 LLM 심층 검증 활성화">
+              <div
+                onClick={() => useLlm && setUseDeepLlm((v) => !v)}
                 className={`w-9 h-5 rounded-full transition-colors cursor-pointer ${useDeepLlm ? "bg-purple-500" : isDarkMode ? "bg-white/10" : "bg-slate-200"}`}
               >
                 <div className={`w-4 h-4 rounded-full bg-white shadow-sm mt-0.5 transition-transform ${useDeepLlm ? "translate-x-4 ml-0.5" : "translate-x-0.5"}`} />
@@ -108,10 +122,10 @@ export default function AgileVerifierTab() {
                 심층 LLM
               </span>
             </label>
-            {useDeepLlm && !apiKey && !backendHasKey && (
+            {useLlm && !apiKey && !backendHasKey && (
               <p className="text-xs text-amber-400">⚠ API 키 없음 — LLM 비활성화</p>
             )}
-            {!isGithubConnected && (
+            {useLlm && !isGithubConnected && (
               <p className="text-xs text-amber-400 mt-0.5">⚠ GitHub 연결 시 LLM 검증이 활성화됩니다</p>
             )}
           </div>
@@ -188,6 +202,16 @@ export default function AgileVerifierTab() {
               {result.violations.map((v, i) => {
                 const cfg = SEVERITY_CONFIG[v.severity] || SEVERITY_CONFIG.minor;
                 const isExpanded = expandedIds.has(i);
+                const memoKey = `${v.rule_id}_${i}`;
+                const alreadyAdded = addedToMemo.has(memoKey);
+
+                const handleAddToMemo = (e) => {
+                  e.stopPropagation();
+                  const memoText = `[${v.rule_id}] ${v.rule_name}: ${v.description}${v.suggestion ? ` → ${v.suggestion}` : ""}`;
+                  addComment({ text: memoText, section: `SA 검증 (${cfg.label})`, selectedText: v.location || "" });
+                  setAddedToMemo((prev) => new Set([...prev, memoKey]));
+                };
+
                 return (
                   <div
                     key={i}
@@ -206,6 +230,18 @@ export default function AgileVerifierTab() {
                         {v.rule_name}
                       </span>
                       <span className={`text-xs font-bold ${cfg.color}`}>{cfg.label}</span>
+                      <button
+                        type="button"
+                        onClick={handleAddToMemo}
+                        title="메모로 추가"
+                        className={`p-1.5 rounded-lg transition-colors ${
+                          alreadyAdded
+                            ? "text-emerald-400 bg-emerald-500/10"
+                            : "text-white/30 hover:text-white/70 hover:bg-white/10"
+                        }`}
+                      >
+                        <StickyNote size={14} />
+                      </button>
                       {isExpanded ? (
                         <ChevronDown size={16} className="opacity-50" />
                       ) : (

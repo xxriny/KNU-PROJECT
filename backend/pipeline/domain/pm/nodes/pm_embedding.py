@@ -31,7 +31,7 @@ def _assemble_pm_bundle(features: List[Dict], stack_mapping: List[Dict], run_id:
         "data": {
             "rtm": [
                 {"feature_id": f.get("id"), "category": f.get("cat", f.get("category", "")),
-                 "description": f.get("desc", f.get("description", "")),
+                 "description": f.get("desc", f.get("description", f.get("label", ""))),
                  "priority": f.get("pri", f.get("priority", "")),
                  "dependencies": f.get("deps", f.get("dependencies", [])),
                  "test_criteria": f.get("tc", f.get("test_criteria", "")),

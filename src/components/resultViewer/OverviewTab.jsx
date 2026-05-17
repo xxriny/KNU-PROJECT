@@ -51,7 +51,7 @@ export default function OverviewTab() {
   const metrics = resultData?.metrics || {};
   const analysis = resultData?.analysis || {};
   const recommendations = resultData?.recommendations || [];
-  const saStatus = sa_output?.status || "UNKNOWN";
+  const saStatus = sa_output?.status || resultData?.metrics?.integrity || "UNKNOWN";
   
   const handleVerify = (comment) => {
     const userRequest = `사용자 지적사항 반영 및 재검증 요망: 기존 내용 "${comment.selectedText}" 에 대하여 "${comment.text}" 조치. 완료 후 애자일 파이프라인(PM/SA) 업데이트를 수행하세요.`;

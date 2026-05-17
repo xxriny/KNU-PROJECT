@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import useAppStore from "../../store/useAppStore";
 import {
   ClipboardList, Check, X, Clock, Loader2, RefreshCw,
-  ChevronDown, ChevronRight, Zap, AlertTriangle, CheckCircle,
-  XCircle, Github, Plus, Trash2,
+  ChevronDown, ChevronRight, AlertTriangle, CheckCircle,
+  XCircle, Plus, Trash2,
 } from "lucide-react";
 
 const STATUS_CONFIG = {
@@ -30,16 +30,19 @@ const AREA_LABEL = {
   frontend:  "프론트엔드",
   fullstack: "풀스택",
   devops:    "DevOps",
+  pm:        "PM",
+  engineer:  "엔지니어",
 };
 
 const TASK_TYPES = ["feature", "bugfix", "refactor", "infra", "publish_docs", "verify_sa"];
-const AREAS = ["backend", "frontend", "fullstack", "devops"];
+const AREAS = ["backend", "frontend", "fullstack", "devops", "pm", "engineer"];
 
 export default function TaskApprovalPanel() {
   const isDarkMode   = useAppStore((s) => s.isDarkMode);
   const userRole     = useAppStore((s) => s.userRole);
   const currentUser  = useAppStore((s) => s.currentUser);
   const backendPort  = useAppStore((s) => s.backendPort);
+  const authToken    = useAppStore((s) => s.authToken);
   const githubToken  = useAppStore((s) => s.githubToken);
   const githubOwner  = useAppStore((s) => s.githubOwner);
   const githubRepo   = useAppStore((s) => s.githubRepo);
@@ -50,8 +53,7 @@ export default function TaskApprovalPanel() {
   const [error, setError]         = useState("");
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [filterStatus, setFilterStatus] = useState("all");
-  const [importLoading, setImportLoading] = useState(false);
-  const [importMsg, setImportMsg] = useState("");
+  const [teamMembers, setTeamMembers] = useState([]);
 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createForm, setCreateForm] = useState({
@@ -62,9 +64,29 @@ export default function TaskApprovalPanel() {
 
   const port    = backendPort || 8000;
   const isPM    = !userRole || userRole === "pm";
+  // isPmRole: strict check (null userRole = unauthenticated, not treated as PM for filtering)
   const userId  = currentUser?.id || "";
+  const teamId  = currentUser?.team_id || "";
 
-  const teamId = currentUser?.team_id || "";
+  // role → visible task areas (non-PM role-based filtering)
+  const ROLE_AREAS = {
+    backend:  ["backend", "fullstack"],
+    frontend: ["frontend", "fullstack"],
+    devops:   ["devops"],
+  };
+
+  const fetchTeamMembers = useCallback(async () => {
+    if (!authToken) return;
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/teams/me/members`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const data = await res.json();
+      setTeamMembers(data.members || []);
+    } catch (_) {}
+  }, [port, authToken]);
+
+  useEffect(() => { fetchTeamMembers(); }, [fetchTeamMembers]);
 
   const fetchTasks = useCallback(async () => {
     setLoading(true); setError("");
@@ -80,7 +102,7 @@ export default function TaskApprovalPanel() {
       else setError(json.error || "조회 실패");
     } catch (e) { setError("서버 연결 실패: " + e.message); }
     finally { setLoading(false); }
-  }, [port, filterStatus]);
+  }, [port, filterStatus, teamId]);
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
 
@@ -149,29 +171,6 @@ export default function TaskApprovalPanel() {
     finally { setCreateLoading(false); }
   };
 
-  const handleImportIssues = async () => {
-    if (!githubToken || !githubOwner || !githubRepo) {
-      setImportMsg("GitHub 설정이 필요합니다. 설정 패널에서 입력하세요.");
-      return;
-    }
-    setImportLoading(true); setImportMsg("");
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/github/issues/import`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: githubToken, owner: githubOwner, repo: githubRepo }),
-      });
-      const json = await res.json();
-      if (json.status === "ok") {
-        setImportMsg(`${json.issue_count}개 이슈 임포트 태스크 생성됨 (PM 승인 대기)`);
-        fetchTasks();
-      } else {
-        setImportMsg("실패: " + (json.error || "unknown"));
-      }
-    } catch (e) { setImportMsg("연결 실패: " + e.message); }
-    finally { setImportLoading(false); }
-  };
-
   const handleDelete = async (taskId) => {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, { method: "DELETE" });
@@ -191,9 +190,16 @@ export default function TaskApprovalPanel() {
       return next;
     });
 
-  const visibleTasks = filterStatus === "all"
-    ? tasks
-    : tasks.filter((t) => t.status === filterStatus);
+  const isPmRole = userRole === "pm";
+  const roleAreaFilter = ROLE_AREAS[userRole] || null;
+  const visibleTasks = tasks
+    .filter((t) => filterStatus === "all" || t.status === filterStatus)
+    .filter((t) => {
+      if (isPmRole) return true;
+      if (!roleAreaFilter) return true;
+      if (!t.area) return false;
+      return roleAreaFilter.includes(t.area);
+    });
 
   return (
     <div className={`h-full flex flex-col p-6 space-y-5 ${isDarkMode ? "text-slate-300" : "text-slate-800"}`}>
@@ -241,18 +247,6 @@ export default function TaskApprovalPanel() {
             >
               <Plus size={12} /> 설계 문서 퍼블리시
             </button>
-            <button
-              onClick={handleImportIssues}
-              disabled={importLoading || !githubToken}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                githubToken && !importLoading
-                  ? "bg-slate-700 hover:bg-slate-600 text-white"
-                  : isDarkMode ? "bg-white/5 text-slate-500 cursor-not-allowed" : "bg-slate-100 text-slate-400 cursor-not-allowed"
-              }`}
-            >
-              {importLoading ? <Loader2 size={12} className="animate-spin" /> : <Github size={12} />}
-              GitHub Issues 임포트
-            </button>
           </div>
 
           {/* 커스텀 태스크 생성 폼 */}
@@ -264,7 +258,7 @@ export default function TaskApprovalPanel() {
                   <select
                     value={createForm.task_type}
                     onChange={(e) => setCreateForm((f) => ({ ...f, task_type: e.target.value }))}
-                    style={{ colorScheme: "light" }}
+                    style={{ colorScheme: isDarkMode ? "dark" : "light" }}
                     className={`w-full px-3 py-2 rounded-lg text-xs font-semibold border outline-none ${
                       isDarkMode ? "bg-slate-800 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-800"
                     }`}
@@ -277,7 +271,7 @@ export default function TaskApprovalPanel() {
                   <select
                     value={createForm.area}
                     onChange={(e) => setCreateForm((f) => ({ ...f, area: e.target.value }))}
-                    style={{ colorScheme: "light" }}
+                    style={{ colorScheme: isDarkMode ? "dark" : "light" }}
                     className={`w-full px-3 py-2 rounded-lg text-xs font-semibold border outline-none ${
                       isDarkMode ? "bg-slate-800 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-800"
                     }`}
@@ -312,15 +306,21 @@ export default function TaskApprovalPanel() {
               </div>
               <div>
                 <label className="block text-xs font-bold opacity-60 mb-1">담당자</label>
-                <input
-                  type="text"
+                <select
                   value={createForm.assignee}
                   onChange={(e) => setCreateForm((f) => ({ ...f, assignee: e.target.value }))}
-                  placeholder="담당자 이름 또는 이메일"
-                  className={`w-full px-3 py-2 rounded-lg text-xs border outline-none ${
-                    isDarkMode ? "bg-white/5 border-white/10 text-white placeholder:text-slate-500" : "bg-white border-slate-200 text-slate-800"
+                  style={{ colorScheme: "light" }}
+                  className={`w-full px-3 py-2 rounded-lg text-xs font-semibold border outline-none ${
+                    isDarkMode ? "bg-slate-800 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-800"
                   }`}
-                />
+                >
+                  <option value="">담당자 없음</option>
+                  {teamMembers.map((m) => (
+                    <option key={m.id} value={m.name}>
+                      {m.name}{m.github_login ? ` (@${m.github_login})` : ""} — {m.role}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="flex gap-2 pt-1">
                 <button
@@ -348,11 +348,6 @@ export default function TaskApprovalPanel() {
             </div>
           )}
 
-          {importMsg && (
-            <p className={`text-xs ${importMsg.startsWith("실패") || importMsg.startsWith("연결") ? "text-red-400" : "text-emerald-400"}`}>
-              {importMsg}
-            </p>
-          )}
         </div>
       )}
 
@@ -427,11 +422,11 @@ export default function TaskApprovalPanel() {
                       {task.title}
                     </span>
                   </div>
-                  <p className="text-xs opacity-50 mt-0.5">
-                    {task.created_at?.slice(0, 16).replace("T", " ")}
-                    {task.area && ` · ${AREA_LABEL[task.area] || task.area}`}
-                    {task.assignee && ` · ${task.assignee}`}
-                    {task.reviewed_by && ` · 검토: ${task.reviewed_by}`}
+                  <p className="text-xs opacity-50 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                    <span>{task.created_at?.slice(0, 16).replace("T", " ")}</span>
+                    {task.area && <span className="before:content-['·'] before:mr-1.5">{AREA_LABEL[task.area] || task.area}</span>}
+                    {task.assignee && <span className="before:content-['·'] before:mr-1.5">{task.assignee}</span>}
+                    {task.reviewed_by && <span className="before:content-['·'] before:mr-1.5">검토: {task.reviewed_by.length > 12 ? task.reviewed_by.slice(0, 8) + "…" : task.reviewed_by}</span>}
                   </p>
                 </div>
                 <span className={`text-xs font-bold ${cfg.color}`}>{cfg.label}</span>

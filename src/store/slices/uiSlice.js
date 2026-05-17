@@ -5,6 +5,7 @@ export const createUiSlice = (set, get) => ({
   activeViewportTab: { ...DEFAULT_VIEWPORT_TAB },
   lastOutputTab: "home",
   selectedMode: "create",
+  activeIconPanel: null,
 
   setDarkMode: (isDark) => {
     set({ isDarkMode: isDark });
@@ -19,4 +20,5 @@ export const createUiSlice = (set, get) => ({
   }),
 
   setSelectedMode: (mode) => set({ selectedMode: normalizeMode(mode) }),
+  setActiveIconPanel: (id) => set({ activeIconPanel: id }),
 });

@@ -104,8 +104,10 @@ export const createSessionSlice = (set, get) => ({
   syncMemos: async () => {
     const { backendPort, currentSessionId } = get();
     if (!backendPort) return;
+    // 세션이 없으면 chat_global 폴백으로 조회 (null로 조회하면 모든 세션 메모 반환)
+    const sessionIdForFetch = currentSessionId || CHAT_GLOBAL_SESSION_ID;
     try {
-      const data = await sessionService.getMemos(backendPort, currentSessionId);
+      const data = await sessionService.getMemos(backendPort, sessionIdForFetch);
       if (data.status !== "ok") return;
 
       const serverItems = (data.memos || []).map((m) => ({
@@ -119,12 +121,19 @@ export const createSessionSlice = (set, get) => ({
         createdAt: Date.now(),
       }));
 
-      // 서버 응답으로 무지성 덮어쓰면 in-flight(`temp_`) 항목이 사라진다.
-      // POST가 아직 끝나지 않은 로컬 메모를 보존하고, 텍스트 기준으로 중복 제거.
       const local = get().userComments || [];
       const inFlight = local.filter(
         (c) => typeof c?.id === "string" && c.id.startsWith("temp_")
       );
+
+      // 서버가 빈 목록을 반환해도 저장 완료된 로컬 메모를 날리지 않는다.
+      // (새 세션 시작 직후 syncMemos가 호출되면 서버엔 아직 없지만 로컬엔 있을 수 있음)
+      if (serverItems.length === 0 && local.some((c) => !c.id?.startsWith("temp_"))) {
+        // inFlight만 제거하고 나머지는 유지
+        set({ userComments: local.filter((c) => !c.id?.startsWith("temp_")) });
+        return;
+      }
+
       const seenTexts = new Set(serverItems.map((s) => (s.text || "").trim()));
       const merged = [
         ...serverItems,

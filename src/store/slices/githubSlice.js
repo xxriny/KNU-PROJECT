@@ -21,14 +21,22 @@ export const createGithubSlice = (set, get) => ({
   githubToken: stored.token || "",
   githubOwner: stored.owner || "",
   githubRepo: stored.repo || "",
+  githubBranch: stored.branch || "main",
 
-  setGithubSettings: (token, owner, repo) => {
-    save({ token, owner, repo });
-    set({ githubToken: token, githubOwner: owner, githubRepo: repo });
+  setGithubSettings: (token, owner, repo, branch) => {
+    const br = branch || stored.branch || "main";
+    save({ token, owner, repo, branch: br });
+    set({ githubToken: token, githubOwner: owner, githubRepo: repo, githubBranch: br });
+  },
+
+  setGithubBranch: (branch) => {
+    const current = load();
+    save({ ...current, branch });
+    set({ githubBranch: branch });
   },
 
   clearGithubSettings: () => {
     save({});
-    set({ githubToken: "", githubOwner: "", githubRepo: "" });
+    set({ githubToken: "", githubOwner: "", githubRepo: "", githubBranch: "main" });
   },
 });

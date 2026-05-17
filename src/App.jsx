@@ -38,8 +38,9 @@ export default function App() {
   const authChecked = useAppStore((state) => state.authChecked);
   const hasUsers = useAppStore((state) => state.hasUsers);
   const checkAuthStatus = useAppStore((state) => state.checkAuthStatus);
+  const activeIconPanel = useAppStore((state) => state.activeIconPanel);
+  const setActiveIconPanel = useAppStore((state) => state.setActiveIconPanel);
 
-  const [activeIconPanel, setActiveIconPanel] = useState(null);
   const [showSessions, setShowSessions] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [isStudioOpen, setIsStudioOpen] = useState(true);
@@ -85,7 +86,7 @@ export default function App() {
   }, [pipelineStatus]);
 
   const handleIconPanel = (id) => {
-    setActiveIconPanel((prev) => (prev === id ? null : id));
+    setActiveIconPanel(activeIconPanel === id ? null : id);
     setShowSessions(false);
     setShowSettingsModal(false);
   };
@@ -124,6 +125,7 @@ export default function App() {
     }
     switch (activeOutputId) {
       case "progress": return <PipelineProgress />;
+      case "overview": return <ResultViewer tabId="overview" />;
       case "home":
       default: return <HomeScreen />;
     }

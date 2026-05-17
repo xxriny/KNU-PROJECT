@@ -147,6 +147,7 @@ export const EMPTY_RESULT_FIELDS = {
   pm_warnings: [],
   tables: null,
   apis: null,
+  components: [],
   tech_stacks: [],
   sa_advisor_output: null,
   metadata: null,

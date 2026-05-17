@@ -47,7 +47,10 @@ export default function HomeScreen() {
     githubToken,
     githubOwner,
     githubRepo,
+    githubBranch,
     setGithubSettings,
+    setGithubBranch,
+    currentUser,
   } = useAppStore();
 
   const [inputText, setInputText] = useState("");
@@ -62,6 +65,8 @@ export default function HomeScreen() {
   const [showRepoPicker, setShowRepoPicker] = useState(false);
   const [repoScopeError, setRepoScopeError] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState(null);
+  const [branchList, setBranchList] = useState([]);
+  const [branchLoading, setBranchLoading] = useState(false);
 
   // 전역 스토어의 레포 정보와 동기화
   useEffect(() => {
@@ -72,6 +77,13 @@ export default function HomeScreen() {
       }
     }
   }, [githubOwner, githubRepo, projectFolder, setProjectFolder]);
+
+  // 모달 열릴 때 기존 레포에 대한 브랜치 목록 로드
+  useEffect(() => {
+    if (showContext && githubOwner && githubRepo && branchList.length === 0 && !branchLoading) {
+      loadBranches(githubOwner, githubRepo);
+    }
+  }, [showContext]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadRepos = async () => {
     if (!authToken) return;
@@ -96,13 +108,34 @@ export default function HomeScreen() {
     }
   };
 
+  const loadBranches = async (owner, repo) => {
+    setBranchLoading(true);
+    try {
+      const port = backendPort || 8000;
+      const res = await fetch(`http://127.0.0.1:${port}/api/github/branches`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+        body: JSON.stringify({ owner, repo }),
+      });
+      const data = await res.json();
+      setBranchList(data.data || []);
+    } catch (_) {
+      setBranchList([]);
+    } finally {
+      setBranchLoading(false);
+    }
+  };
+
   const selectRepo = async (repo) => {
     setSelectedRepo(repo);
     setProjectFolder(repo.full_name);
+    setBranchList([]);
     // 전역 스토어 동기화
     setGithubSettings(githubToken, repo.owner, repo.name);
     setShowRepoPicker(false);
     setRepoSearch("");
+    // 레포 선택 후 브랜치 목록 로드
+    loadBranches(repo.owner, repo.name);
 
     // 팀 기본 레포지토리로 백엔드에도 즉시 반영 (동기화 요구사항)
     try {
@@ -115,9 +148,10 @@ export default function HomeScreen() {
     } catch (_) {}
   };
 
+  const isPm = currentUser?.role === "pm";
   const isReverseMode = selectedMode === "reverse";
   const trimmedInput = inputText.trim();
-  const canSubmit = isReverseMode ? Boolean(projectFolder) : Boolean(trimmedInput);
+  const canSubmit = isPm && (isReverseMode ? Boolean(projectFolder) : Boolean(trimmedInput));
 
   const handleSubmit = () => {
     if (!canSubmit) return;
@@ -212,8 +246,13 @@ export default function HomeScreen() {
             className="flex flex-col gap-4"
           >
 
+            {!isPm && (
+              <div className="w-full text-center py-2 px-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[13px] font-medium">
+                LLM 분석은 PM 권한이 필요합니다. 팀 PM에게 권한을 요청하세요.
+              </div>
+            )}
             <div className={`w-full relative rounded-full p-2 px-6 shadow-2xl flex items-center border border-white/5 ${isDarkMode ? "bg-[#161b22]/90 backdrop-blur-2xl" : "bg-white/90 backdrop-blur-xl border-slate-200"
-              }`}>
+              } ${!isPm ? "opacity-50 pointer-events-none" : ""}`}>
               <div className="flex-1">
                 <textarea
                   ref={textareaRef}
@@ -351,6 +390,59 @@ export default function HomeScreen() {
                   <p className="text-xs text-slate-500 px-4 py-2">{selectedRepo.description}</p>
                 )}
               </div>
+
+              {/* Branch Picker — 레포 선택 후에만 표시 */}
+              {selectedRepo && (
+                <div className="bg-[#131317] border border-white/5 rounded-xl overflow-hidden">
+                  <div className="flex items-center gap-3 px-4 py-3">
+                    <GitBranch size={14} className="text-slate-400 shrink-0" />
+                    <span className="text-xs font-semibold text-slate-400 shrink-0">브랜치</span>
+                    {branchLoading ? (
+                      <div className="flex items-center gap-2 flex-1">
+                        <Loader2 size={13} className="animate-spin text-slate-500" />
+                        <span className="text-xs text-slate-500">브랜치 로드 중...</span>
+                      </div>
+                    ) : branchList.length > 0 ? (
+                      <select
+                        value={typeof githubBranch === "object" && githubBranch !== null ? githubBranch.name : githubBranch}
+                        onChange={(e) => setGithubBranch(e.target.value)}
+                        style={{ colorScheme: "dark" }}
+                        className="flex-1 bg-[#1a1a2e] border border-white/10 rounded-lg px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-white/30 transition-colors cursor-pointer"
+                      >
+                        {branchList.map((b) => {
+                          const name = typeof b === "object" && b !== null ? b.name : b;
+                          const isProtected = typeof b === "object" && b !== null ? b.protected : false;
+                          return (
+                            <option 
+                              key={name} 
+                              value={name} 
+                              className="bg-[#1a1a2e] text-white"
+                            >
+                              {name}{isProtected ? " 🔒" : ""}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    ) : (
+                      <div className="flex items-center gap-2 flex-1">
+                        <input
+                          type="text"
+                          value={githubBranch || "main"}
+                          onChange={(e) => setGithubBranch(e.target.value)}
+                          placeholder="브랜치명 입력 (예: main)"
+                          className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-white/30 transition-colors placeholder:text-slate-600"
+                        />
+                        <button
+                          onClick={() => loadBranches(selectedRepo.owner, selectedRepo.name)}
+                          className="px-2 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs text-slate-400 transition-colors"
+                        >
+                          재시도
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Title Input */}
               <div className="flex flex-col gap-2">

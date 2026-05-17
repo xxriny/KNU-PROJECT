@@ -115,6 +115,17 @@ class GitHubConnector:
             logger.error(f"[GitHubConnector] get_contributors failed: {e}")
             return []
 
+    def list_branches(self, owner: str, repo: str, limit: int = 50) -> list[dict]:
+        """브랜치 목록 조회."""
+        try:
+            branches = self._gh.rest.repos.list_branches(
+                owner=owner, repo=repo, per_page=limit
+            ).parsed_data
+            return [{"name": b.name, "protected": getattr(b, "protected", False)} for b in branches]
+        except Exception as e:
+            logger.error(f"[GitHubConnector] list_branches failed: {e}")
+            return []
+
     def _ensure_label(self, owner: str, repo: str, label_name: str) -> None:
         """라벨이 없으면 자동 생성."""
         try:
@@ -128,39 +139,49 @@ class GitHubConnector:
                 logger.warning(f"[GitHubConnector] Failed to create label {label_name}: {e}")
 
     def publish_markdown_to_wiki(self, owner: str, repo: str, page_title: str, markdown: str) -> dict:
-        """Issues 방식으로 설계 문서를 퍼블리시 (Wiki 대용)."""
+        """GitHub Wiki에 설계 문서를 퍼블리시한다.
+
+        Wiki는 별도 git 레포({owner}/{repo}.wiki)로 관리된다.
+        Git Data API로 파일을 생성/업데이트해 Wiki 페이지를 추가한다.
+        Wiki가 활성화되지 않은 레포는 먼저 GitHub UI에서 Wiki를 켜야 한다.
+        """
+        import base64
+
+        safe_title = page_title.replace("/", "-").replace(" ", "-")
+        filename = f"{safe_title}.md"
+        wiki_owner = owner
+        wiki_repo = f"{repo}.wiki"
+
         try:
-            # 1. 토큰 유효성 및 사용자 확인
-            user = self._gh.rest.users.get_authenticated().parsed_data
-            
-            # 2. 라벨 확인/생성
-            self._ensure_label(owner, repo, "design-doc")
-            
-            # 3. 기존 이슈 탐색
-            issues = self._gh.rest.issues.list_for_repo(
-                owner=owner, repo=repo, state="open", labels="design-doc"
-            ).parsed_data
-            
-            existing_issue = next((i for i in issues if i.title == page_title), None)
-            
-            body = f"<!-- navigator-design-doc -->\n\n{markdown}"
-            
-            if existing_issue:
-                # 업데이트
-                self._gh.rest.issues.update(
-                    owner=owner, repo=repo, issue_number=existing_issue.number, body=body
-                )
-                return {"action": "updated", "number": existing_issue.number, "success": True}
-            else:
-                # 신규 생성
-                new_issue = self._gh.rest.issues.create(
-                    owner=owner, repo=repo, title=page_title, body=body, labels=["design-doc"]
+            content_b64 = base64.b64encode(markdown.encode("utf-8")).decode("ascii")
+
+            # 기존 파일 확인 (SHA 필요)
+            existing_sha = None
+            try:
+                existing = self._gh.rest.repos.get_content(
+                    owner=wiki_owner, repo=wiki_repo, path=filename
                 ).parsed_data
-                return {"action": "created", "number": new_issue.number, "success": True}
-                
+                if hasattr(existing, "sha"):
+                    existing_sha = existing.sha
+            except Exception:
+                pass  # 새 파일
+
+            kwargs = dict(
+                owner=wiki_owner,
+                repo=wiki_repo,
+                path=filename,
+                message=f"docs: {'update' if existing_sha else 'add'} {page_title}",
+                content=content_b64,
+            )
+            if existing_sha:
+                kwargs["sha"] = existing_sha
+            self._gh.rest.repos.create_or_update_file_contents(**kwargs)
+            action = "updated" if existing_sha else "created"
+            return {"action": action, "page": filename, "success": True}
+
         except Exception as e:
-            logger.exception(f"[GitHubConnector] publish_markdown_to_wiki failed: {e}")
-            raise ValueError(f"GitHub 퍼블리시 실패: {str(e)}")
+            logger.exception(f"[GitHubConnector] publish_to_wiki failed: {e}")
+            raise ValueError(f"GitHub Wiki 퍼블리시 실패: {str(e)}")
 
 
 def verify_token(token: str) -> dict:

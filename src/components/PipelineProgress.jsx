@@ -15,19 +15,18 @@ const SCAN_STEPS = [
 ];
 
 const PM_PIPELINE_STEPS = [
-  { key: "requirement_analyzer", label: "요구사항 분석", desc: "아이디어를 원자 단위 요구사항으로 정밀 분석" },
-  { key: "stack_planner", label: "기술 스택 전략", desc: "요구사항별 최적의 라이브러리 및 프레임워크 선정" },
-  { key: "stack_crawling", label: "지능형 지식 탐색", desc: "부족한 기술 지식을 외부 레지스트리에서 자율 검색" },
-  { key: "guardian", label: "기술 정합성 검증", desc: "선정된 스택의 호환성, 보안성 및 품질 최종 검토" },
-  { key: "pm_analysis", label: "통합 분석 및 번들링", desc: "분석 결과 통합 및 최종 PM_BUNDLE 스펙 확정" },
+  { key: "requirement_analyzer", label: "요구사항 분석",    desc: "아이디어를 원자 단위 요구사항으로 정밀 분석" },
+  { key: "stack_planner",        label: "기술 스택 전략",   desc: "요구사항별 최적의 라이브러리 및 프레임워크 선정" },
+  { key: "stack_crawling",       label: "지능형 지식 탐색", desc: "부족한 기술 지식을 외부 레지스트리에서 자율 검색" },
+  { key: "guardian",             label: "기술 정합성 검증", desc: "선정된 스택의 호환성·보안성 최종 검토" },
 ];
 
 const SA_PIPELINE_STEPS = [
-  { key: "sa_merge_project",    label: "프로젝트 병합",      desc: "PM 산출물과 코드 분석 결과 통합" },
-  { key: "component_scheduler", label: "컴포넌트 설계",      desc: "시스템 컴포넌트 구조 및 역할 정의" },
-  { key: "api_data_modeler",    label: "API & 데이터 모델링", desc: "엔드포인트 및 DB 스키마 설계" },
-  { key: "sa_analysis",         label: "아키텍처 검증 (QA)",  desc: "설계 정합성 분석 및 Gap 탐지" },
-  { key: "sa_embedding",        label: "SA 결과 저장",        desc: "아키텍처 산출물 임베딩 및 영구 저장" },
+  { key: "sa_merge_project",     label: "프로젝트 병합",   desc: "PM 산출물과 코드 분석 결과 통합" },
+  { key: "component_scheduler",  label: "컴포넌트 설계",   desc: "시스템 컴포넌트 구조 및 역할 정의" },
+  { key: "sa_unified_modeler",   label: "통합 모델링",     desc: "API, 데이터 모델, 아키텍처 통합 설계" },
+  { key: "sa_test_analysis",     label: "테스트 분석",     desc: "테스트 케이스 및 품질 기준 도출" },
+  { key: "sa_project_structure", label: "프로젝트 구조화", desc: "최종 디렉토리 구조 및 배포 설계 확정" },
 ];
 
 const PIPELINE_STEPS_BY_TYPE = {

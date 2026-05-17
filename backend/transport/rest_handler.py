@@ -682,6 +682,25 @@ async def github_analytics(
         return {"status": "error", "error": str(e)}
 
 
+@rest_router.post("/api/github/branches")
+async def github_branches(
+    req: GitHubAnalyticsRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """GitHub 브랜치 목록 조회."""
+    token = (current_user.github_oauth_token if current_user else None) or req.token
+    if not token:
+        return {"status": "error", "error": "GitHub OAuth 토큰이 필요합니다."}
+    try:
+        from connectors.github_connector import GitHubConnector
+        connector = GitHubConnector(token)
+        branches = connector.list_branches(req.owner, req.repo)
+        return {"status": "ok", "data": branches}
+    except Exception as e:
+        get_logger().exception("github_branches endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
 @rest_router.post("/api/github/issues")
 async def github_issues(
     req: GitHubIssuesRequest,
@@ -831,6 +850,140 @@ async def doc_sync_endpoint(req: DocSyncRequest):
     except Exception as e:
         get_logger().exception("doc_sync endpoint failed")
         return {"status": "error", "error": str(e)}
+
+
+# ── Publish / Shared Snapshots ────────────────────────────────
+
+class PublishRequest(BaseModel):
+    run_id: str
+    title: str
+    description: str = ""
+    team_id: Optional[str] = None
+
+
+@rest_router.get("/api/local-results")
+async def list_local_results_endpoint(
+    limit: int = 50,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+):
+    """Publish 대상 선택을 위한 로컬 분석 결과 목록."""
+    try:
+        from storage.publish_service import list_local_results
+        return {"status": "ok", "data": list_local_results(db, limit=limit)}
+    except Exception as e:
+        get_logger().exception("list_local_results failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/publish")
+async def publish_snapshot_endpoint(
+    req: PublishRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+):
+    """로컬 분석 결과를 공유 DB에 Publish."""
+    try:
+        from storage.publish_service import publish_snapshot
+        team_id = req.team_id or (current_user.team_id if current_user else None)
+        user_id = current_user.id if current_user else None
+        snap = publish_snapshot(
+            db,
+            run_id=req.run_id,
+            title=req.title,
+            description=req.description,
+            team_id=team_id,
+            user_id=user_id,
+        )
+        return {"status": "ok", "data": snap}
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+    except Exception as e:
+        get_logger().exception("publish_snapshot failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.get("/api/snapshots")
+async def list_snapshots_endpoint(
+    team_id: Optional[str] = None,
+    limit: int = 30,
+    offset: int = 0,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+):
+    """팀 공유 스냅샷 목록."""
+    try:
+        from storage.publish_service import list_snapshots
+        resolved_team = team_id or (current_user.team_id if current_user else None)
+        snaps = list_snapshots(db, team_id=resolved_team, limit=limit, offset=offset)
+        return {"status": "ok", "data": snaps}
+    except Exception as e:
+        get_logger().exception("list_snapshots failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.get("/api/snapshots/{snapshot_id}")
+async def get_snapshot_endpoint(
+    snapshot_id: str,
+    db: Session = Depends(get_db),
+):
+    """스냅샷 상세 조회 (데이터 포함)."""
+    try:
+        from storage.publish_service import get_snapshot
+        snap = get_snapshot(db, snapshot_id)
+        if not snap:
+            return {"status": "error", "error": "스냅샷을 찾을 수 없습니다."}
+        return {"status": "ok", "data": snap}
+    except Exception as e:
+        get_logger().exception("get_snapshot failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.delete("/api/snapshots/{snapshot_id}")
+async def delete_snapshot_endpoint(
+    snapshot_id: str,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+):
+    """스냅샷 삭제 (게시자 본인 또는 PM만)."""
+    try:
+        from storage.publish_service import get_snapshot, delete_snapshot
+        snap = get_snapshot(db, snapshot_id)
+        if not snap:
+            return {"status": "error", "error": "스냅샷을 찾을 수 없습니다."}
+        if current_user:
+            is_owner = snap["published_by"] == current_user.id
+            is_pm = current_user.role == "pm"
+            if not (is_owner or is_pm):
+                return {"status": "error", "error": "삭제 권한이 없습니다."}
+        delete_snapshot(db, snapshot_id)
+        return {"status": "ok"}
+    except Exception as e:
+        get_logger().exception("delete_snapshot failed")
+        return {"status": "error", "error": str(e)}
+
+
+class PullRequest(BaseModel):
+    run_id: str
+
+
+@rest_router.post("/api/snapshots/{snapshot_id}/pull")
+async def pull_snapshot_endpoint(
+    snapshot_id: str,
+    req: PullRequest,
+    db: Session = Depends(get_db),
+):
+    """공유 스냅샷 데이터를 지정된 로컬 run_id 세션에 덮어써 저장(Pull)."""
+    try:
+        from storage.publish_service import pull_snapshot
+        result = pull_snapshot(db, snapshot_id=snapshot_id, run_id=req.run_id)
+        return {"status": "ok", "data": result}
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+    except Exception as e:
+        get_logger().exception("pull_snapshot failed")
+        return {"status": "error", "error": str(e)}
+
 
 
 @rest_router.post("/api/github/issues/import")

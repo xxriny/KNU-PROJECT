@@ -94,7 +94,8 @@ def _build_user_message(
     input_idea: str,
     rag_context: str,
     rtm: list,
-    inventory: dict
+    inventory: dict,
+    project_context: str = "",
 ) -> str:
     """LLM 메시지 조립"""
     pruned_rtm = [
@@ -105,7 +106,7 @@ def _build_user_message(
         }
         for r in rtm
     ]
-    
+
     inventory_str = ""
     if inventory:
         lines = ["<project_inventory>"]
@@ -114,7 +115,12 @@ def _build_user_message(
         lines.append("</project_inventory>")
         inventory_str = "\n".join(lines)
 
+    prev_design_section = ""
+    if project_context:
+        prev_design_section = f"[Previous Design Context]\n{project_context}\n\n"
+
     return (
+        f"{prev_design_section}"
         f"{inventory_str}\n\n"
         f"[Action Type] {action_type}\n"
         f"[Input Idea] {input_idea}\n"
@@ -150,8 +156,15 @@ def sa_merge_project_node(ctx: NodeContext) -> dict:
             pass
         rag_context = _build_rag_context(action_type, input_idea, source_dir, rag_session_id)
 
+    # UPDATE 모드: 이전 분석 결과(project_context)를 SA에 전달하여 기존 설계 보존
+    project_context = ""
+    if action_type == "UPDATE":
+        project_context = sget("project_context", "") or ""
+
     # 2. 메시지 조립
-    user_content = _build_user_message(action_type, input_idea, rag_context, requirements_rtm, inventory)
+    user_content = _build_user_message(
+        action_type, input_idea, rag_context, requirements_rtm, inventory, project_context
+    )
 
     # 3. Call LLM for merge strategy
     res = call_structured(

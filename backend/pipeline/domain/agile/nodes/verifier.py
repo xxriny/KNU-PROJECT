@@ -356,20 +356,22 @@ def run_verifier(
     use_llm: V-006 의미론적 일관성 (기본 LLM)
     use_deep_llm: V-007~V-009 추가 LLM 검증 (더 깊은 분석)
     """
+    effective_key = api_key or os.environ.get("GEMINI_API_KEY", "")
+
     violations: list[ViolationItem] = []
     violations += _v001_api_component_ref(sa_data)
     violations += _v002_circular_dependency(sa_data)
     violations += _v003_table_fields(sa_data)
     violations += _v004_security_layer(sa_data)
     violations += _v005_external_interface(sa_data)
-    if use_llm and api_key:
-        violations += _v006_semantic_coherence_llm(sa_data, api_key, model)
-    if use_deep_llm and api_key:
-        violations += _v007_api_naming_consistency_llm(sa_data, api_key, model)
-        violations += _v008_srp_check_llm(sa_data, api_key, model)
-        violations += _v009_security_depth_llm(sa_data, api_key, model)
+    if use_llm and effective_key:
+        violations += _v006_semantic_coherence_llm(sa_data, effective_key, model)
+    if use_deep_llm and effective_key:
+        violations += _v007_api_naming_consistency_llm(sa_data, effective_key, model)
+        violations += _v008_srp_check_llm(sa_data, effective_key, model)
+        violations += _v009_security_depth_llm(sa_data, effective_key, model)
 
-    if use_deep_llm and api_key:
+    if use_deep_llm and effective_key:
         total_rules = 9
     elif use_llm and api_key:
         total_rules = 6

@@ -188,6 +188,25 @@ def _build_project_overview(
         usage_summary=usage_summary,
     ).model_dump()
 
+def _extract_from_stack_planner(stack_planner_output: dict | None) -> list:
+    """pm_embedding 없이 stack_planner_output.m에서 직접 tech_stacks 추출."""
+    if not stack_planner_output:
+        return []
+    mappings = stack_planner_output.get("m") or stack_planner_output.get("stack_mapping") or []
+    return [
+        {
+            "feature_id": m.get("f_id") or m.get("feature_id"),
+            "domain": m.get("dom") or m.get("domain", ""),
+            "pkg": m.get("pkg") or m.get("package", ""),
+            "version": m.get("ver") or m.get("version", ""),
+            "status": m.get("status", "APPROVED"),
+            "source": m.get("source", "LLM"),
+        }
+        for m in mappings
+        if isinstance(m, dict)
+    ]
+
+
 def shape_result(raw_result: dict) -> dict:
     """LangGraph raw 결과 → JSON 직렬화 가능한 정형 결과.
 
@@ -222,6 +241,7 @@ def shape_result(raw_result: dict) -> dict:
         or pm_data.get("stacks")
         or sanitized.get("tech_stacks")
         or sanitized.get("stacks")
+        or _extract_from_stack_planner(sanitized.get("stack_planner_output"))
         or []
     )
     

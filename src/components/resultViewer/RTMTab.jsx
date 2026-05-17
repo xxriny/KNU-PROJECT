@@ -56,7 +56,7 @@ export default function RTMTab() {
                   )}
                 </td>
                 <td className={`py-2 px-2 max-w-xs leading-relaxed ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
-                  {req.description}
+                  {req.description || req.desc || req.label || "-"}
                 </td>
                 <td className="py-2 px-2">
                   <div className="flex flex-wrap gap-1">
@@ -83,15 +83,15 @@ export default function RTMTab() {
                   )}
                 </td>
                 <td className="py-2 px-2">
-                  <PriorityBadge priority={req.priority} />
+                  <PriorityBadge priority={req.priority || req.pri} />
                 </td>
                 <td className="py-2 px-2">
                   <span className={`px-1.5 py-0.5 rounded text-[12px] font-medium ${
-                    isDarkMode 
-                      ? "bg-slate-800 text-slate-400" 
+                    isDarkMode
+                      ? "bg-slate-800 text-slate-400"
                       : "bg-slate-100 text-slate-600 border border-slate-200"
                   }`}>
-                    {req.category}
+                    {req.category || req.cat || "-"}
                   </span>
                 </td>
               </tr>

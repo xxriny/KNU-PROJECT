@@ -7,26 +7,22 @@ _ws_run_* 시리즈 + 스트리밍 로직을 단일 모듈에서 관리.
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 from datetime import datetime
 
 from fastapi import WebSocket
 
 from pipeline.orchestration.facade import (
-    get_analysis_pipeline,
     get_idea_pipeline,
     get_pm_pipeline,
     get_sa_pipeline,
-    get_rag_ingest_pipeline,
-    get_pipeline_routing_map,
     get_pm_routing_map,
     get_sa_routing_map,
-    get_rag_routing_map,
     get_idea_chat_routing_map,
 )
-from pipeline.core.action_type import ANALYSIS_ACTION_TYPES, normalize_action_type
-from pipeline.core.session import compute_project_session_id
+from pipeline.core.action_type import normalize_action_type
 from pipeline.domain.rag.ast_scanner import extract_functions, summarize_for_llm
-from pipeline.domain.rag.nodes.project_db import count_session_chunks
 from result_shaping.result_shaper import shape_result
 from pipeline.core.utils import to_serializable
 from observability.logger import get_logger
@@ -55,25 +51,85 @@ def validate_analysis_inputs(action_type: str, idea: str, source_dir: str) -> st
     return None
 
 
+def _parse_package_json(content: str, _: str) -> str:
+    try:
+        pkg = json.loads(content)
+        deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+        top = list(deps.keys())[:30]
+        return f"[package.json] name={pkg.get('name', '?')}, deps={top}"
+    except Exception:
+        return ""
+
+
+def _parse_requirements_txt(content: str, _: str) -> str:
+    pkgs = [
+        ln.split("==")[0].split(">=")[0].split(">")[0].strip()
+        for ln in content.splitlines()
+        if ln.strip() and not ln.startswith("#")
+    ]
+    return f"[requirements.txt] {pkgs[:30]}" if pkgs else ""
+
+
+def _parse_pyproject_toml(content: str, _: str) -> str:
+    return f"[pyproject.toml]\n{content[:2000]}"
+
+
+def _parse_plain_text(content: str, filename: str) -> str:
+    return f"[{filename}]\n{content[:1000]}"
+
+
+def _read_dependency_files(source_path: str) -> str:
+    """package.json, requirements.txt 등 의존성 파일을 읽어 요약 반환."""
+    candidates = [
+        ("package.json",      _parse_package_json),
+        ("requirements.txt",  _parse_requirements_txt),
+        ("pyproject.toml",    _parse_pyproject_toml),
+        ("Pipfile",           _parse_plain_text),
+        ("go.mod",            _parse_plain_text),
+        ("pom.xml",           _parse_plain_text),
+        ("build.gradle",      _parse_plain_text),
+    ]
+    lines = []
+    for filename, parser in candidates:
+        full_path = os.path.join(source_path, filename)
+        if os.path.isfile(full_path):
+            try:
+                with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read(4000)
+                parsed = parser(content, filename)
+                if parsed:
+                    lines.append(parsed)
+            except Exception:
+                pass
+    return "\n".join(lines)
+
+
 def build_reverse_context(source_dir: str) -> str:
-    """source_dir AST 스캔 결과를 REVERSE 분석용 project_context로 변환."""
+    """source_dir AST 스캔 + 의존성 파일 결과를 REVERSE 분석용 project_context로 변환."""
     source_path = (source_dir or "").strip()
     if not source_path:
         return ""
+
+    dep_summary = _read_dependency_files(source_path)
+
     functions = extract_functions(source_path, max_functions=250)
-    if not functions:
-        return ""
     unique_files = len({fn.get("file", "") for fn in functions if fn.get("file")})
-    summary = summarize_for_llm(functions, max_chars=7000)
-    return (
+    summary = summarize_for_llm(functions, max_chars=6000) if functions else "(함수 없음)"
+
+    parts = [
         "아래는 로컬 프로젝트 정적 스캔 결과입니다. "
-        "이 정보를 기준으로 프로젝트 구조, 핵심 모듈, 유지보수 리스크를 분석하세요.\n\n"
-        f"- source_dir: {source_path}\n"
-        f"- scanned_files: {unique_files}\n"
-        f"- scanned_functions: {len(functions)}\n\n"
-        "[함수 요약]\n"
-        f"{summary}"
-    )
+        "이 정보를 기준으로 프로젝트 구조, 핵심 모듈, 기술 스택, 유지보수 리스크를 분석하세요.\n",
+        f"- source_dir: {source_path}",
+        f"- scanned_files: {unique_files}",
+        f"- scanned_functions: {len(functions)}",
+    ]
+    if dep_summary:
+        parts.append("\n[의존성 파일 요약]")
+        parts.append(dep_summary)
+    parts.append("\n[함수 요약]")
+    parts.append(summary)
+
+    return "\n".join(parts)
 
 
 def analysis_pipeline_type(action_type: str) -> str:
@@ -114,6 +170,9 @@ async def _run_pipeline_base(
             if result_mutator is not None:
                 result_mutator(shaped)
 
+            # 최종 결과를 로컬 DB에 영속화
+            _persist_analysis_result(result.get("run_id", ""), shaped)
+
             await manager.send_json(ws, {"type": "result", "node": result_node, "data": shaped})
         
         return result
@@ -147,6 +206,12 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
                 user = get_user_by_id(db, decoded.get("sub", ""))
                 if user:
                     github_oauth_token = user.github_oauth_token
+                    if user.role != "pm":
+                        await manager.send_json(ws, {
+                            "type": "error",
+                            "data": {"message": "LLM 분석은 PM 권한이 필요합니다."}
+                        })
+                        return
         except Exception:
             get_logger().warning("Failed to resolve user from auth_token in pipeline")
         finally:
@@ -178,40 +243,26 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
         await manager.send_json(ws, {"type": "error", "data": {"message": validation_error}})
         return
 
-    if action_type == "REVERSE_ENGINEER" and not (context or "").strip():
-        context = build_reverse_context(source_dir)
-        if not context:
-            await manager.send_json(ws, {
-                "type": "error",
-                "data": {"message": "선택한 폴더에서 분석 가능한 함수/메서드를 찾지 못했습니다. 프로젝트 루트를 확인하세요."},
-            })
-            return
+    # UPDATE/REVERSE: source_dir에서 AST 스캔으로 프로젝트 컨텍스트 생성
+    if source_dir and action_type in ("UPDATE", "REVERSE_ENGINEER"):
+        if not (context or "").strip():
+            # context 없음: AST 스캔 결과를 context로 사용
+            context = build_reverse_context(source_dir)
+            if not context and action_type == "REVERSE_ENGINEER":
+                await manager.send_json(ws, {
+                    "type": "error",
+                    "data": {"message": "선택한 폴더에서 분석 가능한 함수/메서드를 찾지 못했습니다. 프로젝트 루트를 확인하세요."},
+                })
+                return
+        elif action_type == "UPDATE":
+            # context 있음(이전 설계 JSON): AST 스캔 결과를 추가로 병합하여 풍부한 컨텍스트 제공
+            ast_ctx = build_reverse_context(source_dir)
+            if ast_ctx:
+                context = context + "\n\n---\n\n" + ast_ctx
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     log = get_logger(run_id)
     log.info("analysis_start", action_type=action_type)
-
-    # ── RAG 인덱스 유무 검사 ──
-    # source_dir 해시를 영속 session_id로 사용해 ChromaDB 청크 적재량을 확인.
-    session_id = compute_project_session_id(source_dir)
-    chunk_count = count_session_chunks(session_id) if session_id else 0
-    has_index = chunk_count > 0
-
-    if action_type in ("UPDATE", "REVERSE_ENGINEER") and source_dir and not has_index:
-        # 이번 분석에서 RAG ingest가 곧 실행될 예정이므로 source_dir만 있으면 통과.
-        # 단, source_dir이 비어 있으면 위 조건이 False가 되어 검사 자체가 면제됨.
-        # source_dir이 있는데 인덱스가 없다는 것은 첫 실행이거나 직전 인덱싱이 실패한 경우.
-        log.info("rag_index_empty_will_ingest", session_id=session_id)
-
-    rag_warnings: list[dict] = []
-    if action_type == "CREATE" and has_index:
-        rag_warnings.append({
-            "code": "CREATE_WITH_EXISTING_INDEX",
-            "message": (
-                f"기존 RAG 인덱스(청크 {chunk_count}개)가 발견되었습니다. "
-                f"CREATE 모드로 신규 분석을 진행합니다 — 기존 인덱스는 건드리지 않습니다."
-            ),
-        })
 
     initial_state = {
         "api_key": api_key,
@@ -221,60 +272,14 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
         "source_dir": source_dir,
         "action_type": action_type,
         "run_id": run_id,
-        "session_id": session_id,
-        "rag_index_status": {
-            "has_index": has_index,
-            "chunk_count": chunk_count,
-            "session_id": session_id,
-        },
-        "rag_warnings": rag_warnings,
     }
 
-    # 1. RAG Ingestion (Stage 1) - 코드 청킹 및 벡터 색인
-    #    CREATE 모드는 분석할 기존 코드베이스가 없으므로 RAG 인제스트를 통째로 스킵.
-    if action_type == "CREATE":
-        scan_result = dict(initial_state)
-    else:
-        scan_result = await _run_pipeline_base(
-            ws,
-            pipeline=get_rag_ingest_pipeline(),
-            routing=get_rag_routing_map(),
-            state_payload=initial_state,
-            pipeline_type="rag_ingest",
-            save=False,
-            log=log,
-        )
-
-        if scan_result.get("error"):
-            return
-
-        # RAG ingest 후 인덱스 상태 재평가. UPDATE/REVERSE인데 여전히 비어 있으면 분석 중단.
-        post_count = count_session_chunks(session_id) if session_id else 0
-        post_has_index = post_count > 0
-        scan_result["rag_index_status"] = {
-            "has_index": post_has_index,
-            "chunk_count": post_count,
-            "session_id": session_id,
-        }
-        if action_type in ("UPDATE", "REVERSE_ENGINEER") and source_dir and not post_has_index:
-            await manager.send_json(ws, {
-                "type": "error",
-                "data": {
-                    "message": (
-                        f"{action_type} 모드인데 ChromaDB에 적재된 코드 청크가 없습니다. "
-                        f"source_dir({source_dir or '미지정'})에서 분석 가능한 코드를 찾지 못했거나 "
-                        f"인덱싱이 실패했습니다. 폴더 경로를 확인한 뒤 다시 시도하세요."
-                    )
-                },
-            })
-            return
-
-    # 2. PM Pipeline (Stage 2) - 요구사항 원자화 및 기획
+    # 1. PM Pipeline (Stage 1) - 요구사항 원자화 및 기획
     pm_result = await _run_pipeline_base(
         ws,
         pipeline=get_pm_pipeline(),
         routing=get_pm_routing_map(),
-        state_payload=scan_result,
+        state_payload=initial_state,
         pipeline_type="pm_only",
         save=False,
         log=log,
@@ -283,7 +288,7 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
     if pm_result.get("error"):
         return
 
-    # 3. SA Pipeline (Stage 3) - 아키텍처 설계
+    # 2. SA Pipeline (Stage 2) - 아키텍처 설계
     sa_result = await _run_pipeline_base(
         ws,
         pipeline=get_sa_pipeline(),
@@ -474,6 +479,32 @@ async def _emit_thinking(
             "node": node_name,
             "data": {"text": text},
         })
+
+
+def _persist_analysis_result(run_id: str, shaped: dict) -> None:
+    """분석 결과를 AnalysisResult 테이블에 저장한다."""
+    if not run_id:
+        return
+    try:
+        import json as _json
+        from auth.models import AnalysisSession, AnalysisResult
+        db = SessionLocal()
+        try:
+            # AnalysisSession 레코드가 없으면 먼저 생성
+            if not db.query(AnalysisSession).filter(AnalysisSession.run_id == run_id).first():
+                db.add(AnalysisSession(run_id=run_id))
+
+            # 기존 결과가 있으면 덮어쓰기
+            existing = db.query(AnalysisResult).filter(AnalysisResult.run_id == run_id).first()
+            if existing:
+                existing.shaped_result = _json.dumps(shaped, ensure_ascii=False)
+            else:
+                db.add(AnalysisResult(run_id=run_id, shaped_result=_json.dumps(shaped, ensure_ascii=False)))
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        get_logger().warning(f"[persist_result] 결과 저장 실패 run_id={run_id}: {e}")
 
 
 def _merge_state(target: dict, source: dict) -> None:
