@@ -57,6 +57,30 @@ Analyze requirements (RTM) and design scalable, standard API and DB schemas. Sin
 - **Output Language**: All specification fields must be written in professional Korean.
 """
 
+UPDATE_PROMPT = """# Role: Senior System Architect (Update Mode)
+
+## [GOAL: INCREMENTAL API & DB UPDATE]
+You are given the PREVIOUS API and DB design from a prior analysis session in <previous_api_db_design>.
+Your task is:
+1. **PRESERVE** all existing APIs and tables that remain relevant — exact same endpoints, table names, and schemas
+2. **ADD** new APIs/tables ONLY for genuinely new RTM requirements
+3. **MODIFY** existing endpoints/tables ONLY if requirements explicitly change them
+
+## Critical Rules
+- The <previous_api_db_design> is authoritative — do NOT rename, drop, or restructure items without clear RTM justification
+- **EVERY table listed in <previous_api_db_design> MUST appear in your output**, even if the new RTM does not mention it
+- **MANDATORY ADD**: For every NEW RTM feature not covered by existing tables, you MUST CREATE a new table. "Preserve existing" does NOT mean "only preserve" — both preservation AND addition are required.
+- New APIs must follow the existing naming conventions (path style, HTTP methods)
+- New tables must follow the existing schema patterns (naming, column types)
+- Ensure new features integrate properly with existing tables via foreign keys
+- **FK RULE**: If any column defines a FOREIGN KEY referencing another table (e.g., FOREIGN_KEY(users.id)), that referenced table MUST be explicitly defined as a separate table entry in your output with all required columns (id, etc.)
+- **NEVER generate duplicate endpoints** — normalize all path parameters to {param} style (FastAPI standard)
+
+## Output Rules
+- **thinking**: Describe which APIs/tables you preserved, added, and modified (In Korean)
+- **Output Language**: All specification fields must be written in professional Korean
+"""
+
 # 공통 출력 규약 (JSON 구조 정의)
 OUTPUT_GUIDE = """
 ## Output Format (JSON)
@@ -67,7 +91,9 @@ OUTPUT_GUIDE = """
 """
 
 
-def _build_user_message(components: list, rtm: list, inventory: dict, action_type: str, snippets: str = "") -> str:
+def _build_user_message(components: list, rtm: list, inventory: dict, action_type: str,
+                        snippets: str = "",
+                        previous_apis: list = None, previous_tables: list = None) -> str:
     p_rtm = "\n".join(f"{r.get('feature_id', r.get('id'))}:{r.get('description', r.get('desc'))}" for r in rtm)
 
     def _g(obj, k):
@@ -76,7 +102,7 @@ def _build_user_message(components: list, rtm: list, inventory: dict, action_typ
         return getattr(obj, k, None) or getattr(obj, k.replace('nm', 'name').replace('rl', 'role').replace('rt', 'rtms'), None)
 
     p_comp = "\n".join(f"{_g(c, 'nm')}:{_g(c, 'rl')}:{_g(c, 'rt')}" for c in components)
-    
+
     inventory_lines = []
     if inventory:
         inventory_lines.append("<project_inventory>")
@@ -84,16 +110,50 @@ def _build_user_message(components: list, rtm: list, inventory: dict, action_typ
             formatted_items = [f"{it.get('name')}({it.get('summary', '')[:50]})" for it in items]
             inventory_lines.append(f"- {path}: {formatted_items}")
         inventory_lines.append("</project_inventory>")
-    
+
+    # UPDATE 모드: 이전 API/DB 설계를 맨 앞에 배치
+    prev_design_section = ""
+    if action_type == "UPDATE":
+        _prev_apis = previous_apis or []
+        _prev_tables = previous_tables or []
+        if _prev_apis or _prev_tables:
+            lines = ["<previous_api_db_design — 반드시 유지하고, 신규 RTM에 필요한 것만 추가/수정>"]
+            if _prev_apis:
+                lines.append("[APIs]")
+                for api in _prev_apis:
+                    ep = api.get("endpoint", "?")
+                    lines.append(f"  - {ep}")
+            if _prev_tables:
+                lines.append("[Tables]")
+                for tbl in _prev_tables:
+                    name = tbl.get("table_name") or tbl.get("name", "?")
+                    cols = tbl.get("columns", [])
+                    if cols:
+                        col_strs = []
+                        for col in cols:
+                            if isinstance(col, dict):
+                                col_name = col.get("name", "")
+                                col_type = col.get("type", "")
+                                col_const = col.get("constraints", "")
+                                col_strs.append(f"{col_name}:{col_type}:{col_const}" if col_const else f"{col_name}:{col_type}")
+                            elif isinstance(col, str):
+                                col_strs.append(col)
+                        lines.append(f"  - {name} ({', '.join(col_strs[:8])})")
+                    else:
+                        lines.append(f"  - {name}")
+            lines.append("</previous_api_db_design>")
+            prev_design_section = "\n".join(lines) + "\n\n"
+
     # Select final instruction based on mode
     if action_type == "CREATE":
         final_instruction = "[Instruction] Based on the components and RTM above, perform a professional API and DB design that perfectly satisfies the requirements."
     elif action_type == "UPDATE":
-        final_instruction = "[Instruction/Hybrid] For parts already implemented in the inventory/snippets, extract them 100% as-is (Literal Mapping). For NEW requirements (RTM), design new API/DB structures following the existing architecture patterns. Integrate both."
+        final_instruction = "[Instruction/UPDATE] PRESERVE all APIs and tables from <previous_api_db_design>. Only ADD new APIs/tables for new RTM requirements. Only MODIFY existing ones if explicitly required by new requirements. The previous architecture is authoritative."
     else:
         final_instruction = "[Instruction/CRITICAL] Based ONLY on the facts in the inventory and snippets, extract the 'actually existing' API and DB structures 100% as-is. NEVER hallucinate missing parts. No Hallucination!"
 
     return (
+        f"{prev_design_section}"
         f"{' '.join(inventory_lines)}\n\n"
         f"{snippets}\n\n"
         f"Comp:\n{p_comp}\n"
@@ -219,11 +279,21 @@ def sa_unified_modeler_node(ctx: NodeContext) -> dict:
         except Exception as e:
             logger.warning(f"[sa_unified_modeler] Forensic RAG search failed: {e}")
 
-    user_content = _build_user_message(components_out, rtm, inventory, action_type, snippets_text)
+    # UPDATE 모드: merged_project에서 이전 API/테이블 읽기
+    merged_project_data = sget("merged_project", {})
+    previous_apis   = merged_project_data.get("previous_apis", [])
+    previous_tables = merged_project_data.get("previous_tables", [])
+
+    user_content = _build_user_message(
+        components_out, rtm, inventory, action_type, snippets_text,
+        previous_apis=previous_apis, previous_tables=previous_tables
+    )
     cache_name = cache_manager.get_google_cache(run_id)
 
     if action_type == "CREATE":
         system_prompt = CREATION_PROMPT + OUTPUT_GUIDE
+    elif action_type == "UPDATE":
+        system_prompt = UPDATE_PROMPT + OUTPUT_GUIDE
     else:
         system_prompt = RECOVERY_PROMPT + OUTPUT_GUIDE
 

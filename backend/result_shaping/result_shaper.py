@@ -6,6 +6,7 @@ Result Shaping 계층 (REQ-003)
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -236,7 +237,9 @@ def shape_result(raw_result: dict) -> dict:
     # ── Modular Data Aliasing (Prioritize pre-expanded sa_output) ──
     # 0. PM Stacks — pm_embedding._assemble_pm_bundle가 'tech_stacks' 키로 저장.
     # 'stacks'는 구버전 폴백.
-    sanitized["tech_stacks"] = (
+    # StackMapping schema uses abbreviated field names (f_id, dom, pkg, ver) with no aliases.
+    # Normalize all sources to consistent field names so RTMTab.jsx join works correctly.
+    raw_tech_stacks = (
         pm_data.get("tech_stacks")
         or pm_data.get("stacks")
         or sanitized.get("tech_stacks")
@@ -244,6 +247,17 @@ def shape_result(raw_result: dict) -> dict:
         or _extract_from_stack_planner(sanitized.get("stack_planner_output"))
         or []
     )
+    sanitized["tech_stacks"] = [
+        {
+            "feature_id": t.get("feature_id") or t.get("f_id"),
+            "domain":     t.get("domain") or t.get("dom", ""),
+            "pkg":        t.get("pkg") or t.get("package", ""),
+            "version":    t.get("version") or t.get("ver", ""),
+            "status":     t.get("status", "APPROVED"),
+            "source":     t.get("source", "LLM"),
+        }
+        for t in raw_tech_stacks if isinstance(t, dict)
+    ]
     
     extracted_rtm = (
         merged_plan.get("requirements_rtm") or 
@@ -278,7 +292,18 @@ def shape_result(raw_result: dict) -> dict:
                 "response_schema": a.get("rs") or a.get("res", {}),
                 "description": a.get("description", "")
             })
-    sanitized["apis"] = expanded_apis
+    # Dedup: :param → {param} 정규화 후 중복 엔드포인트 제거
+    def _norm_ep(ep: str) -> str:
+        return re.sub(r':(\w+)', r'{\1}', ep or "").strip().lower()
+
+    seen_eps: set[str] = set()
+    deduped_apis = []
+    for api in expanded_apis:
+        norm = _norm_ep(api.get("endpoint", ""))
+        if norm not in seen_eps:
+            seen_eps.add(norm)
+            deduped_apis.append(api)
+    sanitized["apis"] = deduped_apis
 
     # 2. Tables (sa_output.data.tables > sa_unified.tables)
     raw_tables = []

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 from typing import Any, Dict, List
 
 from pipeline.core.state import PipelineState, make_sget
@@ -156,10 +157,34 @@ def sa_merge_project_node(ctx: NodeContext) -> dict:
             pass
         rag_context = _build_rag_context(action_type, input_idea, source_dir, rag_session_id)
 
-    # UPDATE 모드: 이전 분석 결과(project_context)를 SA에 전달하여 기존 설계 보존
+    # UPDATE 모드: 이전 분석 결과(project_context) JSON 파싱 → 이전 설계 추출
     project_context = ""
+    previous_components: list = []
+    previous_apis: list = []
+    previous_tables: list = []
+    previous_rtm: list = []
+
     if action_type == "UPDATE":
         project_context = sget("project_context", "") or ""
+        if project_context:
+            try:
+                json_start = project_context.find('{')
+                if json_start >= 0:
+                    prev = json.loads(project_context[json_start:])
+                    previous_components = prev.get("components", [])
+                    previous_apis       = prev.get("apis", [])
+                    previous_tables     = prev.get("tables", [])
+                    previous_rtm        = prev.get("requirements_rtm", [])
+            except Exception:
+                pass
+
+        # PM delta RTM에 이전 RTM 중 누락된 항목 병합 → SA에 full RTM 전달
+        if previous_rtm:
+            existing_ids = {r.get("feature_id") or r.get("id") for r in requirements_rtm}
+            for prev_req in previous_rtm:
+                prev_id = prev_req.get("feature_id") or prev_req.get("id")
+                if prev_id and prev_id not in existing_ids:
+                    requirements_rtm.append(prev_req)
 
     # 2. 메시지 조립
     user_content = _build_user_message(
@@ -195,6 +220,9 @@ def sa_merge_project_node(ctx: NodeContext) -> dict:
             "requirements_rtm": requirements_rtm,
             "context_spec": sget("context_spec", {}),
         },
+        "previous_components": previous_components,
+        "previous_apis": previous_apis,
+        "previous_tables": previous_tables,
     }
 
     thinking_msg = output.thinking or "프로젝트 병합 전략 수립 완료"

@@ -86,75 +86,10 @@ export const createPipelineSlice = (set, get) => ({
       }
     }
 
-    // UPDATE 모드에서 RTM은 전체 교체가 아닌 feature_id 기반 upsert 병합
-    if (get().pipelineType === "analysis_update" && data.requirements_rtm?.length) {
-      const existing = get().requirements_rtm || [];
-      const incoming = data.requirements_rtm;
-      const merged = [...existing];
-      incoming.forEach((item) => {
-        const idx = merged.findIndex((e) => e.feature_id === item.feature_id);
-        if (idx >= 0) merged[idx] = item;
-        else merged.push(item);
-      });
-      data = { ...data, requirements_rtm: merged };
-    }
-
-    // UPDATE 모드에서 components/apis/tables도 전체 교체 방지 — name/endpoint 기준 upsert 병합
-    if (get().pipelineType === "analysis_update") {
-      if (data.components?.length) {
-        const existing = get().components || [];
-        const merged = [...existing];
-        data.components.forEach((comp) => {
-          const idx = merged.findIndex((e) => e.name === comp.name);
-          if (idx >= 0) merged[idx] = comp;
-          else merged.push(comp);
-        });
-        data = { ...data, components: merged };
-      }
-      if (data.apis?.length) {
-        const existing = get().apis || [];
-        const merged = [...existing];
-        data.apis.forEach((api) => {
-          const key = api.endpoint || api.name;
-          const idx = merged.findIndex((e) => (e.endpoint || e.name) === key);
-          if (idx >= 0) merged[idx] = api;
-          else merged.push(api);
-        });
-        data = { ...data, apis: merged };
-      }
-      if (data.tables?.length) {
-        const existing = get().tables || [];
-        const merged = [...existing];
-        data.tables.forEach((tbl) => {
-          const idx = merged.findIndex((e) => e.name === tbl.name);
-          if (idx >= 0) merged[idx] = tbl;
-          else merged.push(tbl);
-        });
-        data = { ...data, tables: merged };
-      }
-
-      // sa_output 내 components/apis/tables도 병합된 데이터로 동기화
-      // (SAComponentsTab 등이 sa_output에서 읽을 경우에도 올바른 병합 결과를 보여주기 위함)
-      if (data.sa_output) {
-        data = {
-          ...data,
-          sa_output: {
-            ...data.sa_output,
-            components: data.components,
-            apis: data.apis,
-            tables: data.tables,
-            data: data.sa_output.data
-              ? {
-                  ...data.sa_output.data,
-                  components: data.components,
-                  apis: data.apis,
-                  tables: data.tables,
-                }
-              : data.sa_output.data,
-          },
-        };
-      }
-    }
+    // UPDATE 모드에서 components/apis/tables는 백엔드 결과를 그대로 사용.
+    // 백엔드 component_scheduler/sa_unified_modeler의 UPDATE_PROMPT가 이미
+    // 기존 항목 보존 + 신규 항목 추가를 처리하므로 프론트엔드 병합 불필요.
+    // (이전 스토어 데이터와 병합하면 stale 세션 데이터가 섞여 로컬과 공유 DB 표시가 달라지는 버그 발생)
 
     const nextResultData = {
       pipelineStatus: "done",

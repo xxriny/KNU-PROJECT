@@ -13,7 +13,7 @@ export default function RTMTab() {
   // feature_id 별로 기술 스택 그룹화
   const safeTechStacks = Array.isArray(tech_stacks) ? tech_stacks : [];
   const stackMap = safeTechStacks.reduce((acc, stack) => {
-    const fid = stack.feature_id;
+    const fid = stack.feature_id || stack.f_id;
     if (!acc[fid]) acc[fid] = [];
     acc[fid].push(stack);
     return acc;
@@ -67,7 +67,7 @@ export default function RTMTab() {
                             ? "bg-slate-800 text-blue-300 border-slate-700" 
                             : "bg-blue-50 text-blue-700 border-blue-200"
                         }`}>
-                          {s.package}
+                          {s.pkg || s.package}
                         </span>
                       ))
                     ) : (

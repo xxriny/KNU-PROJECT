@@ -51,8 +51,48 @@ Propose the optimal modern technology stack that satisfies the project requireme
 2. **Modern Standards**: Prioritize stable, industry-standard modern tech stacks.
 3. **Domain Suitability**: Map the best libraries to Frontend, Backend, and DB layers.
 
+## Domain-Specific Mapping Guidelines
+- **Auth/Login features** → bcrypt/passlib (password hashing), python-jose/PyJWT (tokens), authlib/OAuth2 (OAuth)
+- **Database features** → SQLAlchemy/Prisma (ORM), alembic (migrations), sqlmodel (schema)
+- **API features** → FastAPI/Flask/Express (framework), pydantic (validation)
+- **Frontend state** → React/Zustand/Redux, axios (HTTP client)
+
+## Anti-Patterns (NEVER map these)
+- Auth/Login features → DB modeling tools (e.g., @dbml/core, prisma-dbml-generator, dbdiagram)
+- API interface modification features → @dbml/core. **NOTE: @dbml/core is a SQL schema visualization/documentation tool, NOT an API development library.** For API interface or schema changes, use the backend framework (FastAPI, Flask, Express) or validation libraries (Pydantic, zod, marshmallow).
+- DB schema features → Auth libraries (e.g., PyJWT, bcrypt)
+- Unrelated features → Framework itself (e.g., React is a platform, not a feature-specific library)
+
 ## Output Rules
 - **thinking (th)**: Describe your design rationale and suitability for the project scale (In Korean).
+- **Output Language**: All specification fields must be written in professional Korean.
+"""
+
+UPDATE_PROMPT = """# Role: Lead Technical Architect (Update Mode)
+
+## Overview
+You are given an existing project's dependency files (<source_code_dependency_evidence>) and new RTM requirements.
+Map existing features to detected libraries, and propose appropriate NEW libraries for NEW features.
+
+## Mapping Rules
+1. **Existing features**: Map to libraries found in <source_code_dependency_evidence>
+2. **New features**: Propose the most appropriate standard library. Use industry best practices.
+3. **Domain Suitability**: Match the RIGHT library type to the feature domain.
+
+## Domain-Specific Mapping Guidelines
+- **Auth/Login features** → bcrypt/passlib (password hashing), python-jose/PyJWT (tokens), authlib/OAuth2 (OAuth)
+- **Database features** → SQLAlchemy/Prisma (ORM), alembic (migrations), sqlmodel (schema)
+- **API features** → FastAPI/Flask/Express (framework), pydantic (validation)
+- **Frontend state** → React/Zustand/Redux, axios (HTTP client)
+
+## Anti-Patterns (NEVER map these)
+- Auth/Login features → DB modeling tools (e.g., @dbml/core, prisma-dbml-generator, dbdiagram)
+- API interface modification features → @dbml/core. **NOTE: @dbml/core is a SQL schema visualization/documentation tool, NOT an API development library.** For API interface or schema changes, use the backend framework (FastAPI, Flask, Express) or validation libraries (Pydantic, zod, marshmallow).
+- DB schema features → Auth libraries (e.g., PyJWT, bcrypt)
+- Unrelated features → Framework itself (e.g., React is a platform, not a feature-specific library)
+
+## Output Rules
+- **thinking (th)**: Explain which features used existing deps vs. newly proposed libraries (In Korean).
 - **Output Language**: All specification fields must be written in professional Korean.
 """
 
@@ -127,6 +167,8 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
         # 모드에 따른 시스템 프롬프트 선택
         if action_type == "CREATE":
             system_prompt = CREATION_PROMPT + OUTPUT_GUIDE
+        elif action_type == "UPDATE":
+            system_prompt = UPDATE_PROMPT + OUTPUT_GUIDE
         else:
             system_prompt = RECOVERY_PROMPT + OUTPUT_GUIDE
 
