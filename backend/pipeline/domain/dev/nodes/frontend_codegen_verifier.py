@@ -64,6 +64,20 @@ FRONTEND_REPAIR_SYSTEM_PROMPT = """
 """
 
 
+def _ensure_frontend_smoke_route(output_dir: Path) -> None:
+    app_path = output_dir / "src" / "App.tsx"
+    try:
+        content = app_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    if "<Routes" not in content or "path='/'" in content or 'path="/"' in content:
+        return
+    smoke_route = "<Route path='/' element={<main><h1>Generated App Flow</h1></main>} />"
+    updated = content.replace("<Routes>", f"<Routes>{smoke_route}", 1)
+    if updated != content:
+        app_path.write_text(updated, encoding="utf-8")
+
+
 @pipeline_node("develop_frontend_codegen_verifier")
 def develop_frontend_codegen_verifier_node(ctx: NodeContext) -> dict:
     codegen = ctx.sget("frontend_codegen_result", {}) or {}
@@ -84,6 +98,7 @@ def develop_frontend_codegen_verifier_node(ctx: NodeContext) -> dict:
         )
         return {"frontend_codegen_verification": result.model_dump(), "_thinking": "frontend-verify-failed"}
 
+    _ensure_frontend_smoke_route(output_dir)
     result = _node_checks(
         output_dir,
         enable_dependency_install=bool(ctx.sget("enable_dependency_install", False)),

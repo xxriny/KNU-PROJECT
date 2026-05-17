@@ -102,6 +102,9 @@ def _route_after_main_agent(state: PipelineState) -> str:
     if "frontend" in selected: return "frontend"
     return "block"
 
+def _route_feature_queue_controller(state: PipelineState) -> str:
+    return "dispatch" if str(state.get("current_feature_id", "") or "") else "complete"
+
 def _route_uiux_domain_gate(state: PipelineState) -> str:
     res = state.get("uiux_domain_gate_result", {}) or {}
     status = str(res.get("status", "error")).lower()
@@ -319,7 +322,14 @@ def get_develop_pipeline():
     # ── [Edges] ──
     workflow.add_edge(START, "dev_task_planner")
     workflow.add_edge("dev_task_planner", "develop_feature_queue_controller")
-    workflow.add_edge("develop_feature_queue_controller", "develop_main_agent")
+    workflow.add_conditional_edges(
+        "develop_feature_queue_controller",
+        _route_feature_queue_controller,
+        {
+            "dispatch": "develop_main_agent",
+            "complete": END,
+        },
+    )
     
     # 1. Main Agent -> 도메인 분기
     workflow.add_conditional_edges(

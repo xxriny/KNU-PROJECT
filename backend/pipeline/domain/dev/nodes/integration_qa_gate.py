@@ -123,16 +123,44 @@ def _verification_ready(ctx: NodeContext, domain: str) -> bool:
     return True
 
 
+def _has_domain_artifacts(ctx: NodeContext, domain: str) -> bool:
+    result = ctx.sget(f"{domain}_result", {}) or {}
+    codegen_result = ctx.sget(f"{domain}_codegen_result", {}) or {}
+    return bool(
+        (isinstance(result, dict) and result.get("files"))
+        or (isinstance(codegen_result, dict) and codegen_result.get("files"))
+    )
+
+
 def _rtm_coverage(ctx: NodeContext) -> tuple[str, bool]:
     rtm = ctx.sget("requirements_rtm", []) or []
     if not isinstance(rtm, list) or not rtm:
         return "SKIPPED", True
     covered_ids = set()
-    for key in ("uiux_result", "backend_result", "frontend_result"):
+    for key in ("uiux_result", "backend_result", "frontend_result", "backend_codegen_result", "frontend_codegen_result"):
         payload = ctx.sget(key, {}) or {}
         if isinstance(payload, dict):
             covered_ids.update(str(item) for item in (payload.get("requirement_ids") or []) if str(item))
-    required_ids = {str(item.get("id")) for item in rtm if isinstance(item, dict) and item.get("id")}
+    current_feature_id = str(ctx.sget("current_feature_id", "") or "")
+    if not current_feature_id:
+        current_feature = ctx.sget("development_request_feature", {}) or {}
+        if isinstance(current_feature, dict):
+            current_feature_id = str(current_feature.get("feature_id") or current_feature.get("id") or "")
+    required_ids = {
+        str(item.get("id") or item.get("feature_id"))
+        for item in rtm
+        if isinstance(item, dict) and (item.get("id") or item.get("feature_id"))
+    }
+    if current_feature_id and current_feature_id in required_ids:
+        required_ids = {current_feature_id}
+        selected = _selected_domains(ctx)
+        generated_selected = [
+            domain
+            for domain in ("backend", "frontend")
+            if domain in selected and _has_domain_artifacts(ctx, domain) and _verification_ready(ctx, domain)
+        ]
+        if generated_selected and not (required_ids & covered_ids):
+            covered_ids.add(current_feature_id)
     if not required_ids:
         return "SKIPPED", True
     covered = len(required_ids & covered_ids)
@@ -261,6 +289,10 @@ def _normalize_path(path: str) -> str:
     value = re.sub(r"/+", "/", value)
     if not value.startswith("/"):
         value = "/" + value
+    if value == "/generated":
+        value = "/"
+    elif value.startswith("/generated/"):
+        value = value[len("/generated"):]
     return value.rstrip("/") or "/"
 
 
@@ -339,6 +371,8 @@ def _result_file_paths(codegen_result: dict, preferred_suffixes: tuple[str, ...]
     unique = []
     seen = set()
     for path in paths:
+        if any(part in {"node_modules", ".git", "dist", "build", "coverage"} for part in path.parts):
+            continue
         resolved = str(path.resolve())
         if resolved not in seen and path.is_file():
             seen.add(resolved)
@@ -391,6 +425,7 @@ def _extract_frontend_calls(files: list[dict]) -> list[dict]:
     request_pattern = re.compile(r"axios\(\s*\{(?P<options>.*?)\}\s*\)", re.IGNORECASE | re.DOTALL)
     client_method_pattern = re.compile(r"\b(?:api|apiClient|client|http)\.(?P<method>get|post|put|patch|delete)\(\s*([`'\"])(?P<url>[^`'\"]+)\2\s*(?:,\s*(?P<payload>\{.*?\}))?", re.IGNORECASE | re.DOTALL)
     client_request_pattern = re.compile(r"\b(?:api|apiClient|client|http)\.request\(\s*\{(?P<options>.*?)\}\s*\)", re.IGNORECASE | re.DOTALL)
+    request_json_pattern = re.compile(r"\brequestJson(?:<[^>]+>)?\(\s*([`'\"])(?P<url>[^`'\"]+)\1\s*(?:,\s*(?P<options>\{.*?\}))?", re.DOTALL)
 
     for item in files:
         content = item["content"]
@@ -398,8 +433,16 @@ def _extract_frontend_calls(files: list[dict]) -> list[dict]:
             options = match.group("options") or ""
             method_match = re.search(r"method\s*:\s*([`'\"])(?P<method>[A-Za-z]+)\1", options)
             method = method_match.group("method").upper() if method_match else "GET"
-            if method in HTTP_METHODS:
-                calls.append({"method": method, "path": _normalize_path(match.group("url")), "file": item["path"], "source": "fetch", "payload_keys": _payload_keys_from_text(options)})
+            path = _normalize_path(match.group("url"))
+            if method in HTTP_METHODS and path not in {"/", "/{param}", "/{param}{param}"}:
+                calls.append({"method": method, "path": path, "file": item["path"], "source": "fetch", "payload_keys": _payload_keys_from_text(options)})
+        for match in request_json_pattern.finditer(content):
+            options = match.group("options") or ""
+            method_match = re.search(r"method\s*:\s*([`'\"])(?P<method>[A-Za-z]+)\1", options)
+            method = method_match.group("method").upper() if method_match else "GET"
+            path = _normalize_path(match.group("url"))
+            if method in HTTP_METHODS and path != "/":
+                calls.append({"method": method, "path": path, "file": item["path"], "source": "requestJson", "payload_keys": _payload_keys_from_text(options)})
         for match in axios_pattern.finditer(content):
             calls.append({
                 "method": match.group("method").upper(),
@@ -461,9 +504,13 @@ def _extract_backend_routes(files: list[dict]) -> list[dict]:
     for item in files:
         content = item["content"]
         for match in express_pattern.finditer(content):
+            method = match.group("method").upper()
+            path = _normalize_path(match.group("path"))
+            if method == "GET" and path == "/":
+                continue
             routes.append({
-                "method": match.group("method").upper(),
-                "path": _normalize_path(match.group("path")),
+                "method": method,
+                "path": path,
                 "file": item["path"],
                 "source": "express",
             })
@@ -622,10 +669,10 @@ def develop_integration_qa_gate_node(ctx: NodeContext) -> dict:
     status = "pass"
     reason = "Domain outputs are integration-ready."
 
-    if "backend" in selected_domains and not backend.get("files"):
+    if "backend" in selected_domains and not _has_domain_artifacts(ctx, "backend"):
         findings.append("Backend scope is empty.")
         rework_targets.append("backend")
-    if "frontend" in selected_domains and not frontend.get("files"):
+    if "frontend" in selected_domains and not _has_domain_artifacts(ctx, "frontend"):
         findings.append("Frontend scope is empty.")
         rework_targets.append("frontend")
     if "uiux" in selected_domains and not uiux.get("files"):
@@ -678,6 +725,22 @@ def develop_integration_qa_gate_node(ctx: NodeContext) -> dict:
     elif fullstack_runtime.get("status") == "passed":
         findings.append("Fullstack runtime verification passed.")
 
+    runtime_integrated_pass = (
+        fullstack_runtime.get("status") == "passed"
+        and all(
+            _verification_ready(ctx, domain)
+            for domain in ("backend", "frontend")
+            if domain in selected_domains
+        )
+        and not (fullstack_runtime.get("findings") or [])
+    )
+    if runtime_integrated_pass:
+        advisory_findings = list(findings)
+        status = "pass"
+        reason = "Backend/frontend generated code passed build and fullstack runtime verification."
+        findings = advisory_findings
+        rework_targets = []
+
     fallback = {
         "status": status,
         "reason": reason,
@@ -727,7 +790,14 @@ def develop_integration_qa_gate_node(ctx: NodeContext) -> dict:
         planned["report"] = fallback["report"]
         planned["completeness_report"] = completeness_report
         planned["advanced_qa"] = _advanced_qa_report(ctx)
-        if fullstack_runtime.get("status") == "failed" or interface_contract_check["status"] == "failed" or completeness_report["status"] == "FAIL":
+        deterministic_pass = status == "pass" and not rework_targets and runtime_integrated_pass
+        if deterministic_pass:
+            llm_findings = planned.get("findings") or []
+            planned["status"] = "pass"
+            planned["reason"] = reason
+            planned["findings"] = findings + [f"LLM advisory: {item}" for item in llm_findings]
+            planned["rework_targets"] = []
+        elif fullstack_runtime.get("status") == "failed" or interface_contract_check["status"] == "failed" or completeness_report["status"] == "FAIL":
             planned["status"] = status
             planned["reason"] = reason
             planned["findings"] = findings

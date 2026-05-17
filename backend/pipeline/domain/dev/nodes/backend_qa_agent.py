@@ -183,6 +183,15 @@ def _static_code_findings(ctx: NodeContext, result: dict, spec: dict) -> tuple[l
     codegen_result = ctx.sget("backend_codegen_result", {}) or {}
     if codegen_result.get("status") not in {"generated", "repaired"}:
         return [], []
+    current_feature_id = str(ctx.sget("current_feature_id", "") or "")
+    task_instruction = codegen_result.get("task_instruction") or {}
+    codegen_feature_id = str(
+        task_instruction.get("feature_id")
+        or ((task_instruction.get("dev_task") or {}).get("task_info") or {}).get("feature_id")
+        or ""
+    )
+    if current_feature_id and codegen_feature_id and codegen_feature_id != current_feature_id:
+        return [], []
 
     findings: list[str] = []
     fixes_required: list[str] = []

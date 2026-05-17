@@ -247,10 +247,19 @@ def _load_artifact_rag_context(source_session_id: str) -> dict:
             "artifacts": [],
         }
 
-    from pipeline.domain.pm.nodes.pm_db import _get_collection as _get_artifact_collection
+    try:
+        from pipeline.domain.pm.nodes.pm_db import _get_collection as _get_artifact_collection
 
-    collection = _get_artifact_collection()
-    results = collection.get(where={"session_id": source_session_id})
+        collection = _get_artifact_collection()
+        results = collection.get(where={"session_id": source_session_id})
+    except Exception as exc:
+        return {
+            "session_id": source_session_id,
+            "artifact_count": 0,
+            "artifacts": [],
+            "status": "skipped",
+            "reason": f"artifact RAG context unavailable: {type(exc).__name__}: {exc}",
+        }
     ids = results.get("ids", []) or []
     docs = results.get("documents", []) or []
     metas = results.get("metadatas", []) or []

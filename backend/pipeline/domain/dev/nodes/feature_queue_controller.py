@@ -137,10 +137,41 @@ def develop_feature_queue_controller_node(ctx: NodeContext) -> dict:
                 item["status"] = "in_progress"
                 break
 
-    return {
+    result = {
         "current_feature_id": selected_feature_id,
         "development_request_feature": selected_feature,
         "dev_feature_queue": queue,
         "dev_feature_status": next_status_map,
         "_thinking": "feature-priority, dependency-ready, single-feature-dispatch",
     }
+    if selected_feature_id and selected_feature_id != current_feature_id:
+        result.update({
+            "uiux_retry_count": 0,
+            "backend_retry_count": 0,
+            "frontend_retry_count": 0,
+            "global_fe_sync_retry_count": 0,
+            "develop_integration_rework_count": 0,
+            "develop_next_action": "",
+            "uiux_result": {"status": "pending", "reason": "New feature selected."},
+            "uiux_qa_result": {"status": "pending", "reason": "New feature selected."},
+            "uiux_domain_gate_result": {"status": "pending", "reason": "New feature selected."},
+            "backend_result": {"status": "pending", "reason": "New feature selected."},
+            "backend_qa_result": {"status": "pending", "reason": "New feature selected."},
+            "backend_domain_gate_result": {"status": "pending", "reason": "New feature selected."},
+            "backend_codegen_result": {"status": "pending", "reason": "New feature selected.", "files": []},
+            "backend_codegen_verification": {"status": "pending", "reason": "New feature selected."},
+            "backend_codegen_repair_result": {"status": "pending", "reason": "New feature selected."},
+            "backend_codegen_reverify_result": {"status": "pending", "reason": "New feature selected."},
+            "frontend_result": {"status": "pending", "reason": "New feature selected."},
+            "frontend_qa_result": {"status": "pending", "reason": "New feature selected."},
+            "frontend_domain_gate_result": {"status": "pending", "reason": "New feature selected."},
+            "frontend_codegen_result": {"status": "pending", "reason": "New feature selected.", "files": []},
+            "frontend_codegen_verification": {"status": "pending", "reason": "New feature selected."},
+            "frontend_codegen_repair_result": {"status": "pending", "reason": "New feature selected."},
+            "frontend_codegen_reverify_result": {"status": "pending", "reason": "New feature selected."},
+            "global_fe_sync_result": {"status": "pending", "reason": "New feature selected."},
+            "fullstack_runtime_verification": {"status": "pending", "reason": "New feature selected."},
+            "integration_qa_result": {"status": "pending", "reason": "New feature selected."},
+            "branch_pr_result": {"status": "pending", "merge_ready": False, "reason": "New feature selected."},
+        })
+    return result
