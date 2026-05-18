@@ -158,12 +158,17 @@ function InfoRow({ label, value }) {
 
 function SnapshotDetail({ snapshot, onBack, onDelete, canDelete, onPull, isPulling }) {
   const data = snapshot.data || {};
+  const saData = data.sa_output?.data || data.sa_merge_project_output?.data || {};
   const proj = data.project_overview || {};
-  const sa = data.sa_overview || {};
-  const rtm = Array.isArray(data.requirements_rtm) ? data.requirements_rtm : [];
-  const apis = Array.isArray(data.apis) ? data.apis : [];
-  const tables = Array.isArray(data.tables) ? data.tables : [];
-  const components = Array.isArray(data.components) ? data.components : [];
+  const sa = data.sa_overview || data.sa_output?.overview || {};
+  const rtm = Array.isArray(data.requirements_rtm) ? data.requirements_rtm
+            : Array.isArray(data.features) ? data.features : [];
+  const apis = Array.isArray(data.apis) ? data.apis
+             : Array.isArray(saData.apis) ? saData.apis : [];
+  const tables = Array.isArray(data.tables) ? data.tables
+               : Array.isArray(saData.tables) ? saData.tables : [];
+  const components = Array.isArray(data.components) ? data.components
+                   : Array.isArray(saData.components) ? saData.components : [];
   const techStacks = Array.isArray(data.tech_stacks) ? data.tech_stacks : [];
   const metrics = data.metrics || {};
 
@@ -209,7 +214,7 @@ function SnapshotDetail({ snapshot, onBack, onDelete, canDelete, onPull, isPulli
               <div className="flex flex-wrap gap-1 mt-2">
                 {techStacks.map((s, i) => (
                   <span key={i} className="px-2 py-0.5 rounded bg-blue-500/15 text-blue-300 text-[11px] border border-blue-500/20">
-                    {s.package || s.name || String(s)}
+                    {s.package || s.pkg || s.name || String(s)}
                   </span>
                 ))}
               </div>
@@ -280,7 +285,7 @@ function SnapshotDetail({ snapshot, onBack, onDelete, canDelete, onPull, isPulli
                     api.method === "PUT" ? "bg-yellow-500/20 text-yellow-400" :
                     "bg-red-500/20 text-red-400"
                   }`}>{api.method || "?"}</span>
-                  <span className="text-white/70 font-mono">{api.path || api.endpoint}</span>
+                  <span className="text-white/70 font-mono">{api.path || api.endpoint || "-"}</span>
                   {api.description && <span className="text-white/40 ml-auto">{api.description}</span>}
                 </div>
               ))}

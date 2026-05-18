@@ -22,9 +22,36 @@ from auth.service import (
     create_access_token, count_users, get_user_by_email,
     start_github_device_flow, poll_github_device_token,
     get_github_user_info, create_or_update_github_user,
+    exchange_github_code,
 )
+import secrets
+import urllib.parse
+from datetime import datetime, timedelta
+from fastapi import Request
+
+# ── OAuth 세션 인메모리 스토어 ────────────────────────────────
+_oauth_sessions: dict = {}  # session_id → {status, result, created_at}
+
+def _create_oauth_session() -> str:
+    sid = secrets.token_urlsafe(32)
+    _oauth_sessions[sid] = {"status": "pending", "result": None, "created_at": datetime.utcnow()}
+    return sid
+
+def _set_oauth_result(sid: str, result: dict):
+    if sid in _oauth_sessions:
+        _oauth_sessions[sid]["status"] = "done"
+        _oauth_sessions[sid]["result"] = result
+
+def _get_oauth_session(sid: str) -> dict | None:
+    s = _oauth_sessions.get(sid)
+    if not s:
+        return None
+    if datetime.utcnow() - s["created_at"] > timedelta(minutes=10):
+        _oauth_sessions.pop(sid, None)
+        return None
+    return s
 from auth.deps import get_current_user, require_pm, require_engineer, get_current_user_optional
-from auth.oauth_config import get_github_credentials
+from auth.oauth_config import get_github_credentials, get_device_flow_client_id
 
 auth_router = APIRouter()
 
@@ -73,39 +100,102 @@ async def me(current_user: User = Depends(get_current_user)):
     return build_user_response(current_user)
 
 
+# ── GitHub OAuth Web Flow ────────────────────────────────────
+
+@auth_router.get("/auth/github/oauth-url")
+async def github_oauth_url(request: Request, db: Session = Depends(get_db)):
+    """GitHub OAuth Web Flow 인증 URL + session_id 반환."""
+    client_id, _ = get_github_credentials(db)
+    if not client_id or "your_" in client_id.lower():
+        raise HTTPException(status_code=503, detail="needs_oauth_setup")
+    session_id = _create_oauth_session()
+    redirect_uri = str(request.base_url).rstrip("/") + "/auth/github/callback"
+    params = urllib.parse.urlencode({
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "scope": "user:email read:user repo",
+        "state": session_id,
+    })
+    return {"url": f"https://github.com/login/oauth/authorize?{params}", "session_id": session_id}
+
+
+@auth_router.get("/auth/github/callback")
+async def github_callback(code: str, state: str, db: Session = Depends(get_db)):
+    """GitHub OAuth 콜백: code → token → 유저 생성 → 세션에 결과 저장 후 완료 HTML 반환."""
+    from fastapi.responses import HTMLResponse
+    client_id, client_secret = get_github_credentials(db)
+    try:
+        token_data = exchange_github_code(client_id, client_secret, code)
+        access_token = token_data.get("access_token")
+        if not access_token:
+            raise ValueError("토큰 발급 실패")
+        gh_user = get_github_user_info(access_token)
+        user = create_or_update_github_user(
+            db,
+            github_id=gh_user["id"],
+            github_login=gh_user["login"],
+            email=gh_user["email"],
+            name=gh_user["name"],
+            oauth_token=access_token,
+        )
+        jwt_token = create_access_token(user.id, user.email, user.role)
+        _set_oauth_result(state, {"access_token": jwt_token, "user": build_user_response(user)})
+        html = """<html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0d1117;color:#e6edf3">
+<h2>✅ 로그인 완료!</h2><p>NAVIGATOR 앱으로 돌아가세요. 이 창은 닫아도 됩니다.</p>
+<script>setTimeout(()=>window.close(),2000)</script></body></html>"""
+    except Exception as e:
+        _set_oauth_result(state, {"error": str(e)})
+        html = f"""<html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0d1117;color:#f85149">
+<h2>❌ 인증 실패</h2><p>{e}</p><p>앱으로 돌아가서 다시 시도하세요.</p></body></html>"""
+    return HTMLResponse(content=html)
+
+
+@auth_router.get("/auth/github/callback-poll/{session_id}")
+async def github_callback_poll(session_id: str):
+    """프론트엔드가 OAuth 결과를 폴링하는 엔드포인트."""
+    s = _get_oauth_session(session_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="세션 없음 또는 만료")
+    if s["status"] == "pending":
+        return {"status": "pending"}
+    result = s["result"]
+    _oauth_sessions.pop(session_id, None)
+    if "error" in result:
+        return {"status": "error", "error": result["error"]}
+    return {"status": "done", "access_token": result["access_token"], "user": result["user"]}
+
+
 # ── GitHub OAuth Device Flow (Dynamic) ───────────────────────
 
 @auth_router.post("/auth/github/device-start")
 async def github_device_start(db: Session = Depends(get_db)):
-    """GitHub Device Flow 시작. DB 설정을 우선적으로 사용합니다."""
-    from auth.oauth_config import get_github_credentials
-    client_id, _ = get_github_credentials(db)
-    
-    # 미설정이거나 더미 값이 들어있는 경우 설정창 유도
-    if not client_id or "your_" in client_id.lower() or "YOUR_" in client_id:
-        raise HTTPException(
-            status_code=503,
-            detail="needs_oauth_setup",
-        )
+    """GitHub Device Flow 시작. NAVIGATOR 기본 Client ID를 사용하므로 사용자 설정 불필요."""
+    client_id = get_device_flow_client_id(db)
+
+    if not client_id:
+        raise HTTPException(status_code=503, detail="needs_oauth_setup")
+
     try:
         data = start_github_device_flow(client_id)
         if "error" in data:
             raise HTTPException(status_code=400, detail=data.get("error_description", data["error"]))
         return data
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"GitHub 인증 시작 실패: {e}")
 
 
 @auth_router.post("/auth/github/device-poll")
 async def github_device_poll(req: DevicePollRequest, db: Session = Depends(get_db)):
-    """GitHub Device Flow 폴링 및 로그인 완료."""
-    client_id, client_secret = get_github_credentials(db)
-    
+    """GitHub Device Flow 폴링 및 로그인 완료. Client Secret 불필요."""
+    client_id = get_device_flow_client_id(db)
+
     if not client_id:
         raise HTTPException(status_code=503, detail="GitHub OAuth 구성 오류")
 
     try:
-        token_data = poll_github_device_token(client_id, client_secret, req.device_code)
+        token_data = poll_github_device_token(client_id, req.device_code)
         error = token_data.get("error")
         if error in ("authorization_pending", "slow_down"):
             return {"status": "pending", "error": error}
@@ -154,26 +244,35 @@ async def list_github_repos(current_user: User = Depends(get_current_user)):
     if not current_user.github_oauth_token:
         raise HTTPException(status_code=400, detail="GitHub 연결이 필요합니다.")
     try:
-        from githubkit import GitHub
+        import httpx
+        headers = {
+            "Authorization": f"Bearer {current_user.github_oauth_token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Navigator-App/2.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
         repos = []
         page = 1
-        with GitHub(current_user.github_oauth_token) as gh:
+        with httpx.Client(timeout=15.0) as client:
             while True:
-                resp = gh.rest.repos.list_for_authenticated_user(
-                    sort="updated", per_page=100, page=page
+                resp = client.get(
+                    "https://api.github.com/user/repos",
+                    headers=headers,
+                    params={"sort": "updated", "per_page": 100, "page": page},
                 )
-                batch = resp.parsed_data
+                resp.raise_for_status()
+                batch = resp.json()
                 if not batch:
                     break
                 for r in batch:
                     repos.append({
-                        "full_name": r.full_name,
-                        "name": r.name,
-                        "owner": r.owner.login,
-                        "description": getattr(r, "description", "") or "",
-                        "private": r.private,
-                        "language": getattr(r, "language", "") or "",
-                        "pushed_at": str(getattr(r, "pushed_at", "") or ""),
+                        "full_name": r["full_name"],
+                        "name": r["name"],
+                        "owner": r["owner"]["login"],
+                        "description": r.get("description") or "",
+                        "private": r["private"],
+                        "language": r.get("language") or "",
+                        "pushed_at": r.get("pushed_at") or "",
                     })
                 if len(batch) < 100:
                     break

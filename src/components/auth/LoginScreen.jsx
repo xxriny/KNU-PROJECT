@@ -1,12 +1,20 @@
 import React, { useState, useEffect, useRef } from "react";
 import useAppStore from "../../store/useAppStore";
-import { LogIn, UserPlus, Eye, EyeOff, Loader2, Github, Copy, Check } from "lucide-react";
+import {
+  LogIn, UserPlus, Eye, EyeOff, Loader2, Github,
+  AlertCircle, Settings, ExternalLink, ChevronUp,
+} from "lucide-react";
 
 const ROLES = [
   { value: "pm", label: "PM (프로덕트 매니저)" },
   { value: "engineer", label: "Engineer (개발자)" },
   { value: "viewer", label: "Viewer (열람 전용)" },
 ];
+
+// Device Flow 상태: idle | starting | waiting
+const DEVICE_IDLE = "idle";
+const DEVICE_STARTING = "starting";
+const DEVICE_WAITING = "waiting";
 
 export default function LoginScreen({ isFirstRun = false }) {
   const isDarkMode = useAppStore((s) => s.isDarkMode);
@@ -20,93 +28,104 @@ export default function LoginScreen({ isFirstRun = false }) {
   const [error, setError] = useState("");
   const [showPw, setShowPw] = useState(false);
 
-  // GitHub Device Flow state
-  const [ghFlow, setGhFlow] = useState(null); // { user_code, verification_uri, device_code, interval }
-  const [ghLoading, setGhLoading] = useState(false);
+  // Device Flow 상태
+  const [deviceState, setDeviceState] = useState(DEVICE_IDLE);
+  const [userCode, setUserCode] = useState("");
+  const [verificationUri, setVerificationUri] = useState("https://github.com/login/device");
   const [ghError, setGhError] = useState("");
-  const [copied, setCopied] = useState(false);
-  
-  // First run setup state
-  const [needsSetup, setNeedsSetup] = useState(false);
+
+  // 고급 설정 (기존 OAuth App 직접 입력)
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [setupConfig, setSetupConfig] = useState({ client_id: "", client_secret: "" });
   const [setupLoading, setSetupLoading] = useState(false);
-  
-  const pollRef = useRef(null);
-  const expireRef = useRef(null);
-  const pollIntervalRef = useRef(5000);
 
-  const GH_ERRORS = {
-    access_denied: "인증이 취소되었습니다. GitHub에서 승인을 거부했습니다.",
-    expired_token: "인증 코드가 만료되었습니다. 다시 시도하세요.",
-    incorrect_client_credentials: "OAuth 클라이언트 설정이 잘못되었습니다.",
-  };
+  const pollRef = useRef(null);
 
   const [form, setForm] = useState({
-    name: "",
-    email: "",
-    password: "",
-    role: "engineer",
-    github_username: "",
-    team_name: "",
+    name: "", email: "", password: "", role: "engineer",
+    github_username: "", team_name: "",
   });
-
   const setField = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
 
-  // Cleanup on unmount
-  useEffect(() => () => {
-    clearInterval(pollRef.current);
-    clearTimeout(expireRef.current);
-  }, []);
+  useEffect(() => () => clearInterval(pollRef.current), []);
 
-  const stopPolling = (errMsg = null) => {
+  const stopPolling = () => {
     clearInterval(pollRef.current);
-    clearTimeout(expireRef.current);
-    setGhFlow(null);
-    if (errMsg) setGhError(errMsg);
+    pollRef.current = null;
   };
 
-  const startGithubLogin = async () => {
-    clearInterval(pollRef.current);
-    clearTimeout(expireRef.current);
-    setGhLoading(true); setGhError("");
+  const startDeviceFlow = async () => {
+    setDeviceState(DEVICE_STARTING);
+    setGhError("");
     try {
       const data = await startGithubDeviceFlow();
-      setGhFlow(data);
-      window.open(data.verification_uri, "_blank");
-      pollIntervalRef.current = (data.interval || 5) * 1000;
+      setUserCode(data.user_code || "");
+      setVerificationUri(data.verification_uri || "https://github.com/login/device");
+      const interval = Math.max(data.interval || 5, 5);
+      setDeviceState(DEVICE_WAITING);
 
-      const doPoll = async () => {
+      // 브라우저 자동 오픈
+      const uri = data.verification_uri || "https://github.com/login/device";
+      if (window.electronAPI?.openGithubAuth) {
+        window.electronAPI.openGithubAuth(uri);
+      } else {
+        window.open(uri, "_blank");
+      }
+
+      // 폴링 시작
+      pollRef.current = setInterval(async () => {
         try {
           const result = await pollGithubDeviceFlow(data.device_code);
           if (result.status === "ok") {
             stopPolling();
+            // Electron IPC로 창 새로고침, 없으면 fallback
+            if (window.electronAPI?.reloadWindow) {
+              await window.electronAPI.reloadWindow();
+            } else {
+              window.location.reload();
+            }
           } else if (result.status === "error") {
-            stopPolling(GH_ERRORS[result.error] || result.error || "인증 실패");
-          } else if (result.error === "slow_down") {
-            clearInterval(pollRef.current);
-            pollIntervalRef.current += 5000;
-            pollRef.current = setInterval(doPoll, pollIntervalRef.current);
+            stopPolling();
+            setDeviceState(DEVICE_IDLE);
+            setGhError(result.error || "GitHub 인증 실패");
           }
-        } catch (_) {}
-      };
+          // "pending" 은 계속 폴링
+        } catch (err) {
+          stopPolling();
+          setDeviceState(DEVICE_IDLE);
+          setGhError(err.message || "네트워크 오류가 발생했습니다.");
+        }
+      }, interval * 1000);
 
-      pollRef.current = setInterval(doPoll, pollIntervalRef.current);
-
-      expireRef.current = setTimeout(() => {
-        stopPolling("인증 코드가 만료되었습니다. 다시 시도하세요.");
-      }, (data.expires_in || 900) * 1000);
     } catch (err) {
-      // 어떤 에러가 나더라도(404, 422, 500 등), 설정이 잘못되었을 가능성이 크므로
-      // 사용자에게 직접 입력할 수 있는 폼을 보여줍니다.
-      setNeedsSetup(true);
-      setGhError(err.message);
-    } finally {
-      setGhLoading(false);
+      setDeviceState(DEVICE_IDLE);
+      if (err.message === "needs_oauth_setup") {
+        setShowAdvanced(true);
+        setGhError("GitHub OAuth App Client ID가 설정되지 않았습니다. 고급 설정에서 입력해주세요.");
+      } else {
+        setGhError(err.message || "GitHub 인증 시작 실패");
+      }
     }
   };
 
-  const submitSetup = async () => {
-    setSetupLoading(true); setGhError("");
+  const openBrowser = () => {
+    if (window.electronAPI?.openGithubAuth) {
+      window.electronAPI.openGithubAuth(verificationUri);
+    } else {
+      window.open(verificationUri, "_blank");
+    }
+  };
+
+  const cancelDeviceFlow = () => {
+    stopPolling();
+    setDeviceState(DEVICE_IDLE);
+    setGhError("");
+    setUserCode("");
+  };
+
+  const submitAdvancedSetup = async () => {
+    setSetupLoading(true);
+    setGhError("");
     try {
       const port = useAppStore.getState().backendPort || 8000;
       const res = await fetch(`http://127.0.0.1:${port}/auth/setup-oauth`, {
@@ -115,24 +134,18 @@ export default function LoginScreen({ isFirstRun = false }) {
         body: JSON.stringify(setupConfig),
       });
       const data = await res.json();
+      if (res.status === 403) {
+        setGhError("OAuth 설정은 관리자 설정 패널에서 변경하세요.");
+        return;
+      }
       if (!res.ok) throw new Error(data.detail || "설정 실패");
-      
-      // 설정 성공 시 바로 로그인 플로우 시작
-      setNeedsSetup(false);
-      startGithubLogin();
+      setShowAdvanced(false);
+      startDeviceFlow();
     } catch (err) {
       setGhError(err.message);
     } finally {
       setSetupLoading(false);
     }
-  };
-
-  const cancelGithubLogin = () => stopPolling();
-
-  const copyCode = () => {
-    navigator.clipboard.writeText(ghFlow?.user_code || "");
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   const handleSubmit = async (e) => {
@@ -144,9 +157,7 @@ export default function LoginScreen({ isFirstRun = false }) {
         await login(form.email, form.password);
       } else {
         await register({
-          name: form.name,
-          email: form.email,
-          password: form.password,
+          name: form.name, email: form.email, password: form.password,
           role: form.role,
           github_username: form.github_username || undefined,
           team_name: form.team_name || undefined,
@@ -160,48 +171,46 @@ export default function LoginScreen({ isFirstRun = false }) {
   };
 
   const card = isDarkMode
-    ? "bg-[#0F1219] border border-white/8 shadow-2xl"
+    ? "bg-[#0d1117] border border-white/10 shadow-2xl shadow-black/50"
     : "bg-white border border-slate-200 shadow-xl";
   const input = isDarkMode
-    ? "bg-slate-900/60 border-white/8 text-white placeholder:text-slate-600 focus:border-blue-500/60"
-    : "bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-blue-500";
-  const label = isDarkMode ? "text-slate-400" : "text-slate-600";
+    ? "bg-slate-800/60 border-white/10 text-white placeholder:text-slate-500 focus:border-blue-500/70 focus:bg-slate-800"
+    : "bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white";
+  const label = isDarkMode ? "text-slate-400" : "text-slate-500";
+  const divider = isDarkMode ? "bg-white/10" : "bg-slate-200";
+  const panelBg = isDarkMode ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200";
+  const cancelBtn = isDarkMode
+    ? "bg-white/5 hover:bg-white/10 text-slate-400"
+    : "bg-slate-100 hover:bg-slate-200 text-slate-600";
 
   return (
-    <div
-      className="h-screen w-screen flex items-center justify-center"
-      style={{ background: "var(--bg-root)" }}
-    >
-      <div className={`w-full max-w-sm rounded-2xl p-8 ${card}`}>
-        {/* 헤더 */}
-        <div className="mb-8 text-center">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-600/10 mb-4">
-            <span className="text-2xl font-black text-blue-500">N</span>
+    <div className="h-screen w-screen flex items-center justify-center p-4" style={{ background: "var(--bg-root)" }}>
+      <div className={`w-full max-w-sm rounded-2xl p-7 max-h-[95vh] overflow-y-auto custom-scrollbar ${card}`}>
+
+        {/* Header */}
+        <div className="mb-7 text-center">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-blue-600/15 mb-3">
+            <span className="text-xl font-black text-blue-500">N</span>
           </div>
-          <h1 className={`text-2xl font-black tracking-tight ${isDarkMode ? "text-white" : "text-slate-900"}`}>
+          <h1 className={`text-xl font-black tracking-tight ${isDarkMode ? "text-white" : "text-slate-900"}`}>
             NAVIGATOR
           </h1>
-          <p className={`text-sm mt-1 ${label}`}>
+          <p className={`text-xs mt-1 ${label}`}>
             {mode === "login" ? "팀 계정으로 로그인" : "새 계정 만들기"}
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* 회원가입 전용 필드 */}
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="space-y-3.5">
           {mode === "register" && (
             <>
               <Field label="이름" value={form.name} onChange={setField("name")}
                 placeholder="홍길동" required inputClass={input} labelClass={label} />
               <div>
                 <label className={`block text-xs font-semibold mb-1.5 ${label}`}>역할</label>
-                <select
-                  value={form.role}
-                  onChange={setField("role")}
-                  className={`w-full rounded-xl px-3 py-2.5 text-sm border outline-none transition-colors ${input}`}
-                >
-                  {ROLES.map((r) => (
-                    <option key={r.value} value={r.value}>{r.label}</option>
-                  ))}
+                <select value={form.role} onChange={setField("role")}
+                  className={`w-full rounded-xl px-3 py-2.5 text-sm border outline-none transition-colors ${input}`}>
+                  {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
               </div>
               <Field label="팀 이름 (선택)" value={form.team_name} onChange={setField("team_name")}
@@ -212,165 +221,169 @@ export default function LoginScreen({ isFirstRun = false }) {
             </>
           )}
 
-          {/* 공통 필드 */}
           <Field label="이메일" type="email" value={form.email} onChange={setField("email")}
             placeholder="you@example.com" required inputClass={input} labelClass={label} />
 
           <div>
-            <label className={`block text-xs font-semibold mb-1.5 ${label}`}>
-              비밀번호
-            </label>
+            <label className={`block text-xs font-semibold mb-1.5 ${label}`}>비밀번호</label>
             <div className="relative">
-              <input
-                type={showPw ? "text" : "password"}
-                value={form.password}
-                onChange={setField("password")}
-                placeholder="••••••••"
-                required
-                className={`w-full rounded-xl px-3 py-2.5 pr-10 text-sm border outline-none transition-colors ${input}`}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPw((p) => !p)}
-                className={`absolute right-3 top-1/2 -translate-y-1/2 ${label} hover:text-blue-400`}
-              >
-                {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
+              <input type={showPw ? "text" : "password"} value={form.password}
+                onChange={setField("password")} placeholder="••••••••" required
+                className={`w-full rounded-xl px-3 py-2.5 pr-10 text-sm border outline-none transition-colors ${input}`} />
+              <button type="button" onClick={() => setShowPw((p) => !p)}
+                className={`absolute right-3 top-1/2 -translate-y-1/2 ${label} hover:text-blue-400 transition-colors`}>
+                {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
             </div>
           </div>
 
-          {/* 에러 */}
           {error && (
-            <p className="text-red-500 text-xs font-medium bg-red-500/10 rounded-lg px-3 py-2">
-              {error}
-            </p>
+            <div className="flex items-start gap-2 text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2.5">
+              <AlertCircle size={13} className="mt-0.5 shrink-0" />
+              <p className="text-xs font-medium">{error}</p>
+            </div>
           )}
 
-          {/* 제출 버튼 */}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-2.5 px-4 rounded-xl text-sm transition-colors mt-2"
-          >
-            {loading ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : mode === "login" ? (
-              <LogIn size={16} />
-            ) : (
-              <UserPlus size={16} />
-            )}
+          <button type="submit" disabled={loading}
+            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white font-bold py-2.5 px-4 rounded-xl text-sm transition-colors">
+            {loading ? <Loader2 size={15} className="animate-spin" /> : mode === "login" ? <LogIn size={15} /> : <UserPlus size={15} />}
             {mode === "login" ? "로그인" : "계정 만들기"}
           </button>
         </form>
 
-        {/* GitHub OAuth 구분선 */}
-        <div className="mt-5 flex items-center gap-3">
-          <div className={`flex-1 h-px ${isDarkMode ? "bg-white/10" : "bg-slate-200"}`} />
+        {/* Divider */}
+        <div className="my-5 flex items-center gap-3">
+          <div className={`flex-1 h-px ${divider}`} />
           <span className={`text-xs font-medium ${label}`}>또는</span>
-          <div className={`flex-1 h-px ${isDarkMode ? "bg-white/10" : "bg-slate-200"}`} />
+          <div className={`flex-1 h-px ${divider}`} />
         </div>
 
         {/* GitHub Device Flow */}
-        {ghFlow ? (
-          <div className={`mt-4 p-4 rounded-xl border space-y-3 ${isDarkMode ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200"}`}>
-            <p className={`text-xs font-bold ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
-              GitHub에서 아래 코드를 입력하세요
+        {deviceState === DEVICE_WAITING ? (
+          <div className={`rounded-xl border p-4 space-y-3 ${panelBg}`}>
+            <p className={`text-xs font-bold ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>
+              브라우저에서 아래 코드를 입력하세요
             </p>
-            <div className="flex items-center gap-2">
-              <span className={`flex-1 text-center text-2xl font-black tracking-[0.25em] py-3 rounded-xl ${isDarkMode ? "bg-black/30 text-white" : "bg-white border border-slate-200 text-slate-900"}`}>
-                {ghFlow.user_code}
+
+            {/* User Code — 크게 표시 */}
+            <div className={`rounded-lg py-3 text-center ${isDarkMode ? "bg-white/5" : "bg-white border border-slate-200"}`}>
+              <span className={`font-mono text-2xl font-black tracking-[0.25em] select-all ${isDarkMode ? "text-white" : "text-slate-900"}`}>
+                {userCode}
               </span>
-              <button
-                onClick={copyCode}
-                className={`p-2.5 rounded-lg transition-colors ${isDarkMode ? "hover:bg-white/10 text-slate-400" : "hover:bg-slate-100 text-slate-500"}`}
-                title="코드 복사"
-              >
-                {copied ? <Check size={16} className="text-emerald-400" /> : <Copy size={16} />}
-              </button>
+              <p className={`text-xs mt-1 ${label}`}>github.com/login/device</p>
             </div>
-            <p className="text-xs opacity-50 text-center">
-              브라우저에서 자동으로 열립니다 · 승인 후 자동 로그인됩니다
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => window.open(ghFlow.verification_uri, "_blank")}
-                className="flex-1 py-2 text-xs font-bold rounded-lg bg-slate-800 hover:bg-slate-700 text-white transition-colors"
-              >
-                GitHub 페이지 열기
-              </button>
-              <button
-                onClick={cancelGithubLogin}
-                className={`px-4 text-xs font-bold rounded-lg transition-colors ${isDarkMode ? "bg-white/5 hover:bg-white/10 text-slate-400" : "bg-slate-100 hover:bg-slate-200 text-slate-600"}`}
-              >
-                취소
-              </button>
+
+            <button onClick={openBrowser}
+              className="w-full flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-colors">
+              <ExternalLink size={13} />
+              GitHub에서 인증하기
+            </button>
+
+            <div className="flex items-center gap-2">
+              <Loader2 size={12} className="animate-spin text-blue-400 shrink-0" />
+              <p className={`text-xs ${label}`}>코드 입력 후 Authorize하면 자동으로 로그인됩니다</p>
             </div>
-            {ghError && <p className="text-xs text-red-400 text-center">{ghError}</p>}
-          </div>
-        ) : needsSetup ? (
-          <div className={`mt-4 p-4 rounded-xl border space-y-3 ${isDarkMode ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200"}`}>
-            <p className={`text-xs font-bold ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
-              시스템 초기화: GitHub OAuth 구성
-            </p>
-            <input
-              type="text"
-              placeholder="Client ID"
-              value={setupConfig.client_id}
-              onChange={(e) => setSetupConfig(p => ({...p, client_id: e.target.value}))}
-              className={`w-full rounded-lg px-3 py-2 text-xs border outline-none transition-colors ${input}`}
-            />
-            <input
-              type="password"
-              placeholder="Client Secret"
-              value={setupConfig.client_secret}
-              onChange={(e) => setSetupConfig(p => ({...p, client_secret: e.target.value}))}
-              className={`w-full rounded-lg px-3 py-2 text-xs border outline-none transition-colors ${input}`}
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={submitSetup}
-                disabled={setupLoading || !setupConfig.client_id || !setupConfig.client_secret}
-                className="flex-1 py-2 text-xs font-bold rounded-lg bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 transition-colors"
-              >
-                {setupLoading ? "저장 중..." : "저장 후 로그인 계속"}
-              </button>
-              <button
-                onClick={() => { setNeedsSetup(false); setGhError(""); }}
-                className={`px-3 text-xs font-bold rounded-lg transition-colors ${isDarkMode ? "bg-white/5 hover:bg-white/10 text-slate-400" : "bg-slate-100 hover:bg-slate-200 text-slate-600"}`}
-              >
-                취소
-              </button>
-            </div>
+
+            {ghError && (
+              <div className="flex items-start gap-2 text-red-400">
+                <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                <p className="text-xs">{ghError}</p>
+              </div>
+            )}
+
+            <button onClick={cancelDeviceFlow}
+              className={`w-full py-2 text-xs font-bold rounded-lg transition-colors ${cancelBtn}`}>
+              취소
+            </button>
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={startGithubLogin}
-            disabled={ghLoading}
-            className={`mt-3 w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-bold border transition-all ${
-              isDarkMode
-                ? "bg-white/5 hover:bg-white/10 border-white/10 text-slate-200"
-                : "bg-white hover:bg-slate-50 border-slate-200 text-slate-800 shadow-sm"
-            } disabled:opacity-50`}
-          >
-            {ghLoading ? <Loader2 size={16} className="animate-spin" /> : <Github size={16} />}
-            GitHub로 로그인
-          </button>
-        )}
-        {ghError && !ghFlow && !needsSetup && (
-          <p className="text-xs text-red-400 text-center mt-2">{ghError}</p>
+          <>
+            <div className="flex gap-2">
+              <button type="button" onClick={startDeviceFlow}
+                disabled={deviceState === DEVICE_STARTING}
+                className={`flex-1 flex items-center justify-center gap-2.5 py-2.5 px-4 rounded-xl text-sm font-bold border transition-all disabled:opacity-50 ${
+                  isDarkMode
+                    ? "bg-white/5 hover:bg-white/10 active:bg-white/15 border-white/10 text-slate-200"
+                    : "bg-white hover:bg-slate-50 active:bg-slate-100 border-slate-200 text-slate-800 shadow-sm"
+                }`}>
+                {deviceState === DEVICE_STARTING
+                  ? <Loader2 size={15} className="animate-spin" />
+                  : <Github size={15} />}
+                GitHub로 로그인
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAdvanced((v) => !v)}
+                className={`px-3.5 rounded-xl border transition-all ${
+                  isDarkMode
+                    ? "bg-white/5 hover:bg-white/10 border-white/10 text-slate-400 hover:text-white"
+                    : "bg-white hover:bg-slate-50 border-slate-200 text-slate-500 hover:text-slate-800 shadow-sm"
+                }`}
+                title="고급 설정"
+              >
+                {showAdvanced ? <ChevronUp size={15} /> : <Settings size={15} />}
+              </button>
+            </div>
+
+            {ghError && (
+              <div className="flex items-start gap-2 mt-2.5 text-red-400">
+                <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                <p className="text-xs">{ghError}</p>
+              </div>
+            )}
+
+            {/* 고급 설정: 커스텀 OAuth App */}
+            {showAdvanced && (
+              <div className={`mt-3 rounded-xl border p-4 space-y-3 ${panelBg}`}>
+                <div className="flex items-center gap-2">
+                  <Settings size={12} className={label} />
+                  <p className={`text-xs font-bold ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>
+                    고급: 커스텀 GitHub OAuth App
+                  </p>
+                </div>
+                <p className={`text-xs ${label}`}>
+                  팀 전용 GitHub OAuth App을 사용하려면 Client ID와 Secret을 입력하세요.
+                  일반 사용자는 위의 "GitHub로 로그인" 버튼만 사용하면 됩니다.
+                </p>
+                <div className="space-y-2">
+                  <div>
+                    <label className={`block text-xs font-semibold mb-1 ${label}`}>Client ID</label>
+                    <input type="text" placeholder="Iv23li..."
+                      value={setupConfig.client_id}
+                      onChange={(e) => setSetupConfig((p) => ({ ...p, client_id: e.target.value }))}
+                      className={`w-full rounded-lg px-3 py-2 text-xs border outline-none transition-colors ${input}`} />
+                  </div>
+                  <div>
+                    <label className={`block text-xs font-semibold mb-1 ${label}`}>Client Secret</label>
+                    <input type="password" placeholder="••••••••••••••••••••"
+                      value={setupConfig.client_secret}
+                      onChange={(e) => setSetupConfig((p) => ({ ...p, client_secret: e.target.value }))}
+                      className={`w-full rounded-lg px-3 py-2 text-xs border outline-none transition-colors ${input}`} />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={submitAdvancedSetup}
+                    disabled={setupLoading || !setupConfig.client_id || !setupConfig.client_secret}
+                    className="flex-1 py-2 text-xs font-bold rounded-lg bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 transition-colors">
+                    {setupLoading ? <Loader2 size={12} className="animate-spin mx-auto" /> : "저장 후 로그인"}
+                  </button>
+                  <button onClick={() => { setShowAdvanced(false); setGhError(""); }}
+                    className={`px-4 text-xs font-bold rounded-lg transition-colors ${cancelBtn}`}>
+                    닫기
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
-
-        {/* 모드 전환 */}
-        <div className="mt-5 text-center">
-          <button
-            onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }}
-            className={`text-xs font-medium hover:text-blue-400 transition-colors ${label}`}
-          >
+        {/* Mode switch */}
+        <div className="mt-6 text-center">
+          <button onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }}
+            className={`text-xs transition-colors ${label} hover:text-blue-400`}>
             {mode === "login"
-              ? "계정이 없으신가요? 회원가입"
-              : "이미 계정이 있으신가요? 로그인"}
+              ? <>계정이 없으신가요? <span className="font-bold text-blue-500">회원가입</span></>
+              : <>이미 계정이 있으신가요? <span className="font-bold text-blue-500">로그인</span></>}
           </button>
         </div>
       </div>
@@ -382,14 +395,8 @@ function Field({ label, value, onChange, placeholder, type = "text", required, i
   return (
     <div>
       <label className={`block text-xs font-semibold mb-1.5 ${labelClass}`}>{label}</label>
-      <input
-        type={type}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        required={required}
-        className={`w-full rounded-xl px-3 py-2.5 text-sm border outline-none transition-colors ${inputClass}`}
-      />
+      <input type={type} value={value} onChange={onChange} placeholder={placeholder} required={required}
+        className={`w-full rounded-xl px-3 py-2.5 text-sm border outline-none transition-colors ${inputClass}`} />
     </div>
   );
 }

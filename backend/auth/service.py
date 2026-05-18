@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import uuid
+import urllib.parse
 import httpx
 from datetime import datetime, timedelta
 from typing import Optional
@@ -14,7 +15,6 @@ from typing import Optional
 from jose import JWTError, jwt
 import bcrypt as _bcrypt_lib
 from sqlalchemy.orm import Session
-from githubkit import GitHub
 
 from auth.models import User, Team
 
@@ -111,81 +111,112 @@ def count_users(db: Session) -> int:
     return db.query(User).count()
 
 
-# ── GitHub OAuth Device Flow ──────────────────────────────────
+# ── GitHub OAuth Web Flow ────────────────────────────────────
 
-def start_github_device_flow(client_id: str) -> dict:
-    """GitHub Device Flow 시작."""
-    # 공식 경로로 복귀
-    url = "https://github.com/login/device/code"
-    payload = {"client_id": client_id, "scope": "user:email read:user repo"}
-    
-    # User-Agent는 GitHub API 호출 시 필수적인 경우가 많습니다.
-    headers = {
-        "Accept": "application/json",
-        "User-Agent": "Navigator-App/2.0"
-    }
-    
-    with httpx.Client(follow_redirects=True) as client:
-        # JSON 포맷으로 전송
-        resp = client.post(url, json=payload, headers=headers)
-        
-        # 만약 404가 나면 oauth 경로로 폴백 (하이브리드 지원)
-        if resp.status_code == 404:
-            url = "https://github.com/login/oauth/device/code"
-            resp = client.post(url, json=payload, headers=headers)
-            
-        try:
-            data = resp.json()
-            if resp.status_code != 200:
-                return {"error": "github_error", "error_description": f"GitHub API 에러 ({resp.status_code}): {data.get('error_description', data.get('error', 'Unknown'))}"}
-            return data
-        except Exception:
-            return {
-                "error": "invalid_client",
-                "error_description": f"GitHub 서버 응답 오류 ({resp.status_code}). Client ID를 확인하시고, GitHub OAuth App 설정에서 'Enable Device Flow'가 켜져 있는지 다시 확인하세요."
-            }
+REDIRECT_URI = "navigator://auth/callback"
 
-
-def poll_github_device_token(client_id: str, client_secret: str, device_code: str) -> dict:
-    """GitHub Device Flow 폴링."""
+def exchange_github_code(client_id: str, client_secret: str, code: str) -> dict:
+    """Authorization Code를 access_token으로 교환."""
     url = "https://github.com/login/oauth/access_token"
     payload = {
         "client_id": client_id,
         "client_secret": client_secret,
+        "code": code,
+        "redirect_uri": REDIRECT_URI,
+    }
+    headers = {"Accept": "application/json", "User-Agent": "Navigator-App/2.0"}
+    with httpx.Client(follow_redirects=True) as client:
+        resp = client.post(url, json=payload, headers=headers)
+    try:
+        data = resp.json()
+    except Exception:
+        raise ValueError(f"GitHub 토큰 교환 실패 (HTTP {resp.status_code})")
+    if "error" in data:
+        raise ValueError(data.get("error_description") or data["error"])
+    return data  # { access_token, token_type, scope }
+
+
+# ── GitHub OAuth Device Flow ──────────────────────────────────
+
+DEVICE_FLOW_SCOPE = "repo user:email read:user read:org workflow gist"
+
+def start_github_device_flow(client_id: str) -> dict:
+    """GitHub Device Flow 시작."""
+    url = "https://github.com/login/device/code"
+    payload = {"client_id": client_id, "scope": DEVICE_FLOW_SCOPE}
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Navigator-App/2.0",
+    }
+    with httpx.Client(follow_redirects=True) as client:
+        resp = client.post(url, content=urllib.parse.urlencode(payload), headers=headers)
+        try:
+            data = resp.json()
+            if resp.status_code != 200:
+                desc = data.get("error_description") or data.get("error") or resp.text
+                return {"error": "github_error", "error_description": f"GitHub API 에러 ({resp.status_code}): {desc}"}
+            return data
+        except Exception:
+            return {
+                "error": "invalid_client",
+                "error_description": f"GitHub 서버 응답 오류 ({resp.status_code}): {resp.text[:200]}",
+            }
+
+
+def poll_github_device_token(client_id: str, device_code: str) -> dict:
+    """GitHub Device Flow 폴링. Device Flow는 client_secret 불필요. JSON 방식 사용."""
+    url = "https://github.com/login/oauth/access_token"
+    payload = {
+        "client_id": client_id,
         "device_code": device_code,
         "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
     }
     headers = {
         "Accept": "application/json",
-        "User-Agent": "Navigator-App/2.0"
+        "User-Agent": "Navigator-App/2.0",
     }
-    
     with httpx.Client(follow_redirects=True) as client:
         resp = client.post(url, json=payload, headers=headers)
-        return resp.json()
+        try:
+            return resp.json()
+        except Exception:
+            # GitHub가 JSON이 아닌 응답을 보낸 경우 (form-encoded 등)
+            return {"error": "parse_error", "error_description": f"응답 파싱 실패 ({resp.status_code}): {resp.text[:200]}"}
 
 
 def get_github_user_info(access_token: str) -> dict:
-    """GitHub OAuth 토큰으로 사용자 정보 조회 (githubkit 사용)."""
-    with GitHub(access_token) as gh:
-        user = gh.rest.users.get_authenticated().parsed_data
-        
-        email = getattr(user, "email", None)
+    """GitHub OAuth 토큰으로 사용자 정보 조회 (순수 httpx, 동기 이벤트 루프 차단 없음)."""
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "Navigator-App/2.0",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    with httpx.Client(timeout=15.0) as client:
+        resp = client.get("https://api.github.com/user", headers=headers)
+        resp.raise_for_status()
+        user_data = resp.json()
+
+        email = user_data.get("email")
         if not email:
             try:
-                emails = gh.rest.users.list_emails_for_authenticated_user().parsed_data
-                primary = next((e for e in emails if e.primary), None)
+                emails_resp = client.get("https://api.github.com/user/emails", headers=headers)
+                emails_resp.raise_for_status()
+                emails = emails_resp.json()
+                primary = next((e["email"] for e in emails if e.get("primary")), None)
                 if primary:
-                    email = primary.email
+                    email = primary
             except Exception:
                 pass
-                
+
+        login = user_data["login"]
         return {
-            "id": str(user.id),
-            "login": user.login,
-            "name": getattr(user, "name", user.login) or user.login,
-            "email": email or f"{user.login}@github-noreply.com",
-            "avatar_url": getattr(user, "avatar_url", ""),
+            "id": str(user_data["id"]),
+            "login": login,
+            "name": user_data.get("name") or login,
+            "email": email or f"{login}@users.noreply.github.com",
+            "avatar_url": user_data.get("avatar_url", ""),
         }
 
 

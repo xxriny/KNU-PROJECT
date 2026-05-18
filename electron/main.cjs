@@ -15,17 +15,52 @@
  * - pythonProcess.stdout/stderr에 'error' 이벤트 핸들러 추가
  */
 
-const { app, BrowserWindow, ipcMain, Menu, dialog, nativeTheme } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, dialog, nativeTheme, shell } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const net = require("net");
 const http = require("http");
+
+// ── GitHub OAuth 커스텀 프로토콜 ─────────────────────────────
+// Windows에서 navigator:// 콜백을 받으려면 single-instance lock이 필요
+const PROTOCOL = "navigator";
+
+// 개발 모드에서는 Electron 실행 파일 경로를 명시해야 setAsDefaultProtocolClient가 동작
+if (process.defaultApp && process.argv.length >= 2) {
+  app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
+} else {
+  app.setAsDefaultProtocolClient(PROTOCOL);
+}
+
+// Windows: 두 번째 인스턴스가 실행되면 콜백 URL이 commandLine에 담겨 옴
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+  process.exit(0);
+}
 
 // ── 상태 ────────────────────────────────
 let mainWindow = null;
 let pythonProcess = null;
 let backendPort = null;
 let isQuitting = false;  // 앱 종료 중 플래그
+
+// ── GitHub OAuth 콜백 처리 ───────────────────────────────────
+function handleProtocolCallback(url) {
+  if (!url || !url.startsWith(`${PROTOCOL}://`)) return;
+  try {
+    const parsed = new URL(url);
+    if (parsed.pathname !== "//auth/callback" && parsed.host !== "auth") return;
+    const code = parsed.searchParams.get("code");
+    const state = parsed.searchParams.get("state");
+    if (code && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("github-auth-callback", { code, state });
+      mainWindow.focus();
+    }
+  } catch (e) {
+    safeError("[Electron] Protocol URL parse error:", e.message);
+  }
+}
 
 // ── 개발/프로덕션 경로 ──────────────────
 const isDev = !app.isPackaged;
@@ -282,6 +317,22 @@ function createWindow() {
   Menu.setApplicationMenu(null);
 }
 
+// ─── second-instance: Windows에서 navigator:// 콜백 수신 ─────
+app.on("second-instance", (event, commandLine) => {
+  const url = commandLine.find((arg) => arg.startsWith(`${PROTOCOL}://`));
+  if (url) handleProtocolCallback(url);
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
+// ─── open-url: macOS / Linux ─────────────────────────────────
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  handleProtocolCallback(url);
+});
+
 // ═══════════════════════════════════════════
 //  IPC Handlers
 // ═══════════════════════════════════════════
@@ -330,6 +381,18 @@ ipcMain.handle("get-backend-status", () => {
     port: backendPort,
     running: pythonProcess !== null,
   };
+});
+
+// GitHub OAuth: 시스템 브라우저로 GitHub 인증 URL 열기
+ipcMain.handle("github-oauth-open", async (event, url) => {
+  await shell.openExternal(url);
+});
+
+// 로그인 완료 후 렌더러 새로고침
+ipcMain.handle("reload-window", () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.reload();
+  }
 });
 
 // ═══════════════════════════════════════════

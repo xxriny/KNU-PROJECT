@@ -118,6 +118,28 @@ export const createAuthSlice = (set, get) => ({
     get().clearAuth();
   },
 
+  /** GitHub OAuth Web Flow: 인증 URL + session_id 가져오기 */
+  getGithubOAuthUrl: async () => {
+    const { backendPort } = get();
+    const res = await fetch(`http://127.0.0.1:${backendPort}/auth/github/oauth-url`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "GitHub OAuth URL 조회 실패");
+    return { url: data.url, sessionId: data.session_id };
+  },
+
+  /** GitHub OAuth Web Flow: 폴링으로 결과 확인 */
+  pollGithubOAuthResult: async (sessionId) => {
+    const { backendPort } = get();
+    const res = await fetch(`http://127.0.0.1:${backendPort}/auth/github/callback-poll/${sessionId}`);
+    if (!res.ok) return { status: "error", error: "세션 만료" };
+    const data = await res.json();
+    if (data.status === "done") {
+      get().setAuth(data.access_token, data.user);
+      set({ hasUsers: true });
+    }
+    return data;
+  },
+
   /** GitHub Device Flow 시작 */
   startGithubDeviceFlow: async () => {
     const { backendPort } = get();
@@ -137,9 +159,14 @@ export const createAuthSlice = (set, get) => ({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ device_code }),
     });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      return { status: "error", error: errBody.detail || `서버 오류 (${res.status})` };
+    }
     const data = await res.json();
     if (data.status === "ok") {
       get().setAuth(data.access_token, data.user);
+      set({ hasUsers: true });
     }
     return data;
   },
