@@ -97,6 +97,16 @@ export default function MemoManager() {
   const selectAll = () => setSelectedIds(new Set(filteredMemos.map((m) => m.id)));
   const clearSelection = () => setSelectedIds(new Set());
 
+  const deleteAllFiltered = () => {
+    if (filteredMemos.length === 0) return;
+    const ok = window.confirm(
+      `현재 보이는 메모 ${filteredMemos.length}건을 모두 삭제할까요? 되돌릴 수 없습니다.`
+    );
+    if (!ok) return;
+    filteredMemos.forEach((m) => removeComment(m.id));
+    setSelectedIds(new Set());
+  };
+
   const canTriggerUpdate =
     viewMode === "active" && selectedIds.size > 0 && !isRunning && canEdit;
 
@@ -247,6 +257,19 @@ export default function MemoManager() {
               className={`px-3 py-2 rounded-xl text-xs font-medium transition-colors disabled:opacity-40 ${isDarkMode ? "bg-white/5 hover:bg-white/10" : "bg-slate-50 hover:bg-slate-100 border border-slate-200"}`}
             >
               선택 해제
+            </button>
+            <button
+              onClick={deleteAllFiltered}
+              disabled={!canEdit}
+              title="현재 목록에 보이는 메모를 모두 삭제"
+              className={`px-3 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors disabled:opacity-40 ${
+                isDarkMode
+                  ? "bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/30"
+                  : "bg-red-50 hover:bg-red-100 text-red-700 border border-red-200"
+              }`}
+            >
+              <Trash2 size={12} />
+              전체 삭제
             </button>
           </div>
         )}

@@ -48,6 +48,7 @@ export default function RTMTab() {
                 }`}
               >
                 <td className={`py-2 px-2 font-mono text-[13px] font-bold whitespace-nowrap ${isDarkMode ? "text-blue-400" : "text-blue-700"}`}>
+                  <ChangeStatusBadge status={req.change_status} isDarkMode={isDarkMode} />
                   {fid}
                   {label && (
                     <span className={`ml-1 font-sans font-normal ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
@@ -100,6 +101,23 @@ export default function RTMTab() {
         </tbody>
       </table>
     </div>
+  );
+}
+
+function ChangeStatusBadge({ status, isDarkMode }) {
+  const normalized = (status || "").trim();
+  if (normalized !== "신규" && normalized !== "수정") return null;
+  const styles = normalized === "신규"
+    ? (isDarkMode
+        ? "bg-emerald-600/20 text-emerald-300 border-emerald-500/40"
+        : "bg-emerald-50 text-emerald-700 border-emerald-200")
+    : (isDarkMode
+        ? "bg-amber-600/20 text-amber-300 border-amber-500/40"
+        : "bg-amber-50 text-amber-700 border-amber-200");
+  return (
+    <span className={`mr-1.5 inline-block px-1.5 py-0.5 rounded text-[10px] font-bold border align-middle ${styles}`}>
+      {normalized}
+    </span>
   );
 }
 

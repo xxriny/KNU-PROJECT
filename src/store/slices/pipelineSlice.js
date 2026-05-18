@@ -177,14 +177,26 @@ export const createPipelineSlice = (set, get) => ({
       lastOutputTab: "progress",
     });
     // 이전 분석 결과를 JSON으로 직렬화하여 SA 파이프라인이 기존 설계를 인식하도록 전달
+    const prevRtm = get().requirements_rtm || [];
     const prevDesign = {
-      requirements_rtm: get().requirements_rtm || [],
+      requirements_rtm: prevRtm,
       components: get().components || [],
       apis: get().apis || [],
       tables: get().tables || [],
       tech_stacks: get().tech_stacks || [],
     };
     const prevContext = `[이전 분석 결과 — 반드시 아래 설계를 기반으로 업데이트하세요]\n${JSON.stringify(prevDesign, null, 2)}`;
+
+    // requirement_analyzer가 ID·위치를 보존할 수 있도록 RTM row를 features 형태로 구조화 전달
+    const previousFeatures = prevRtm.map((r) => ({
+      id: r.feature_id || r.id || r.REQ_ID || "",
+      label: r.label || "",
+      desc: r.description || r.desc || "",
+      cat: r.category || r.cat || "",
+      pri: r.priority || r.pri || "",
+      deps: r.dependencies || r.deps || [],
+      tc: r.test_criteria || r.tc || "",
+    })).filter((f) => f.id);
 
     get().sendWsMessage("analyze", {
       idea: memoText,
@@ -194,6 +206,7 @@ export const createPipelineSlice = (set, get) => ({
       action_type: "UPDATE",
       source_dir: projectFolder || "",
       auth_token: get().authToken,
+      previous_features: previousFeatures,
     });
   },
 

@@ -193,6 +193,8 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
     action_type = normalize_action_type(payload.get("action_type", "CREATE"))
     source_dir = payload.get("source_dir", "")
     auth_token = payload.get("auth_token", "")
+    # UPDATE 모드에서 이전 RTM/features를 그대로 받아 위치·ID 보존에 사용
+    previous_features = payload.get("previous_features") or []
     
     get_logger().info("run_analysis_payload", action_type=action_type, source_dir=source_dir, idea=idea[:50])
 
@@ -272,6 +274,7 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
         "source_dir": source_dir,
         "action_type": action_type,
         "run_id": run_id,
+        "previous_features": previous_features,
     }
 
     # 1. PM Pipeline (Stage 1) - 요구사항 원자화 및 기획

@@ -35,7 +35,8 @@ def _assemble_pm_bundle(features: List[Dict], stack_mapping: List[Dict], run_id:
                  "priority": f.get("pri", f.get("priority", "")),
                  "dependencies": f.get("deps", f.get("dependencies", [])),
                  "test_criteria": f.get("tc", f.get("test_criteria", "")),
-                 "label": f.get("label", "")}
+                 "label": f.get("label", ""),
+                 "change_status": f.get("change_status", "")}
                 for f in features
             ],
             "tech_stacks": [
