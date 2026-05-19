@@ -1,15 +1,11 @@
 """
-변경 영향 분석기: RAG 1단계 + LLM 2단계.
-
-Step 1: ChromaDB에서 관련 SA 아티팩트 검색
-Step 2: LLM으로 영향 범위 추론
+변경 영향 분석기: SA 데이터 기반 LLM 영향 범위 추론.
 """
 from __future__ import annotations
 
 import json
 import os
 import re
-from typing import Any
 
 from pipeline.domain.agile.schemas import ImpactedComponent, ImpactResult
 
@@ -18,42 +14,6 @@ def _get_llm(api_key: str, model: str):
     from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore
     key = api_key or os.environ.get("GEMINI_API_KEY", "")
     return ChatGoogleGenerativeAI(model=model, google_api_key=key, temperature=0)
-
-
-def _rag_retrieve(change_description: str, session_id: str | None) -> str:
-    """ChromaDB pm_sa_vector_db에서 변경 설명과 관련된 SA 아티팩트 검색."""
-    try:
-        import chromadb  # type: ignore
-        from chromadb.config import Settings  # type: ignore
-
-        storage_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.dirname(os.path.abspath(__file__))
-            )))),
-            "storage",
-        )
-        client = chromadb.PersistentClient(
-            path=os.path.join(storage_dir, "pm_sa_vector_db"),
-            settings=Settings(anonymized_telemetry=False),
-        )
-        try:
-            collection = client.get_collection("pm_sa_knowledge")
-        except Exception:
-            return ""
-
-        where: dict[str, Any] = {}
-        if session_id:
-            where["session_id"] = session_id
-
-        results = collection.query(
-            query_texts=[change_description],
-            n_results=5,
-            where=where if where else None,
-        )
-        docs = results.get("documents", [[]])[0]
-        return "\n\n".join(docs[:3])
-    except Exception:
-        return ""
 
 
 def _parse_impact_json(text: str) -> dict:
@@ -75,19 +35,7 @@ def run_impact_analyzer(
     session_id: str | None = None,
     use_llm: bool = True,
 ) -> ImpactResult:
-    """
-    변경 영향 분석.
-
-    Args:
-        change_description: 변경 사항 설명 (자연어)
-        sa_data: SA 분석 결과 (components, apis, tables)
-        api_key: Gemini API 키
-        model: 사용할 모델
-        session_id: RAG 필터링용 세션 ID
-    """
-    # Step 1: RAG 컨텍스트 수집
-    rag_context = _rag_retrieve(change_description, session_id)
-
+    """SA 데이터와 LLM을 사용한 변경 영향 분석."""
     # SA 데이터 요약
     sa_summary = json.dumps({
         "components": [
@@ -102,7 +50,6 @@ def run_impact_analyzer(
                    for t in sa_data.get("tables", [])[:10]],
     }, ensure_ascii=False)
 
-    rag_section = f"## 관련 RAG 컨텍스트\n{rag_context}" if rag_context else ""
     prompt = f"""당신은 소프트웨어 아키텍처 변경 영향 분석 전문가입니다.
 
 ## 변경 사항
@@ -110,8 +57,6 @@ def run_impact_analyzer(
 
 ## 현재 SA 구조 요약
 {sa_summary}
-
-{rag_section}
 
 위 변경 사항이 시스템에 미치는 영향을 분석하여 다음 JSON 형식으로 반환하세요:
 

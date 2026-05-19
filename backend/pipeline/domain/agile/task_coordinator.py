@@ -38,9 +38,11 @@ class AgileTask(_Base):
     task_type = Column(String(64), nullable=False)
     title = Column(String(255), nullable=False)
     description = Column(Text, default="")
-    status = Column(String(32), default="pending")  # pending | approved | rejected | completed | failed
+    status = Column(String(32), default="unassigned")  # unassigned | pending_approval | in_progress | pr_pending | completed | rejected
     area = Column(String(32), default="")           # backend | frontend | fullstack | devops
     assignee = Column(String(255), default="")
+    feature_ref = Column(String(64), default="")   # RTM FEAT_ID
+    effort = Column(String(4), default="")          # S|M|L|XL
     payload = Column(Text, default="{}")  # JSON
     result = Column(Text, default="")
     created_by = Column(String(36), default="")
@@ -53,7 +55,7 @@ class AgileTask(_Base):
 def init_tasks_db():
     _Base.metadata.create_all(bind=_engine)
     with _engine.connect() as conn:
-        for col_def in ["area TEXT DEFAULT ''", "assignee TEXT DEFAULT ''", "team_id TEXT DEFAULT ''"]:
+        for col_def in ["area TEXT DEFAULT ''", "assignee TEXT DEFAULT ''", "team_id TEXT DEFAULT ''", "feature_ref TEXT DEFAULT ''", "effort TEXT DEFAULT ''"]:
             try:
                 conn.execute(text(f"ALTER TABLE agile_tasks ADD COLUMN {col_def}"))
                 conn.commit()
@@ -72,6 +74,9 @@ def create_task(
     area: str = "",
     assignee: str = "",
     team_id: str = "",
+    feature_ref: str = "",
+    effort: str = "",
+    status: str = "unassigned",
 ) -> dict:
     import json
     init_tasks_db()
@@ -81,8 +86,11 @@ def create_task(
             task_type=task_type,
             title=title,
             description=description,
+            status=status,
             area=area,
             assignee=assignee,
+            feature_ref=feature_ref,
+            effort=effort,
             payload=json.dumps(payload or {}),
             created_by=created_by,
             team_id=team_id,
@@ -153,6 +161,8 @@ def _task_to_dict(task: AgileTask) -> dict:
         "status": task.status,
         "area": task.area or "",
         "assignee": task.assignee or "",
+        "feature_ref": task.feature_ref or "",
+        "effort": task.effort or "",
         "payload": json.loads(task.payload or "{}"),
         "result": task.result,
         "created_by": task.created_by,
@@ -160,6 +170,33 @@ def _task_to_dict(task: AgileTask) -> dict:
         "created_at": task.created_at.isoformat() if task.created_at else "",
         "updated_at": task.updated_at.isoformat() if task.updated_at else "",
     }
+
+
+def get_existing_feature_refs(team_id: str) -> set[str]:
+    """team_id에 속한 태스크의 feature_ref 집합 반환 (중복 생성 방지용)."""
+    init_tasks_db()
+    with _Session() as session:
+        rows = session.query(AgileTask.feature_ref).filter(
+            AgileTask.team_id == team_id,
+            AgileTask.feature_ref != "",
+        ).all()
+        return {r[0] for r in rows}
+
+
+def assign_task(task_id: str, assignee: str, reviewed_by: str = "") -> dict | None:
+    """unassigned 태스크에 담당자를 지정하고 pending_approval로 전환."""
+    init_tasks_db()
+    with _Session() as session:
+        task = session.query(AgileTask).filter(AgileTask.id == task_id).first()
+        if not task:
+            return None
+        task.assignee = assignee
+        task.status = "pending_approval"
+        task.updated_at = _now()
+        if reviewed_by:
+            task.reviewed_by = reviewed_by
+        session.commit()
+        return _task_to_dict(task)
 
 
 # ── 자동 실행 ─────────────────────────────────────────────────

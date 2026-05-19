@@ -6,7 +6,6 @@ component_mapping은 GitHub Commit Analyzer의 파일→컴포넌트 매핑 기�
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
 
 from pipeline.core.node_base import pipeline_node, NodeContext
 from pipeline.core.utils import call_structured
@@ -15,7 +14,7 @@ from observability.logger import get_logger
 
 logger = get_logger()
 
-SYSTEM_PROMPT = """# Role: Software Architecture Directory Designer
+CREATE_SYSTEM_PROMPT = """# Role: Software Architecture Directory Designer
 
 ## Goal
 Design an optimal project directory structure based on:
@@ -38,19 +37,28 @@ Every directory and file must map to a specific component or architectural conce
 - files (fl): List of all necessary file paths (e.g., "src/components/auth/Login.jsx")
 - component_mapping (cm): {component_name: [file_path_list]} for GitHub Commit Analyzer
 - conventions (cv): List of naming/placement conventions used
+"""
 
-## Example component_mapping format
-{
-  "AuthService": [
-    "backend/app/api/v1/auth.py",
-    "backend/app/services/auth_service.py",
-    "backend/tests/unit/test_auth_service.py"
-  ]
-}
+UPDATE_SYSTEM_PROMPT = """# Role: Software Architecture Directory Designer (Update Mode)
+
+## Goal
+You are given the PREVIOUS directory structure in <previous_project_structure>.
+Preserve all existing directories, files, and component_mapping. Only add new paths for new RTM features.
+
+## Rules
+1. **PRESERVE** every existing directory and file path exactly as-is
+2. **ADD** new paths only for RTM features marked as 신규(new)
+3. **MODIFY** existing paths only if a requirement explicitly renames or restructures them
+4. component_mapping must include ALL previous entries plus new ones for new components
+
+## Output Fields
+- thinking (th): List which paths were preserved / added (Korean)
+- directories, files, component_mapping, conventions: same schema as CREATE mode
 """
 
 
-def _build_user_msg(sa_bundle: dict, pm_bundle: dict, rtm: list, action_type: str) -> str:
+def _build_user_msg(sa_bundle: dict, pm_bundle: dict, rtm: list, action_type: str,
+                    previous_project_structure: dict = None) -> str:
     data = sa_bundle.get("data", {})
     components = data.get("components", [])
 
@@ -61,7 +69,13 @@ def _build_user_msg(sa_bundle: dict, pm_bundle: dict, rtm: list, action_type: st
     stacks_text = json.dumps(tech_stacks, ensure_ascii=False, indent=2)[:1500]
     rtm_text = json.dumps(rtm[:15], ensure_ascii=False, indent=2)[:1500]
 
+    prev_section = ""
+    if action_type == "UPDATE" and previous_project_structure:
+        prev_json = json.dumps(previous_project_structure, ensure_ascii=False)[:3000]
+        prev_section = f"<previous_project_structure>\n{prev_json}\n</previous_project_structure>\n\n"
+
     return (
+        f"{prev_section}"
         f"## Action Type: {action_type}\n\n"
         f"## Tech Stacks ({len(tech_stacks)}개)\n```json\n{stacks_text}\n```\n\n"
         f"## Components ({len(components)}개)\n```json\n{components_text}\n```\n\n"
@@ -86,12 +100,15 @@ def sa_project_structure_node(ctx: NodeContext) -> dict:
         logger.warning("[sa_project_structure] sa_arch_bundle이 비어 있어 스킵합니다.")
         return {"current_step": "sa_project_structure_done"}
 
-    user_msg = _build_user_msg(sa_bundle, pm_bundle, rtm, action_type)
+    previous_project_structure = sget("previous_project_structure", None)
+    user_msg = _build_user_msg(sa_bundle, pm_bundle, rtm, action_type, previous_project_structure)
+
+    system_prompt = UPDATE_SYSTEM_PROMPT if action_type == "UPDATE" else CREATE_SYSTEM_PROMPT
 
     res = call_structured(
         api_key=ctx.api_key, model=ctx.model,
         schema=SAProjectStructureOutput,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         user_msg=user_msg,
         compress_prompt=False,
         temperature=0.0,

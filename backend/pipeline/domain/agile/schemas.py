@@ -1,9 +1,9 @@
-"""Agile Layer Pydantic schemas — verifier & impact analyzer."""
+"""Agile Layer Pydantic schemas — verifier, impact analyzer, task generator & distributor."""
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
-from pydantic import BaseModel, Field
+from typing import Optional, List, Dict
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class Severity(str, Enum):
@@ -44,3 +44,40 @@ class ImpactResult(BaseModel):
     risk_level: str = "medium"
     migration_notes: str = ""
     summary: str = ""
+
+
+# ── Task Generator ────────────────────────────────────────────
+
+class GeneratedTask(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    task_type: str = Field(alias="tt", description="feature|bugfix|test|infra|doc_sync")
+    title: str = Field(alias="tl")
+    description: str = Field(alias="ds")
+    area: str = Field(alias="ar", description="backend|frontend|devops|fullstack")
+    priority: str = Field(alias="pr", description="high|medium|low")
+    effort: str = Field(alias="ef", description="S|M|L|XL")
+    feature_ref: str = Field(alias="fr", default="", description="RTM FEAT_ID")
+
+
+class TaskGeneratorOutput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    thinking: str = Field(alias="th", default="")
+    tasks: List[GeneratedTask] = Field(alias="tk")
+    summary: str = Field(alias="sm", default="")
+
+
+# ── Task Distributor ──────────────────────────────────────────
+
+class TaskAssignment(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    task_id: str = Field(alias="ti")
+    assignee_name: str = Field(alias="an")
+    reason: str = Field(alias="rs", default="")
+
+
+class TaskDistributorOutput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    thinking: str = Field(alias="th", default="")
+    assignments: List[TaskAssignment] = Field(alias="as_")
+    workload_summary: Dict[str, int] = Field(alias="ws", default_factory=dict)
+    balancing_note: str = Field(alias="bn", default="")

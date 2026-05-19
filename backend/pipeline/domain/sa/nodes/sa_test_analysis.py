@@ -6,7 +6,6 @@ SA 설계 산출물(컴포넌트/API/DB)을 입력으로 받아 SE 관점의 테
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
 
 from pipeline.core.node_base import pipeline_node, NodeContext
 from pipeline.core.utils import call_structured
@@ -15,7 +14,7 @@ from observability.logger import get_logger
 
 logger = get_logger()
 
-SYSTEM_PROMPT = """# Role: Software Engineering Test Strategist
+CREATE_SYSTEM_PROMPT = """# Role: Software Engineering Test Strategist
 
 ## Goal
 Analyze the given software architecture (components, APIs, DB tables) and produce a comprehensive
@@ -57,8 +56,25 @@ Convert each RTM FEAT_ID into Given-When-Then format. Include at least one edge 
 - automation_priority (ap): Ordered list of what to automate first and why
 """
 
+UPDATE_SYSTEM_PROMPT = """# Role: Software Engineering Test Strategist (Update Mode)
 
-def _build_user_msg(sa_bundle: dict, rtm: list, action_type: str) -> str:
+## Goal
+You are given the PREVIOUS test strategy in <previous_test_strategy>.
+Your task is incremental update — preserve existing strategy, only modify/add for changed RTM features.
+
+## Rules
+1. **PRESERVE** all existing risk_zones, unit_specs, integration_specs, system_specs, acceptance_specs that are unaffected
+2. **MODIFY** only the entries corresponding to RTM features marked as 수정(modified)
+3. **ADD** new entries only for RTM features marked as 신규(new)
+4. **Do NOT** change test_philosophy or automation_priority unless explicitly required
+
+## Output Rules
+- thinking (th): List which test entries were preserved / modified / added (Korean)
+- All other fields: same schema as CREATE mode
+"""
+
+
+def _build_user_msg(sa_bundle: dict, rtm: list, action_type: str, previous_test_cases: dict = None) -> str:
     data = sa_bundle.get("data", {})
     components = data.get("components", [])
     apis = data.get("apis", [])
@@ -69,7 +85,13 @@ def _build_user_msg(sa_bundle: dict, rtm: list, action_type: str) -> str:
     tables_text = json.dumps(tables, ensure_ascii=False, indent=2)[:1500]
     rtm_text = json.dumps(rtm[:20], ensure_ascii=False, indent=2)[:2000]
 
+    prev_section = ""
+    if action_type == "UPDATE" and previous_test_cases:
+        prev_json = json.dumps(previous_test_cases, ensure_ascii=False)[:3000]
+        prev_section = f"<previous_test_strategy>\n{prev_json}\n</previous_test_strategy>\n\n"
+
     return (
+        f"{prev_section}"
         f"## Action Type: {action_type}\n\n"
         f"## Components ({len(components)}개)\n```json\n{components_text}\n```\n\n"
         f"## APIs ({len(apis)}개)\n```json\n{apis_text}\n```\n\n"
@@ -93,12 +115,15 @@ def sa_test_analysis_node(ctx: NodeContext) -> dict:
         logger.warning("[sa_test_analysis] sa_arch_bundle이 비어 있어 스킵합니다.")
         return {"current_step": "sa_test_analysis_done"}
 
-    user_msg = _build_user_msg(sa_bundle, rtm, action_type)
+    previous_test_cases = sget("previous_test_cases", None)
+    user_msg = _build_user_msg(sa_bundle, rtm, action_type, previous_test_cases)
+
+    system_prompt = UPDATE_SYSTEM_PROMPT if action_type == "UPDATE" else CREATE_SYSTEM_PROMPT
 
     res = call_structured(
         api_key=ctx.api_key, model=ctx.model,
         schema=SATestAnalysisOutput,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         user_msg=user_msg,
         compress_prompt=False,
         temperature=0.0,

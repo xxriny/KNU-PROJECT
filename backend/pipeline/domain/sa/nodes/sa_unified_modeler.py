@@ -219,7 +219,7 @@ def sa_unified_modeler_node(ctx: NodeContext) -> dict:
     run_id = sget("run_id", sget("session_id", "sa_session"))
     action_type = sget("action_type", "CREATE")
 
-    inventory = {}
+    inventory = sget("code_inventory", {})  # REVERSE_ENGINEER 모드만 데이터 있음
     snippets_text = ""
 
     # UPDATE 모드: merged_project에서 이전 API/테이블 읽기

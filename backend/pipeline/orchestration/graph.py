@@ -175,7 +175,6 @@ def get_sa_routing_map() -> dict:
 
 def get_analysis_pipeline(action_type: str = "CREATE"):
     """Full PM-SA pipeline."""
-    from pipeline.domain.sa.nodes.forensic_profiler import forensic_profiler_node
     from pipeline.domain.pm.nodes.requirement_analyzer import requirement_analyzer_node
     from pipeline.domain.pm.nodes.stack_planner import stack_planner_node
     from pipeline.domain.pm.nodes.stack_crawling import stack_crawling_node
@@ -187,7 +186,6 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     from pipeline.domain.sa.nodes.sa_project_structure import sa_project_structure_node
 
     workflow = StateGraph(PipelineState)
-    workflow.add_node("forensic_profiler", forensic_profiler_node)
     workflow.add_node("requirement_analyzer", requirement_analyzer_node)
     workflow.add_node("stack_planner", stack_planner_node)
     workflow.add_node("stack_crawling", stack_crawling_node)
@@ -199,8 +197,7 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     workflow.add_node("sa_project_structure", sa_project_structure_node)
 
     # Edges
-    workflow.add_edge(START, "forensic_profiler")
-    workflow.add_edge("forensic_profiler", "requirement_analyzer")
+    workflow.add_edge(START, "requirement_analyzer")
     workflow.add_edge("requirement_analyzer", "stack_planner")
 
     # Stack Planner 조건부 루프

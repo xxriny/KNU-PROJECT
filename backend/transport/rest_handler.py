@@ -248,13 +248,16 @@ async def analyze(req: AnalysisRequest):
             return {"status": "error", "error": validation_error}
 
         context = req.context
+        extra_state: dict = {}
         if action_type == "REVERSE_ENGINEER" and not (context or "").strip():
-            context = build_reverse_context(req.source_dir)
+            context, code_inventory = build_reverse_context(req.source_dir)
             if not context:
                 return {
                     "status": "error",
                     "error": "선택한 폴더에서 분석 가능한 함수/메서드를 찾지 못했습니다.",
                 }
+            if code_inventory:
+                extra_state["code_inventory"] = code_inventory
 
         return _to_response(execute_pipeline(
             get_analysis_pipeline(action_type),
@@ -266,6 +269,7 @@ async def analyze(req: AnalysisRequest):
                 "source_dir": req.source_dir,
                 "action_type": action_type,
                 "run_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
+                **extra_state,
             },
             analysis_pipeline_type(action_type),
         ))
@@ -301,6 +305,26 @@ async def delete_session(run_id: str, req: Optional[DeleteSessionRequest] = None
     if not re.match(r"^\d{8}_\d{6}$", run_id):
         return {"status": "error", "error": "Invalid run_id format. Expected YYYYMMDD_HHMMSS"}
     return {"status": "ok", "message": f"Session {run_id} deleted"}
+
+
+@rest_router.get("/api/session/{run_id}/restore")
+async def restore_session(run_id: str):
+    """로컬 DB(AnalysisResult)에서 이전 분석 결과를 복원."""
+    import json
+    from auth.database import SessionLocal
+    from auth.models import AnalysisResult
+    db = SessionLocal()
+    try:
+        record = db.query(AnalysisResult).filter(AnalysisResult.run_id == run_id).first()
+        if not record:
+            return {"status": "error", "error": f"No saved result for run_id '{run_id}'"}
+        data = json.loads(record.shaped_result)
+        return {"status": "ok", "data": data}
+    except Exception as e:
+        get_logger().exception(f"restore_session failed for {run_id}")
+        return {"status": "error", "error": str(e)}
+    finally:
+        db.close()
 
 
 @rest_router.get("/api/memos")
@@ -687,7 +711,7 @@ async def list_tasks_endpoint(status: Optional[str] = None, team_id: Optional[st
 @rest_router.patch("/api/tasks/{task_id}")
 async def update_task_endpoint(task_id: str, req: TaskUpdateRequest):
     """태스크 상태 업데이트 (승인/거절/완료)."""
-    allowed_statuses = {"pending", "approved", "rejected", "completed", "failed"}
+    allowed_statuses = {"unassigned", "pending_approval", "in_progress", "pr_pending", "completed", "rejected"}
     if req.status not in allowed_statuses:
         return {"status": "error", "error": f"Invalid status. Allowed: {allowed_statuses}"}
     try:
@@ -696,13 +720,6 @@ async def update_task_endpoint(task_id: str, req: TaskUpdateRequest):
         task = update_task_status(task_id, req.status, req.reviewed_by, req.result)
         if not task:
             return {"status": "error", "error": "Task not found"}
-
-        # 승인 시 자동 실행
-        if req.status == "approved":
-            exec_result = execute_approved_task(task)
-            update_task_status(task_id, "completed", result=exec_result)
-            task["status"] = "completed"
-            task["result"] = exec_result
 
         return {"status": "ok", "data": task}
     except Exception as e:
@@ -722,6 +739,76 @@ async def delete_task_endpoint(task_id: str):
         return {"status": "ok"}
     except Exception as e:
         get_logger().exception(f"delete_task endpoint failed for {task_id}")
+        return {"status": "error", "error": str(e)}
+
+
+class GenerateTasksRequest(BaseModel):
+    run_id: str
+    team_id: str
+    api_key: str = ""
+    model: str = ""
+    created_by: str = ""
+
+
+class DistributeTasksRequest(BaseModel):
+    team_id: str
+    api_key: str = ""
+    model: str = ""
+    distributed_by: str = ""
+
+
+@rest_router.post("/api/agile/generate-tasks")
+async def generate_tasks_endpoint(req: GenerateTasksRequest):
+    """SA/PM 산출물 → unassigned 태스크 자동 생성 (파이프라인 완료 후 호출)."""
+    try:
+        from auth.database import SessionLocal
+        from auth.models import AnalysisResult
+        from pipeline.domain.agile.nodes.task_generator import run_task_generator
+        from version import DEFAULT_MODEL
+        import json
+
+        db = SessionLocal()
+        try:
+            record = db.query(AnalysisResult).filter(AnalysisResult.run_id == req.run_id).first()
+            if not record:
+                return {"status": "error", "error": f"run_id '{req.run_id}' 결과 없음"}
+            shaped = json.loads(record.shaped_result)
+        finally:
+            db.close()
+
+        sa_bundle = shaped.get("sa_arch_bundle") or {}
+        pm_bundle = shaped.get("pm_bundle") or {}
+
+        result = run_task_generator(
+            sa_bundle=sa_bundle,
+            pm_bundle=pm_bundle,
+            team_id=req.team_id,
+            api_key=req.api_key,
+            model=req.model or DEFAULT_MODEL,
+            created_by=req.created_by,
+        )
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        get_logger().exception("generate_tasks endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/agile/distribute-tasks")
+async def distribute_tasks_endpoint(req: DistributeTasksRequest):
+    """unassigned 태스크를 팀 멤버에게 배분 (PM이 '배분' 버튼 클릭 시 호출)."""
+    try:
+        from pipeline.domain.agile.nodes.task_distributor import run_task_distributor
+        from version import DEFAULT_MODEL
+
+        result = run_task_distributor(
+            team_id=req.team_id,
+            api_key=req.api_key,
+            model=req.model or DEFAULT_MODEL,
+            distributed_by=req.distributed_by,
+        )
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        get_logger().exception("distribute_tasks endpoint failed")
         return {"status": "error", "error": str(e)}
 
 

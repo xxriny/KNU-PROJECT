@@ -5,7 +5,6 @@ RAG Manager — 통합 지식 관리 및 적응형 검색 (Phase 2)
 
 from typing import List, Dict, Any, Optional
 from observability.logger import get_logger
-from pipeline.core.utils import call_structured, format_chroma_results
 
 logger = get_logger()
 

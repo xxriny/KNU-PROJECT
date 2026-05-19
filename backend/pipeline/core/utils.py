@@ -381,26 +381,6 @@ def make_sget(state: Any):
     def _sget(key: str, default: Any = None):
         return sget(state, key, default)
     return _sget
-def format_chroma_results(results: dict[str, Any]) -> list[dict[str, Any]]:
-    """ChromaDB 원시 결과를 표준 리스트 형식으로 변환."""
-    formatted = []
-    if not results or not results.get("ids") or not results["ids"]:
-        return formatted
-        
-    # results["ids"]는 [[]] 형태일 수도 있고 [] 형태일 수도 있음
-    ids_list = results["ids"][0] if isinstance(results["ids"][0], list) else results["ids"]
-    docs_list = results["documents"][0] if isinstance(results["documents"][0], list) else results["documents"]
-    metas_list = results["metadatas"][0] if isinstance(results["metadatas"][0], list) else results["metadatas"]
-    dists_list = results.get("distances", [[]])[0] if results.get("distances") and isinstance(results["distances"][0], list) else results.get("distances", [])
-
-    for i in range(len(ids_list)):
-        formatted.append({
-            "id": ids_list[i],
-            "content": docs_list[i],
-            "metadata": metas_list[i],
-            "distance": dists_list[i] if i < len(dists_list) else 0
-        })
-    return formatted
 
 
 # ── DB 및 저장소 유틸 ────────────────────────────
@@ -410,22 +390,11 @@ def get_backend_root() -> Path:
     return Path(__file__).parent.parent.parent
 
 
-def get_storage_path(sub_dir: str = "pm_sa_vector_db") -> str:
+def get_storage_path(sub_dir: str) -> str:
     """백엔드 storage 하위 경로를 안전하게 생성하고 반환."""
     path = get_backend_root() / "storage" / sub_dir
     path.mkdir(parents=True, exist_ok=True)
     return str(path)
-
-
-_DB_CLIENTS: dict[str, Any] = {}
-
-def get_vector_db_client(db_name: str = "pm_sa_vector_db") -> Any:
-    """ChromaDB 싱글톤 클라이언트 반환."""
-    import chromadb
-    if db_name not in _DB_CLIENTS:
-        path = get_storage_path(db_name)
-        _DB_CLIENTS[db_name] = chromadb.PersistentClient(path=path)
-    return _DB_CLIENTS[db_name]
 
 
 # ── 직렬화 유틸 ──────────────────────────────────

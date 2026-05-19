@@ -104,17 +104,29 @@ def _read_dependency_files(source_path: str) -> str:
     return "\n".join(lines)
 
 
-def build_reverse_context(source_dir: str) -> str:
-    """source_dir AST 스캔 + 의존성 파일 결과를 REVERSE 분석용 project_context로 변환."""
+def build_reverse_context(source_dir: str) -> tuple[str, dict]:
+    """source_dir AST 스캔 + 의존성 파일 → (project_context 문자열, code_inventory dict).
+
+    code_inventory: {file_path: [{name, summary}]} — SA 노드에서 직접 소비.
+    스캔을 한 번만 수행해서 context와 inventory를 동시에 생성한다.
+    """
     source_path = (source_dir or "").strip()
     if not source_path:
-        return ""
+        return "", {}
 
     dep_summary = _read_dependency_files(source_path)
 
     functions = extract_functions(source_path, max_functions=250)
     unique_files = len({fn.get("file", "") for fn in functions if fn.get("file")})
     summary = summarize_for_llm(functions, max_chars=6000) if functions else "(함수 없음)"
+
+    code_inventory: dict = {}
+    for fn in functions:
+        fp = fn.get("file", "")
+        if fp:
+            code_inventory.setdefault(fp, []).append(
+                {"name": fn.get("name", ""), "summary": fn.get("summary", "")}
+            )
 
     parts = [
         "아래는 로컬 프로젝트 정적 스캔 결과입니다. "
@@ -129,7 +141,42 @@ def build_reverse_context(source_dir: str) -> str:
     parts.append("\n[함수 요약]")
     parts.append(summary)
 
-    return "\n".join(parts)
+    return "\n".join(parts), code_inventory
+
+
+def _inject_previous_artifacts(state: dict, project_context: str) -> None:
+    """UPDATE 모드: project_context JSON에서 이전 artifact를 파싱하여 state에 주입."""
+    import json as _json
+    log = get_logger()
+    try:
+        start = project_context.find("{")
+        if start < 0:
+            log.warning("_inject_previous_artifacts: project_context에서 JSON을 찾지 못했습니다.")
+            return
+        prev = _json.loads(project_context[start:])
+
+        # stack_planner: global_stacks(gs) 원본 우선 → tech_stacks(feature별 매핑) 폴백
+        spo = prev.get("stack_planner_output") or {}
+        gs = spo.get("gs") or spo.get("global_stacks") or []
+        if not gs:
+            gs = prev.get("tech_stacks") or []
+        if gs:
+            state["previous_global_stacks"] = gs
+
+        # sa_test_analysis: 이전 테스트 전략
+        ta = prev.get("sa_test_analysis_output") or (
+            (prev.get("sa_arch_bundle") or {}).get("data", {}).get("test_strategy")
+        )
+        if ta:
+            state["previous_test_cases"] = ta
+
+        # sa_project_structure: 이전 디렉토리 구조
+        ps = prev.get("sa_project_structure") or prev.get("sa_project_structure_output")
+        if ps:
+            state["previous_project_structure"] = ps
+
+    except Exception as e:
+        log.warning(f"_inject_previous_artifacts 파싱 실패 (UPDATE 계속 진행): {e}")
 
 
 def analysis_pipeline_type(action_type: str) -> str:
@@ -245,22 +292,17 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
         await manager.send_json(ws, {"type": "error", "data": {"message": validation_error}})
         return
 
-    # UPDATE/REVERSE: source_dir에서 AST 스캔으로 프로젝트 컨텍스트 생성
-    if source_dir and action_type in ("UPDATE", "REVERSE_ENGINEER"):
-        if not (context or "").strip():
-            # context 없음: AST 스캔 결과를 context로 사용
-            context = build_reverse_context(source_dir)
-            if not context and action_type == "REVERSE_ENGINEER":
-                await manager.send_json(ws, {
-                    "type": "error",
-                    "data": {"message": "선택한 폴더에서 분석 가능한 함수/메서드를 찾지 못했습니다. 프로젝트 루트를 확인하세요."},
-                })
-                return
-        elif action_type == "UPDATE":
-            # context 있음(이전 설계 JSON): AST 스캔 결과를 추가로 병합하여 풍부한 컨텍스트 제공
-            ast_ctx = build_reverse_context(source_dir)
-            if ast_ctx:
-                context = context + "\n\n---\n\n" + ast_ctx
+    # REVERSE_ENGINEER: AST 스캔으로 project_context + code_inventory 동시 빌드 (단일 스캔)
+    # UPDATE: 코드 스캔 불필요 — 이전 설계 artifact(context)가 진실 소스
+    code_inventory: dict = {}
+    if action_type == "REVERSE_ENGINEER" and source_dir:
+        context, code_inventory = build_reverse_context(source_dir)
+        if not context:
+            await manager.send_json(ws, {
+                "type": "error",
+                "data": {"message": "선택한 폴더에서 분석 가능한 함수/메서드를 찾지 못했습니다. 프로젝트 루트를 확인하세요."},
+            })
+            return
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     log = get_logger(run_id)
@@ -276,6 +318,12 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
         "run_id": run_id,
         "previous_features": previous_features,
     }
+
+    if action_type == "REVERSE_ENGINEER" and code_inventory:
+        initial_state["code_inventory"] = code_inventory
+
+    if action_type == "UPDATE" and (context or "").strip():
+        _inject_previous_artifacts(initial_state, context)
 
     # 1. PM Pipeline (Stage 1) - 요구사항 원자화 및 기획
     pm_result = await _run_pipeline_base(

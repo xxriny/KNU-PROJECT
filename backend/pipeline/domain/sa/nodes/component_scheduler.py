@@ -129,7 +129,7 @@ def component_scheduler_node(ctx: NodeContext) -> dict:
     action_type = sget("action_type", "CREATE")
     run_id = sget("run_id", sget("session_id", "sa_session"))
 
-    inventory = {}
+    inventory = sget("code_inventory", {})  # REVERSE_ENGINEER 모드만 데이터 있음
     snippets_text = ""
 
     user_content = _build_user_message(merged_project, inventory, action_type, snippets_text)

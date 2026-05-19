@@ -112,12 +112,11 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
     current_loop = sget("loop_count", 0)
     features = sget("features", [])
     action_type = sget("action_type", "CREATE")
-    run_id = sget("run_id", sget("session_id", "stack_session"))
     
-    # 2. 소스 디렉토리에서 의존성 파일 직접 읽기 (ChromaDB 없이)
+    # 2. 의존성 파일 읽기 (REVERSE 전용 — 실제 코드에서 스택 복원)
     snippets_text = ""
     source_dir = sget("source_dir", "")
-    if source_dir and action_type != "CREATE":
+    if source_dir and action_type == "REVERSE_ENGINEER":
         import os
         dep_files = ["package.json", "requirements.txt", "pyproject.toml", "package-lock.json"]
         found_lines = ["<source_code_dependency_evidence>"]
@@ -134,15 +133,27 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
             found_lines.append("</source_code_dependency_evidence>")
             snippets_text = "\n".join(found_lines)
 
-    base_rag_context = "Guardian crawling results below."
+    # UPDATE 전용: 이전 세션의 전역 스택 목록 (버전 앵커링)
+    prev_stacks_section = ""
+    if action_type == "UPDATE":
+        prev_global_stacks = sget("previous_global_stacks", []) or []
+        if prev_global_stacks:
+            lines = ["<previous_global_stacks — 이미 결정된 스택. 버전 변경 금지, 신규 기능에만 추가 가능>"]
+            for s in prev_global_stacks:
+                if isinstance(s, dict):
+                    pkg = s.get("pkg") or s.get("package", "")
+                    ver = s.get("version") or s.get("ver", "")
+                    dom = s.get("domain") or s.get("dom", "")
+                    lines.append(f"  - [{dom}] {pkg} {ver}".rstrip())
+            lines.append("</previous_global_stacks>")
+            prev_stacks_section = "\n".join(lines)
+
     guardian_out = sget("guardian_output", {})
     new_knowledge = ""
     if guardian_out.get("status") == "APPROVED" and guardian_out.get("final_data"):
         data = guardian_out["final_data"]
         new_knowledge = f"\n[NEWLY DISCOVERED] {data['name']}: {data['description']} (v{data['version']})"
-    
-    integrated_context = base_rag_context + new_knowledge
-    
+
     if not features:
         return {
             "stack_planner_output": {"thinking": "분석할 기능이 없습니다.", "stack_mapping": []},
@@ -150,16 +161,31 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
         }
 
     # 3. 사용자 메시지 조립
-    feature_ids = [f.get("id") for f in features]
-    user_msg = f"""{snippets_text}
+    if action_type == "UPDATE":
+        anchor_instruction = (
+            "<previous_global_stacks>에 있는 스택은 버전을 절대 변경하지 마십시오. "
+            "신규 기능(change_status=신규)에 필요한 새 라이브러리만 추가하십시오."
+            if prev_stacks_section else
+            "이전 스택 정보가 없습니다. 기존 기능에 적합한 표준 스택을 새로 제안하십시오."
+        )
+        user_msg = f"""{prev_stacks_section}
 
 ### [요구사항 기능 목록 (총 {len(features)}개)]
 {features}
 
-### [APPROVED_STACK_FROM_RAG]
-{integrated_context}
+{new_knowledge}
 
-위의 <source_code_dependency_evidence>와 <project_inventory>를 가장 우선적인 진실(Source of Truth)로 삼아 각 기능에 대한 기술 스택을 매핑하십시오.
+{anchor_instruction}
+"""
+    else:
+        user_msg = f"""{snippets_text}
+
+### [요구사항 기능 목록 (총 {len(features)}개)]
+{features}
+
+{new_knowledge}
+
+위의 <source_code_dependency_evidence>를 가장 우선적인 진실(Source of Truth)로 삼아 각 기능에 대한 기술 스택을 매핑하십시오.
 증거 자료에 없는 기술을 임의로 상상해서 답변하는 것은 금지됩니다.
 """
 
@@ -183,18 +209,18 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
         )
         out = res.parsed
         total_retries = res.retry_count
-        
+
         # 6. 자가 치유 로직 — 누락이 전체의 30% 초과일 때만 2차 LLM 호출
-        # (소수 누락은 정상 범주로 처리하여 불필요한 38초 지연 방지)
+        feature_ids = {f.get("id") for f in features if isinstance(f, dict) and f.get("id")}
         mapped_ids = {item.f_id for item in out.m}
-        missing_ids = set(feature_ids) - mapped_ids
+        missing_ids = feature_ids - mapped_ids
         heal_threshold = max(1, int(len(feature_ids) * 0.3))
 
         if missing_ids and len(missing_ids) > heal_threshold:
             logger.warning(f"Detected {len(missing_ids)} missing mappings (>{heal_threshold}). Initiating self-healing...")
-            missing_features = [f for f in features if f.get("id") in missing_ids]
+            missing_features = [f for f in features if isinstance(f, dict) and f.get("id") in missing_ids]
             healing_user_msg = f"다음 누락된 기능들에 대해 추가로 기술 스택을 매핑하십시오:\n{missing_features}"
-            
+
             res_heal = call_structured(
                 api_key=sget("api_key", ""),
                 model=sget("model", DEFAULT_MODEL),
@@ -205,14 +231,13 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
             )
             out_heal = res_heal.parsed
             total_retries += res_heal.retry_count
-            
-            # 병합 및 중복 제거
+
             final_mapping_dict = {item.f_id: item for item in out.m + out_heal.m if item.f_id in feature_ids}
             out.m = list(final_mapping_dict.values())
         else:
             if missing_ids:
                 logger.info(f"[stack_planner] {len(missing_ids)}개 누락은 허용 범위({heal_threshold}개 이하). 자가치유 생략.")
-            final_mapping_dict = {item.f_id: item for item in out.m if item.f_id in feature_ids}
+            final_mapping_dict = {item.f_id: item for item in out.m if not feature_ids or item.f_id in feature_ids}
             out.m = list(final_mapping_dict.values())
 
         # 7. 크롤러 입력 생성
@@ -223,7 +248,6 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
             "stack_planner_output": out.model_dump(),
             "next_crawler_inputs": next_crawler_inputs,
             "loop_count": current_loop + 1,
-            "stack_rag_context": integrated_context, 
             "thinking_log": (sget("thinking_log", []) or []) + [{"node": "stack_planner", "thinking": out.th}],
             "total_retries": sget("total_retries", 0) + total_retries
         }

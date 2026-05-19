@@ -1,6 +1,6 @@
 """
 SA Pipeline Schemas — DSL 기반 초압축 출력 스키마 정의
-활성 노드: merge_project → component_scheduler → sa_unified_modeler → sa_test_analysis → sa_project_structure → sa_embedding
+활성 노드: merge_project → component_scheduler → sa_unified_modeler → sa_test_analysis → sa_project_structure
 """
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Any
@@ -14,20 +14,6 @@ class MergeProjectOutput(BaseModel):
     mode: str = Field(alias="md", description="C|U|R")
     base_context: Dict[str, Any] = Field(alias="bc")
     merge_strategy: str = Field(alias="ms")
-
-
-# ── Forensic Profiler ────────────────────────────────────
-
-class FileProfile(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    path: str = Field(alias="p")
-    role: str = Field(alias="r", description="DB|API|SERVICE|UI|STORE|CONFIG|UTIL")
-    reason: str = Field(alias="rs", default="")
-
-class ForensicProfilerOutput(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    thinking: str = Field(alias="th", default="")
-    profiles: List[FileProfile] = Field(alias="pf")
 
 
 # ── Component Scheduler ─────────────────────────────────
