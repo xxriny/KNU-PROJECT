@@ -194,6 +194,21 @@ def execute_approved_task(task: dict) -> str:
         elif task_type == "import_issues":
             return json.dumps({"imported": len(payload.get("issues", []))})
 
+        elif task_type == "dev_gap_approval":
+            # author:xxrin
+            # Dev Tracking 승인 태스크. 코드 생성 실행 없이 PM 승인 결과만 기록한다.
+            pm_report = payload.get("pm_report", {}) if isinstance(payload, dict) else {}
+            return json.dumps({
+                "message": "Dev Tracking GAP report approved by PM.",
+                "approval_status": "APPROVED_INTENTIONAL_CHANGE",
+                "pr_context": payload.get("pr_context", {}) if isinstance(payload, dict) else {},
+                "recommended_actions": (
+                    pm_report.get("recommended_pm_actions", [])
+                    if isinstance(pm_report, dict)
+                    else []
+                ),
+            }, ensure_ascii=False)
+
         elif task_type in ("feature", "bugfix", "refactor", "infra", "doc_sync"):
             return json.dumps({
                 "message": f"'{task_type}' 태스크가 승인되었습니다. 담당자에게 알림이 전송됩니다.",
