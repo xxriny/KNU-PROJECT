@@ -18,7 +18,14 @@ def _merge_thinking_logs(existing_logs, new_logs):
         existing_logs = []
     if not isinstance(new_logs, list):
         new_logs = []
-    return existing_logs + new_logs
+    # Legacy nodes sometimes return the full prior log plus a new entry. The
+    # reducer already receives the prior value, so concatenating blindly can
+    # grow thinking_log exponentially during long-running flows.
+    if existing_logs and new_logs[: len(existing_logs)] == existing_logs:
+        merged = new_logs
+    else:
+        merged = existing_logs + new_logs
+    return merged[-200:]
 
 
 def _keep_last_step(existing_step, new_step):
@@ -148,9 +155,33 @@ class _RAGFields(TypedDict, total=False):
     rag_query_result: list           # RAGQueryResult dict 목록 (code_retriever 산출물)
 
 
+class _DevTrackingFields(TypedDict, total=False):
+    """navi_v3 PR 기반 개발 추적/검증 파이프라인 상태."""
+
+    trigger: str                     # GITHUB_PR_WEBHOOK 등 실행 트리거
+    repository: dict                 # {"owner": "...", "repo": "..."}
+    pull_request: dict               # PR 번호, 브랜치, base, head_sha, 설명
+    actor: dict                      # GitHub actor 및 역할 정보
+    pr_context: dict                 # dev_task_planner가 정규화한 PR 분석 컨텍스트
+    code_inventory: dict             # code_inventory_builder의 AST 기반 인벤토리
+    published_spec_snapshot: dict    # branch_created_at 이하의 published snapshot
+    spec_outdated: bool              # 최신 published snapshot이 더 최신인지 여부
+    latest_snapshot: dict            # 현재 최신 snapshot 메타데이터
+    implementation_profile: dict     # reverse/forensic 분석 결과
+    gap_report: list                 # 설계 대비 구현 GAP 목록
+    has_high_gap: bool               # HIGH GAP 존재 여부
+    intent_classification: list      # GAP별 의도/비의도/불확실 분류 결과
+    milestone_status: dict           # 완료율, blocked 항목, 예상 완료일
+    pm_report: dict                  # TaskApprovalPanel에 표시할 PM 판단 리포트
+    approval_status: str             # PENDING/APPROVED/REJECTED/NEEDS_SA_REVIEW
+    pr_comment: dict                 # PR 코멘트 생성 결과
+    dev_tracking_next_action: str    # branch_fetcher/intent_classifier/complete 등
+    dev_tracking_loop_count: int     # PR batch/재시도 루프 횟수
+
+
 # ── 통합 상태 ────────────────────────────────────────────
 
-class PipelineState(_BaseState, _AnalysisFields, _ChatFields, _IdeaFields, _RAGFields, total=False):
+class PipelineState(_BaseState, _AnalysisFields, _ChatFields, _IdeaFields, _RAGFields, _DevTrackingFields, total=False):
     """LangGraph 파이프라인 공유 상태 — 모든 모드의 합집합.
 
     개별 모드가 사용하는 필드는 _AnalysisFields, _ChatFields, _IdeaFields를 참조.
