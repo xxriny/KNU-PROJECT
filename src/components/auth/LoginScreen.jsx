@@ -50,7 +50,7 @@ export default function LoginScreen({ isFirstRun = false }) {
   useEffect(() => () => clearInterval(pollRef.current), []);
 
   const stopPolling = () => {
-    clearInterval(pollRef.current);
+    clearTimeout(pollRef.current);
     pollRef.current = null;
   };
 
@@ -61,7 +61,7 @@ export default function LoginScreen({ isFirstRun = false }) {
       const data = await startGithubDeviceFlow();
       setUserCode(data.user_code || "");
       setVerificationUri(data.verification_uri || "https://github.com/login/device");
-      const interval = Math.max(data.interval || 5, 5);
+      const initialInterval = Math.max(data.interval || 5, 5);
       setDeviceState(DEVICE_WAITING);
 
       // 브라우저 자동 오픈
@@ -72,30 +72,39 @@ export default function LoginScreen({ isFirstRun = false }) {
         window.open(uri, "_blank");
       }
 
-      // 폴링 시작
-      pollRef.current = setInterval(async () => {
-        try {
-          const result = await pollGithubDeviceFlow(data.device_code);
-          if (result.status === "ok") {
-            stopPolling();
-            // Electron IPC로 창 새로고침, 없으면 fallback
-            if (window.electronAPI?.reloadWindow) {
-              await window.electronAPI.reloadWindow();
+      // setTimeout 기반 폴링 (slow_down 시 interval 동적 조정)
+      const schedulePoll = (intervalSec, deviceCode) => {
+        pollRef.current = setTimeout(async () => {
+          if (!pollRef.current && pollRef.current !== 0) return; // stopped
+          try {
+            const result = await pollGithubDeviceFlow(deviceCode);
+            if (result.status === "ok") {
+              pollRef.current = null;
+              if (window.electronAPI?.reloadWindow) {
+                await window.electronAPI.reloadWindow();
+              } else {
+                window.location.reload();
+              }
+            } else if (result.status === "error") {
+              pollRef.current = null;
+              setDeviceState(DEVICE_IDLE);
+              setGhError(result.error || "GitHub 인증 실패");
             } else {
-              window.location.reload();
+              // pending (authorization_pending or slow_down)
+              const nextInterval = result.interval
+                ? Math.max(result.interval, intervalSec)
+                : intervalSec;
+              schedulePoll(nextInterval, deviceCode);
             }
-          } else if (result.status === "error") {
-            stopPolling();
+          } catch (err) {
+            pollRef.current = null;
             setDeviceState(DEVICE_IDLE);
-            setGhError(result.error || "GitHub 인증 실패");
+            setGhError(err.message || "네트워크 오류가 발생했습니다.");
           }
-          // "pending" 은 계속 폴링
-        } catch (err) {
-          stopPolling();
-          setDeviceState(DEVICE_IDLE);
-          setGhError(err.message || "네트워크 오류가 발생했습니다.");
-        }
-      }, interval * 1000);
+        }, intervalSec * 1000);
+      };
+
+      schedulePoll(initialInterval, data.device_code);
 
     } catch (err) {
       setDeviceState(DEVICE_IDLE);

@@ -196,9 +196,13 @@ async def github_device_poll(req: DevicePollRequest, db: Session = Depends(get_d
 
     try:
         token_data = poll_github_device_token(client_id, req.device_code)
+        print(f"[device-poll] GitHub raw response: {token_data}", flush=True)
         error = token_data.get("error")
         if error in ("authorization_pending", "slow_down"):
-            return {"status": "pending", "error": error}
+            resp = {"status": "pending", "error": error}
+            if error == "slow_down":
+                resp["interval"] = token_data.get("interval", 10)
+            return resp
         if error:
             return {"status": "error", "error": token_data.get("error_description", error)}
 
