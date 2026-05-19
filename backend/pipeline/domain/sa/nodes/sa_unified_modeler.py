@@ -8,7 +8,6 @@ from pipeline.core.cache_manager import cache_manager
 from pipeline.domain.sa.schemas import SAUnifiedModelerOutput
 from observability.logger import get_logger
 
-from pipeline.domain.rag.nodes.project_db import query_project_code, get_session_inventory
 
 logger = get_logger()
 
@@ -222,62 +221,6 @@ def sa_unified_modeler_node(ctx: NodeContext) -> dict:
 
     inventory = {}
     snippets_text = ""
-    
-    if action_type != "CREATE":
-        search_session_id = sget("session_id", run_id)
-        try:
-            inventory = get_session_inventory(search_session_id)
-            
-            # [HYBRID EXTRACTION]
-            # Priority 1: Deterministic Targeting (via Forensic Profiler)
-            from pipeline.domain.rag.nodes.project_db import get_file_chunks, query_project_code
-            
-            forensic_profile = sget("forensic_profile", {})
-            target_files = []
-            if forensic_profile:
-                # [DYNAMIC] DB, API 뿐만 아니라 SERVICE 로직도 핵심 설계 근거로 포함
-                target_files = [path for path, role in forensic_profile.items() if role in ("DB", "API", "SERVICE")]
-                logger.info(f"[sa_unified_modeler] Priority 1 (Forensic): {len(target_files)} files identified.")
-            else:
-                # [MINIMAL FALLBACK] 프로파일 실패시에만 작동
-                arch_patterns = ["db", "model", "schema", "router", "controller", "api", "main", "handler", "service", "connector", "repository", "provider"]
-                target_files = [path for path in inventory.keys() if any(p in path.lower() for p in arch_patterns)]
-                logger.info(f"[sa_unified_modeler] Priority 2 (Fallback): {len(target_files)} files identified by patterns.")
-
-            all_chunks = []
-            seen_ids = set()
-            
-            # 1단계: 직접 추출 실행
-            for t_file in target_files:
-                direct_chunks = get_file_chunks(t_file, session_id=search_session_id)
-                for c in direct_chunks:
-                    cid = c.get("chunk_id")
-                    if cid and cid not in seen_ids:
-                        seen_ids.add(cid)
-                        all_chunks.append(c)
-
-            # Priority 2: Semantic RAG Search (to find cross-cutting concerns)
-            queries = ["database entities relationships", "API endpoints handlers", "business logic flows"]
-            for q in queries:
-                try:
-                    res_chunks = query_project_code(q, session_id=search_session_id, n_results=10)
-                    for c in res_chunks:
-                        cid = c.get("chunk_id")
-                        if cid and cid not in seen_ids:
-                            seen_ids.add(cid)
-                            all_chunks.append(c)
-                except Exception as e:
-                    logger.warning(f"[sa_unified_modeler] Semantic RAG failed: {e}")
-
-            if all_chunks:
-                lines = ["<existing_code_forensic_evidence>"]
-                # Provide maximum forensic depth within context limits
-                for c in all_chunks[:1000]:
-                    lines.append(f"File: {c.get('file_path')}\nContent: {c.get('content_text', '')[:1500]}")
-                lines.append("</existing_code_forensic_evidence>")
-                snippets_text = "\n".join(lines)
-        except Exception as e:
-            logger.warning(f"[sa_unified_modeler] Forensic RAG search failed: {e}")
 
     # UPDATE 모드: merged_project에서 이전 API/테이블 읽기
     merged_project_data = sget("merged_project", {})

@@ -186,37 +186,6 @@ def idea_chat_node(state: PipelineState) -> dict:
         except Exception as rag_err:
             logger.warning(f"RAG search via RAGManager failed: {rag_err}")
 
-        # ── 사용자 프로젝트 코드 청크 RAG (분석 1회 이후만 동작) ──
-        # previous_result.rag_index_status.session_id는 직전 분석 라운드에서 사용된
-        # source_dir 해시 기반 영속 ID. 코드 청크는 project_code_knowledge 컬렉션에 들어있음.
-        # 분석을 한 번도 안 돌렸으면 session_id가 비어 있어 자연히 검색 스킵.
-        code_session_id = ""
-        has_code_index = False
-        try:
-            rag_status = (previous_result or {}).get("rag_index_status") or {}
-            code_session_id = rag_status.get("session_id") or ""
-            has_code_index = bool(rag_status.get("has_index"))
-        except Exception:
-            pass
-
-        if code_session_id and has_code_index:
-            try:
-                from pipeline.domain.rag.nodes.project_db import query_project_code
-                code_results = query_project_code(
-                    user_request, session_id=code_session_id, n_results=5
-                )
-                if code_results:
-                    rag_context.append("### 관련 코드 청크 (사용자 프로젝트)")
-                    for r in code_results[:5]:
-                        fp = r.get("file_path", "")
-                        fn = r.get("func_name", "")
-                        sim = r.get("similarity", 0) or 0
-                        snippet = (r.get("content_text") or "")[:500]
-                        rag_context.append(
-                            f"- {fp}::{fn} (유사도 {sim:.2f})\n  {snippet}"
-                        )
-            except Exception as code_err:
-                logger.warning(f"[idea_chat] 코드 RAG 검색 실패: {code_err}")
 
         rag_text = "\n".join(rag_context)
 

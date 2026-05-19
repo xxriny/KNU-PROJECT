@@ -174,9 +174,7 @@ def get_sa_routing_map() -> dict:
 
 
 def get_analysis_pipeline(action_type: str = "CREATE"):
-    """Full RAG-PM-SA pipeline."""
-    from pipeline.domain.rag.nodes.code_chunker import code_chunker_node
-    from pipeline.domain.rag.nodes.code_embedding import code_embedding_node
+    """Full PM-SA pipeline."""
     from pipeline.domain.sa.nodes.forensic_profiler import forensic_profiler_node
     from pipeline.domain.pm.nodes.requirement_analyzer import requirement_analyzer_node
     from pipeline.domain.pm.nodes.stack_planner import stack_planner_node
@@ -189,17 +187,11 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     from pipeline.domain.sa.nodes.sa_project_structure import sa_project_structure_node
 
     workflow = StateGraph(PipelineState)
-    # RAG Ingest (code indexing — 여전히 구조 파악용으로 유지)
-    workflow.add_node("code_chunker", code_chunker_node)
-    workflow.add_node("code_embedding", code_embedding_node)
-    # Forensic
     workflow.add_node("forensic_profiler", forensic_profiler_node)
-    # PM — stack_retriever, pm_embedding 제거
     workflow.add_node("requirement_analyzer", requirement_analyzer_node)
     workflow.add_node("stack_planner", stack_planner_node)
     workflow.add_node("stack_crawling", stack_crawling_node)
     workflow.add_node("guardian", guardian_node)
-    # SA — sa_embedding 제거
     workflow.add_node("sa_merge_project", sa_merge_project_node)
     workflow.add_node("component_scheduler", component_scheduler_node)
     workflow.add_node("sa_unified_modeler", sa_unified_modeler_node)
@@ -207,9 +199,7 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
     workflow.add_node("sa_project_structure", sa_project_structure_node)
 
     # Edges
-    workflow.add_edge(START, "code_chunker")
-    workflow.add_edge("code_chunker", "code_embedding")
-    workflow.add_edge("code_embedding", "forensic_profiler")
+    workflow.add_edge(START, "forensic_profiler")
     workflow.add_edge("forensic_profiler", "requirement_analyzer")
     workflow.add_edge("requirement_analyzer", "stack_planner")
 
@@ -237,8 +227,7 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
 
 def get_pipeline_routing_map(action_type: str = "CREATE") -> dict:
     """Compatibility shim."""
-    # 전체 분석 파이프라인은 RAG ingest → PM → SA 순서로 노드를 나열한다.
-    chain = ("code_chunker", "code_embedding") + _PM_CHAIN + _SA_CHAIN
+    chain = _PM_CHAIN + _SA_CHAIN
     return {
         "first_node": chain[0],
         "next_nodes": _chain_to_next_nodes(chain),

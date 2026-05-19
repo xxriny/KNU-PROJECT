@@ -20,7 +20,7 @@ _STORAGE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
     "storage",
 )
-_DB_PATH = os.path.join(_STORAGE_DIR, "navigator.db")
+_DB_PATH = os.path.join(_STORAGE_DIR, "local.db")
 _DB_URL = f"sqlite:///{_DB_PATH}"
 
 _engine = create_engine(_DB_URL, connect_args={"check_same_thread": False})

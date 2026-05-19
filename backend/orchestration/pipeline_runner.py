@@ -22,7 +22,7 @@ from pipeline.orchestration.facade import (
     get_idea_chat_routing_map,
 )
 from pipeline.core.action_type import normalize_action_type
-from pipeline.domain.rag.ast_scanner import extract_functions, summarize_for_llm
+from pipeline.core.ast_scanner import extract_functions, summarize_for_llm
 from result_shaping.result_shaper import shape_result
 from pipeline.core.utils import to_serializable
 from observability.logger import get_logger
@@ -338,45 +338,38 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
         f"notes_to_add type={type(result.get('notes_to_add')).__name__}"
     )
 
-    # ── 채팅 의도로 만들어진 메모를 백엔드에서 직접 영속화 ──
-    # 프론트의 addComment 호출에 의존하지 않고 ChromaDB(memo_db)에 즉시 저장한다.
-    # 이렇게 하면 프론트 코드 상태(HMR 누락, 옛 코드 등)와 무관하게 메모가 보존되며,
-    # 다음에 MemoManager가 syncMemos를 호출하면 자동으로 화면에 등장한다.
+    # ── 채팅 의도로 만들어진 메모를 SQLite(local.db)에 직접 영속화 ──
     raw_notes = result.get("notes_to_add") or []
     persisted_notes: list = []
     if raw_notes:
         try:
-            from pipeline.domain.pm.nodes.memo_db import add_memo
-            for note in raw_notes:
-                if not isinstance(note, dict):
-                    continue
-                text = str(note.get("text") or "").strip()
-                section = str(note.get("section") or "Idea Chat").strip() or "Idea Chat"
-                detail = str(note.get("detail") or "").strip()
-                if not text:
-                    continue
-                try:
-                    memo_id = add_memo(
+            from auth.models import MemoItem
+            db = SessionLocal()
+            try:
+                for note in raw_notes:
+                    if not isinstance(note, dict):
+                        continue
+                    text = str(note.get("text") or "").strip()
+                    if not text:
+                        continue
+                    item = MemoItem(
                         session_id=chat_session_id,
-                        memo_text=text,
+                        text=text,
                         selected_text="",
-                        section=section,
-                        detail=detail,
+                        section=str(note.get("section") or "Idea Chat").strip() or "Idea Chat",
+                        detail=str(note.get("detail") or "").strip(),
                     )
-                    persisted_notes.append({
-                        "id": memo_id,
-                        "text": text,
-                        "section": section,
-                        "detail": detail,
-                    })
-                except Exception as memo_err:
-                    get_logger().warning(f"[idea_chat] memo_db 영속화 실패: {memo_err}")
+                    db.add(item)
+                    persisted_notes.append({"id": item.id, "text": text})
+                db.commit()
+            finally:
+                db.close()
             get_logger().info(
                 f"[idea_chat] 채팅 메모 {len(persisted_notes)}/{len(raw_notes)}건 영속화 "
                 f"(session_id={chat_session_id})"
             )
-        except Exception as import_err:
-            get_logger().warning(f"[idea_chat] memo_db import 실패: {import_err}")
+        except Exception as memo_err:
+            get_logger().warning(f"[idea_chat] memo 영속화 실패: {memo_err}")
 
     await manager.send_json(ws, {
         "type": "result",

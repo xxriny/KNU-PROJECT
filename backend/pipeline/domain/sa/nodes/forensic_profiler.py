@@ -5,7 +5,6 @@ from __future__ import annotations
 from pipeline.core.node_base import pipeline_node, NodeContext
 from pipeline.core.utils import call_structured
 from pipeline.domain.sa.schemas import ForensicProfilerOutput
-from pipeline.domain.rag.nodes.project_db import get_session_inventory
 from observability.logger import get_logger
 
 logger = get_logger()
@@ -45,13 +44,8 @@ def forensic_profiler_node(ctx: NodeContext) -> dict:
     search_session_id = sget("session_id", run_id)
     action_type = sget("action_type", "CREATE")
 
-    # 인벤토리 수집
+    # RAG 제거 후 인벤토리 없음 → 빈 결과 반환
     inventory = {}
-    if action_type != "CREATE":
-        try:
-            inventory = get_session_inventory(search_session_id)
-        except Exception as e:
-            logger.warning(f"[forensic_profiler] Failed to get inventory: {e}")
 
     if not inventory:
         return {"forensic_profile": {}, "current_step": "forensic_profiler_done"}

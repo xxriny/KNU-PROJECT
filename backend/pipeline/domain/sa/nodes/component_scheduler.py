@@ -8,7 +8,6 @@ from pipeline.core.cache_manager import cache_manager
 from pipeline.domain.sa.schemas import ComponentSchedulerOutput
 from observability.logger import get_logger
 
-from pipeline.domain.rag.nodes.project_db import get_session_inventory
 
 logger = get_logger()
 
@@ -130,64 +129,8 @@ def component_scheduler_node(ctx: NodeContext) -> dict:
     action_type = sget("action_type", "CREATE")
     run_id = sget("run_id", sget("session_id", "sa_session"))
 
-    # 인벤토리 수집 (CREATE 제외)
     inventory = {}
     snippets_text = ""
-    if action_type != "CREATE":
-        search_session_id = sget("session_id", run_id)
-        try:
-            inventory = get_session_inventory(search_session_id)
-            
-            # [HYBRID EXTRACTION]
-            # Priority 1: Deterministic Targeting (via Forensic Profiler)
-            from pipeline.domain.rag.nodes.project_db import get_file_chunks, query_project_code
-            
-            seen_ids = set()
-            all_chunks = []
-            
-            # 1. ForensicProfiler 결과 활용
-            forensic_profile = sget("forensic_profile", {})
-            
-            target_files = []
-            if forensic_profile:
-                # [DYNAMIC] UI와 서비스 레이어 전체를 아우르는 동적 타겟팅
-                target_files = [path for path, role in forensic_profile.items() if role in ("UI", "SERVICE", "API")]
-                logger.info(f"[component_scheduler] Priority 1 (Forensic): {len(target_files)} UI/Service files identified.")
-            else:
-                # [MINIMAL FALLBACK]
-                comp_patterns = ["app", "index", "main", "service", "handler", "router", "view", "component", "store", "slice", "context", "layout", "page"]
-                target_files = [path for path in inventory.keys() if any(p in path.lower() for p in comp_patterns)]
-                logger.info(f"[component_scheduler] Fallback: {len(target_files)} files identified by patterns.")
-            
-            for t_file in target_files:
-                direct_chunks = get_file_chunks(t_file, session_id=search_session_id)
-                for c in direct_chunks:
-                    cid = c.get("chunk_id")
-                    if cid and cid not in seen_ids:
-                        seen_ids.add(cid)
-                        all_chunks.append(c)
-
-            # Priority 2: Semantic RAG Search (supplementary)
-            queries = ["system components entrypoints", "UI views and layouts", "business core services"]
-            for q in queries:
-                try:
-                    res_chunks = query_project_code(q, session_id=search_session_id, n_results=10)
-                    for c in res_chunks:
-                        cid = c.get("chunk_id")
-                        if cid and cid not in seen_ids:
-                            seen_ids.add(cid)
-                            all_chunks.append(c)
-                except Exception as e:
-                    logger.warning(f"[component_scheduler] Semantic RAG failed: {e}")
-
-            if all_chunks:
-                lines = ["<existing_system_structure_evidence>"]
-                for c in all_chunks[:100]:
-                    lines.append(f"File: {c.get('file_path')}\nContent: {c.get('content_text', '')[:1000]}")
-                lines.append("</existing_system_structure_evidence>")
-                snippets_text = "\n".join(lines)
-        except Exception as e:
-            logger.warning(f"[component_scheduler] RAG search failed: {e}")
 
     user_content = _build_user_message(merged_project, inventory, action_type, snippets_text)
 

@@ -1,6 +1,8 @@
 """
 SQLAlchemy SQLite 데이터베이스 설정.
-navigator.db: users, teams, analysis_sessions, design_change_requests
+
+local.db  — 개인 데이터: users, teams, sessions, results, memos, agile_tasks
+shared.db — 공유 데이터: published_snapshots (향후 배포 예정)
 """
 
 import os
@@ -13,15 +15,19 @@ _STORAGE_DIR = os.environ.get(
 )
 os.makedirs(_STORAGE_DIR, exist_ok=True)
 
-DB_PATH = os.path.join(_STORAGE_DIR, "navigator.db")
-DATABASE_URL = f"sqlite:///{DB_PATH}"
+# ── 로컬 DB (개인 산출물) ───────────────────────────────────
+LOCAL_DB_PATH = os.path.join(_STORAGE_DIR, "local.db")
+LOCAL_DB_URL = f"sqlite:///{LOCAL_DB_PATH}"
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},
-)
-
+engine = create_engine(LOCAL_DB_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# ── 공유 DB (팀 스냅샷, 향후 배포) ─────────────────────────
+SHARED_DB_PATH = os.path.join(_STORAGE_DIR, "shared.db")
+SHARED_DB_URL = f"sqlite:///{SHARED_DB_PATH}"
+
+shared_engine = create_engine(SHARED_DB_URL, connect_args={"check_same_thread": False})
+SharedSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=shared_engine)
 
 
 class Base(DeclarativeBase):
@@ -36,6 +42,14 @@ def get_db():
         db.close()
 
 
+def get_shared_db():
+    db = SharedSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 def _add_column_if_missing(conn, table: str, column: str, col_def: str) -> None:
     rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
     existing = {row[1] for row in rows}
@@ -44,24 +58,14 @@ def _add_column_if_missing(conn, table: str, column: str, col_def: str) -> None:
 
 
 def _migrate_role_constraint(conn) -> None:
-    """users.role 컬럼의 CheckConstraint를 새 역할(backend/frontend/devops)을 포함하도록 확장.
-
-    SQLite는 ALTER COLUMN을 지원하지 않으므로:
-    1. 기존 테이블을 백업으로 복사
-    2. 새 스키마로 테이블 재생성
-    3. 데이터 복원 후 백업 삭제
-    """
-    # 이미 새 constraint가 적용됐는지 확인 — sqlite_master에서 스키마 확인
+    """users.role CheckConstraint를 새 역할 포함하도록 확장."""
     schema = conn.execute(
         text("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'")
     ).scalar() or ""
     if "devops" in schema:
-        return  # 이미 마이그레이션 완료
+        return
 
-    # 테이블 백업
     conn.execute(text("ALTER TABLE users RENAME TO users_bak"))
-
-    # 새 테이블 생성 (CheckConstraint 제거 — SQLAlchemy가 앱 레벨에서 검증)
     conn.execute(text("""
         CREATE TABLE users (
             id TEXT NOT NULL PRIMARY KEY,
@@ -77,33 +81,42 @@ def _migrate_role_constraint(conn) -> None:
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """))
-
-    # 데이터 복원
     conn.execute(text("INSERT INTO users SELECT * FROM users_bak"))
     conn.execute(text("DROP TABLE users_bak"))
 
 
 def _run_migrations() -> None:
-    """기존 DB에 나중에 추가된 컬럼을 안전하게 추가합니다."""
+    """기존 local.db에 나중에 추가된 컬럼을 안전하게 추가합니다."""
     with engine.begin() as conn:
-        # teams 테이블 — oauth 동적 설정 컬럼
         _add_column_if_missing(conn, "teams", "github_client_id",     "TEXT")
         _add_column_if_missing(conn, "teams", "github_client_secret", "TEXT")
-        # users 테이블 — github 인증 컬럼
         _add_column_if_missing(conn, "users", "github_username",      "TEXT")
         _add_column_if_missing(conn, "users", "github_id",            "TEXT")
         _add_column_if_missing(conn, "users", "github_login",         "TEXT")
         _add_column_if_missing(conn, "users", "github_oauth_token",   "TEXT")
-        # role 컬럼 CheckConstraint 확장 (backend/frontend/devops 추가)
         _migrate_role_constraint(conn)
-        # agile tasks 테이블 — team_id 컬럼
         try:
-            _add_column_if_missing(conn, "agile_tasks", "team_id",    "TEXT DEFAULT ''")
+            _add_column_if_missing(conn, "agile_tasks", "team_id", "TEXT DEFAULT ''")
         except Exception:
-            pass  # 테이블이 없으면 task_coordinator.py가 따로 생성
+            pass
 
 
 def init_db():
-    from auth.models import User, Team, AnalysisSession, DesignChangeRequest, MemoItem, AnalysisResult, PublishedSnapshot  # noqa: F401
-    Base.metadata.create_all(bind=engine)
+    from auth.models import (  # noqa: F401
+        User, Team, AnalysisSession, DesignChangeRequest,
+        MemoItem, AnalysisResult,
+    )
+    from auth.shared_models import PublishedSnapshot  # noqa: F401
+
+    # 로컬 테이블 생성 (PublishedSnapshot 제외)
+    local_tables = [
+        t for name, t in Base.metadata.tables.items()
+        if name != "published_snapshots"
+    ]
+    Base.metadata.create_all(bind=engine, tables=local_tables)
+
+    # 공유 테이블 생성
+    shared_tables = [Base.metadata.tables["published_snapshots"]]
+    Base.metadata.create_all(bind=shared_engine, tables=shared_tables)
+
     _run_migrations()

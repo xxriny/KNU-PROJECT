@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 from pipeline.core.state import PipelineState, make_sget
 from pipeline.core.utils import call_structured_with_usage
 from pipeline.domain.pm.schemas import StackSourceData, GuardianOutput
-from pipeline.domain.rag.nodes.project_db import get_session_inventory
 from observability.logger import get_logger
 from version import DEFAULT_MODEL
 
@@ -191,10 +190,6 @@ def guardian_node(state: PipelineState) -> Dict[str, Any]:
     # llm_semantic_check는 inventory(현재 세션의 파일/함수 분포)를 받아 프로젝트 정합성도 함께 평가한다.
     # ChromaDB 호출이 일시 실패하더라도 PM 단계 전체가 죽지 않도록 빈 인벤토리로 폴백.
     inventory: Dict[str, Any] = {}
-    try:
-        inventory = get_session_inventory(run_id) or {}
-    except Exception as inv_err:
-        logger.warning(f"[guardian] get_session_inventory 실패, 빈 인벤토리로 진행: {inv_err}")
 
     is_legit, ai_reason = llm_semantic_check(
         api_key=sget("api_key", ""),

@@ -31,7 +31,7 @@ if %errorlevel% neq 0 (
 echo [3/4] Vite is ready!
 
 echo [4/4] Launching Electron app...
-npm run dev:electron
+npm run dev:electron:now
 
 :cleanup
 echo Cleaning up...

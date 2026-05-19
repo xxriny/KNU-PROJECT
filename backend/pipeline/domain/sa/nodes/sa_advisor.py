@@ -140,44 +140,19 @@ def _expand_for_frontend(components: list, apis: list, tables: list) -> dict:
     return {"components": expanded_comps, "apis": expanded_apis, "tables": expanded_tables}
 
 
-def _build_rag_context(session_id: str) -> str:
-    """RAG에서 해당 세션의 PM/SA 요약 정보를 검색 (토큰 절약)"""
-    try:
-        from pipeline.domain.pm.nodes.pm_db import _get_collection
-        collection = _get_collection()
-        results = collection.get(
-            where={"session_id": session_id},
-            include=["metadatas", "documents"]
-        )
-        if not results or not results["ids"]:
-            return "RAG에 저장된 데이터 없음"
-        summaries = []
-        for i in range(len(results["ids"])):
-            meta = results["metadatas"][i]
-            doc = results["documents"][i]
-            artifact_type = meta.get("artifact_type", "unknown")
-            phase = meta.get("phase", "?")
-            summaries.append(f"[{phase}/{artifact_type}] {doc[:500]}")
-        return "\n---\n".join(summaries)
-    except Exception as e:
-        logger.warning(f"RAG context retrieval failed: {e}")
-        return "RAG 검색 실패"
-
-
-def _build_user_message(rtm: list, components: list, apis: list, tables: list, precheck_gaps: list, rag_ctx: str) -> str:
+def _build_user_message(rtm: list, components: list, apis: list, tables: list, precheck_gaps: list) -> str:
     p_rtm = "\n".join(f"{safe_get(r, ['id', 'feature_id'])}:{safe_get(r, ['desc', 'description'])}" for r in rtm)
     p_comp = "\n".join(f"{safe_get(c, ['name', 'nm'])}:{safe_get(c, ['role', 'rl'])}" for c in components)
     p_api = "\n".join(f"{safe_get(a, ['ep'])}|{safe_get(a, ['req', 'rq'])}|{safe_get(a, ['res', 'rs'])}" for a in apis)
     p_db = "\n".join(f"{safe_get(t, ['name', 'nm'])}|{safe_get(t, ['cols', 'cl'])}" for t in tables)
-    
+
     precheck_section = ""
     if precheck_gaps:
         precheck_section = f"\n## Python Pre-check 결함 ({len(precheck_gaps)}건):\n" + "\n".join(f"- {g}" for g in precheck_gaps)
-    
+
     return (
         f"RTM:\n{p_rtm}\nComp:\n{p_comp}\nAPI:\n{p_api}\nDB:\n{p_db}"
-        f"{precheck_section}"
-        f"\n\n## RAG Context (요약)\n{rag_ctx}\n\n"
+        f"{precheck_section}\n\n"
         f"위 설계를 검증하고, 결함이 있으면 구체적 수정 가이드를 작성하세요."
     )
 
@@ -217,11 +192,8 @@ def sa_advisor_node(ctx: NodeContext) -> dict:
         "data": expanded_data,
     }
 
-    # 5. RAG 컨텍스트 수집 (토큰 절약형)
-    rag_context = _build_rag_context(run_id)
-
-    # 6. LLM 호출: 통합 QA 검증 + 수정 조언
-    user_msg = _build_user_message(rtm, components, apis, tables, precheck_gaps, rag_context)
+    # 5. LLM 호출: 통합 QA 검증 + 수정 조언
+    user_msg = _build_user_message(rtm, components, apis, tables, precheck_gaps)
 
     try:
         res = call_structured(

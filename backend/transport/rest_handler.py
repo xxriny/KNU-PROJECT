@@ -14,24 +14,40 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from fastapi.security import OAuth2PasswordBearer
 from auth.deps import get_current_user, get_current_user_optional
-from auth.database import get_db
+from auth.database import get_db, get_shared_db
 from sqlalchemy.orm import Session
 from auth.models import User
 from pydantic import BaseModel
 from version import APP_VERSION, DEFAULT_MODEL
 from observability.logger import get_logger
-from pipeline.core.action_type import normalize_action_type
-from pipeline.orchestration.facade import (
-    get_analysis_pipeline,
-    get_idea_pipeline,
-    get_rag_ingest_pipeline,
-)
-from orchestration.executor import execute_pipeline
-from orchestration.pipeline_runner import (
-    validate_analysis_inputs,
-    build_reverse_context,
-    analysis_pipeline_type,
-)
+# pipeline 관련 임포트는 첫 요청 시 지연 로드 (langgraph 콜드스타트 방지)
+_pipeline_loaded = False
+
+def _ensure_pipeline():
+    global _pipeline_loaded, normalize_action_type
+    global get_analysis_pipeline, get_idea_pipeline
+    global execute_pipeline, validate_analysis_inputs, build_reverse_context, analysis_pipeline_type
+    if _pipeline_loaded:
+        return
+    from pipeline.core.action_type import normalize_action_type as _nat
+    from pipeline.orchestration.facade import (
+        get_analysis_pipeline as _gap,
+        get_idea_pipeline as _gip,
+    )
+    from orchestration.executor import execute_pipeline as _ep
+    from orchestration.pipeline_runner import (
+        validate_analysis_inputs as _vai,
+        build_reverse_context as _brc,
+        analysis_pipeline_type as _apt,
+    )
+    normalize_action_type = _nat
+    get_analysis_pipeline = _gap
+    get_idea_pipeline = _gip
+    execute_pipeline = _ep
+    validate_analysis_inputs = _vai
+    build_reverse_context = _brc
+    analysis_pipeline_type = _apt
+    _pipeline_loaded = True
 
 # ── 상수 ─────────────────────────────────────────────────
 AVAILABLE_MODELS = [
@@ -108,18 +124,6 @@ class MemoRequest(BaseModel):
 
 class MemoApplyRequest(BaseModel):
     memo_ids: list = []
-
-
-class RAGIngestRequest(BaseModel):
-    source_dir: str
-    session_id: str
-    version: str = "v1.0"
-
-
-class RAGQueryRequest(BaseModel):
-    query: str
-    session_id: Optional[str] = None
-    n_results: int = 10
 
 
 class HealthResponse(BaseModel):
@@ -235,6 +239,7 @@ def _compact_result_value(value, *, depth: int = 0):
 
 @rest_router.post("/api/analyze")
 async def analyze(req: AnalysisRequest):
+    _ensure_pipeline()
     try:
         api_key = req.api_key
         action_type = normalize_action_type(req.action_type)
@@ -271,6 +276,7 @@ async def analyze(req: AnalysisRequest):
 
 @rest_router.post("/api/idea-chat")
 async def idea_chat(req: IdeaChatRequest):
+    _ensure_pipeline()
     try:
         api_key = req.api_key
         return _to_response(execute_pipeline(
@@ -290,136 +296,11 @@ async def idea_chat(req: IdeaChatRequest):
         return {"status": "error", "error": str(e)}
 
 
-@rest_router.post("/api/rag/ingest")
-async def rag_ingest(req: RAGIngestRequest):
-    """소스 디렉터리를 청킹·임베딩하여 project_code_knowledge에 저장합니다."""
-    if not req.source_dir or not os.path.isdir(req.source_dir):
-        return {"status": "error", "error": f"유효하지 않은 source_dir: {req.source_dir}"}
-    try:
-        result = execute_pipeline(
-            get_rag_ingest_pipeline(),
-            {
-                "source_dir": req.source_dir,
-                "run_id": req.session_id,
-                "api_key": "",
-                "model": "",
-            },
-            "rag_ingest",
-        )
-        if not result.success:
-            return {"status": "error", "error": result.error}
-        ingest_output = result.data.get("rag_ingest_output", {})
-        return {"status": "ok", **ingest_output}
-    except Exception as e:
-        get_logger().exception("rag_ingest endpoint failed")
-        return {"status": "error", "error": str(e)}
-
-
-@rest_router.post("/api/rag/query")
-async def rag_query(req: RAGQueryRequest):
-    """project_code_knowledge에서 유사 코드 청크를 검색합니다."""
-    if not req.query.strip():
-        return {"status": "error", "error": "query가 비어있습니다."}
-    try:
-        from pipeline.domain.rag.nodes.code_retriever import retrieve_project_code
-        results = retrieve_project_code(req.query, session_id=req.session_id, n_results=req.n_results)
-        return {"status": "ok", "results": results}
-    except Exception as e:
-        get_logger().exception("rag_query endpoint failed")
-        return {"status": "error", "error": str(e)}
-
-
 @rest_router.delete("/api/session/{run_id}")
 async def delete_session(run_id: str, req: Optional[DeleteSessionRequest] = None):
     if not re.match(r"^\d{8}_\d{6}$", run_id):
         return {"status": "error", "error": "Invalid run_id format. Expected YYYYMMDD_HHMMSS"}
-
-    try:
-        # DB 지식 삭제
-        from pipeline.domain.pm.nodes.pm_db import delete_pm_knowledge
-        from pipeline.domain.sa.nodes.sa_db import delete_sa_knowledge
-        from pipeline.domain.pm.nodes.stack_db import delete_session_knowledge
-        from pipeline.domain.rag.nodes.project_db import delete_project_knowledge
-
-        pm_deleted = delete_pm_knowledge(run_id)
-        sa_deleted = delete_sa_knowledge(run_id)
-        stack_deleted = delete_session_knowledge(run_id)
-        project_deleted = delete_project_knowledge(run_id)
-
-        return {
-            "status": "ok",
-            "message": f"Session {run_id} deleted from RAG",
-            "pm_docs_deleted": pm_deleted,
-            "sa_docs_deleted": sa_deleted,
-            "stack_docs_deleted": stack_deleted,
-            "project_docs_deleted": project_deleted,
-        }
-    except Exception as e:
-        get_logger().exception(f"delete_session failed for run_id={run_id}")
-        return {
-            "status": "error",
-            "error": str(e),
-            "message": f"Partial deletion for {run_id}",
-        }
-
-
-@rest_router.get("/api/session/{run_id}/restore")
-async def restore_session(run_id: str):
-    """RAG DB에서 특정 세션의 모든 아티팩트를 수집하여 복원합니다."""
-    try:
-        from pipeline.domain.pm.nodes.pm_db import _get_collection
-        coll = _get_collection()
-        
-        # 해당 세션의 모든 데이터 조회
-        results = coll.get(where={"session_id": run_id})
-        
-        if not results["ids"]:
-            return {"status": "error", "error": "해당 세션의 데이터를 찾을 수 없습니다."}
-            
-        # 데이터를 LangGraph Raw State처럼 조립
-        raw_state = {
-            "run_id": run_id,
-            "metadata": {"session_id": run_id, "project_name": "Restored Project", "status": "Completed"}
-        }
-        
-        for i in range(len(results["ids"])):
-            artifact_type = results["metadatas"][i].get("artifact_type")
-            doc_str = results["documents"][i]
-            
-            try:
-                import json
-                parsed_content = json.loads(doc_str)
-            except:
-                try:
-                    import ast
-                    parsed_content = ast.literal_eval(doc_str)
-                except:
-                    parsed_content = doc_str
-                
-            if artifact_type == "PM_BUNDLE":
-                raw_state["pm_bundle"] = parsed_content
-            elif artifact_type == "SA_ARCH_BUNDLE":
-                raw_state["sa_advisor_output"] = parsed_content
-                # Legacy 호환을 위해 sa_output으로도 저장
-                raw_state["sa_output"] = parsed_content
-            elif "API" in artifact_type.upper():
-                raw_state["sa_unified_modeler_output"] = parsed_content
-            elif "TABLE" in artifact_type.upper() or "DB" in artifact_type.upper():
-                # 이미 SA_ARCH_BUNDLE이나 Unified에 포함되어 있을 확률이 높음
-                if "sa_unified_modeler_output" not in raw_state:
-                    raw_state["sa_unified_modeler_output"] = parsed_content
-            elif artifact_type == "RTM_STACK_BUNDLE":
-                raw_state["requirements_rtm"] = parsed_content
-
-        # ── 핵심: 새로운 Shaper를 적용하여 UI용 데이터로 변환 ──
-        from result_shaping.result_shaper import shape_result
-        final_data = shape_result(raw_state)
-        
-        return {"status": "ok", "data": final_data}
-        
-    except Exception as e:
-        get_logger().error(f"Restore failed: {e}")
-        return {"status": "error", "error": str(e)}
+    return {"status": "ok", "message": f"Session {run_id} deleted"}
 
 
 @rest_router.get("/api/memos")
@@ -878,11 +759,12 @@ async def list_local_results_endpoint(
     limit: int = 50,
     current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
+    shared_db: Session = Depends(get_shared_db),
 ):
     """Publish 대상 선택을 위한 로컬 분석 결과 목록."""
     try:
         from storage.publish_service import list_local_results
-        return {"status": "ok", "data": list_local_results(db, limit=limit)}
+        return {"status": "ok", "data": list_local_results(db, shared_db, limit=limit)}
     except Exception as e:
         get_logger().exception("list_local_results failed")
         return {"status": "error", "error": str(e)}
@@ -893,6 +775,7 @@ async def publish_snapshot_endpoint(
     req: PublishRequest,
     current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
+    shared_db: Session = Depends(get_shared_db),
 ):
     """로컬 분석 결과를 공유 DB에 Publish."""
     try:
@@ -900,7 +783,7 @@ async def publish_snapshot_endpoint(
         team_id = req.team_id or (current_user.team_id if current_user else None)
         user_id = current_user.id if current_user else None
         snap = publish_snapshot(
-            db,
+            db, shared_db,
             run_id=req.run_id,
             title=req.title,
             description=req.description,
@@ -921,13 +804,13 @@ async def list_snapshots_endpoint(
     limit: int = 30,
     offset: int = 0,
     current_user: Optional[User] = Depends(get_current_user_optional),
-    db: Session = Depends(get_db),
+    shared_db: Session = Depends(get_shared_db),
 ):
     """팀 공유 스냅샷 목록."""
     try:
         from storage.publish_service import list_snapshots
         resolved_team = team_id or (current_user.team_id if current_user else None)
-        snaps = list_snapshots(db, team_id=resolved_team, limit=limit, offset=offset)
+        snaps = list_snapshots(shared_db, team_id=resolved_team, limit=limit, offset=offset)
         return {"status": "ok", "data": snaps}
     except Exception as e:
         get_logger().exception("list_snapshots failed")
@@ -937,12 +820,12 @@ async def list_snapshots_endpoint(
 @rest_router.get("/api/snapshots/{snapshot_id}")
 async def get_snapshot_endpoint(
     snapshot_id: str,
-    db: Session = Depends(get_db),
+    shared_db: Session = Depends(get_shared_db),
 ):
     """스냅샷 상세 조회 (데이터 포함)."""
     try:
         from storage.publish_service import get_snapshot
-        snap = get_snapshot(db, snapshot_id)
+        snap = get_snapshot(shared_db, snapshot_id)
         if not snap:
             return {"status": "error", "error": "스냅샷을 찾을 수 없습니다."}
         return {"status": "ok", "data": snap}
@@ -955,12 +838,12 @@ async def get_snapshot_endpoint(
 async def delete_snapshot_endpoint(
     snapshot_id: str,
     current_user: Optional[User] = Depends(get_current_user_optional),
-    db: Session = Depends(get_db),
+    shared_db: Session = Depends(get_shared_db),
 ):
     """스냅샷 삭제 (게시자 본인 또는 PM만)."""
     try:
         from storage.publish_service import get_snapshot, delete_snapshot
-        snap = get_snapshot(db, snapshot_id)
+        snap = get_snapshot(shared_db, snapshot_id)
         if not snap:
             return {"status": "error", "error": "스냅샷을 찾을 수 없습니다."}
         if current_user:
@@ -968,7 +851,7 @@ async def delete_snapshot_endpoint(
             is_pm = current_user.role == "pm"
             if not (is_owner or is_pm):
                 return {"status": "error", "error": "삭제 권한이 없습니다."}
-        delete_snapshot(db, snapshot_id)
+        delete_snapshot(shared_db, snapshot_id)
         return {"status": "ok"}
     except Exception as e:
         get_logger().exception("delete_snapshot failed")
@@ -984,11 +867,12 @@ async def pull_snapshot_endpoint(
     snapshot_id: str,
     req: PullRequest,
     db: Session = Depends(get_db),
+    shared_db: Session = Depends(get_shared_db),
 ):
     """공유 스냅샷 데이터를 지정된 로컬 run_id 세션에 덮어써 저장(Pull)."""
     try:
         from storage.publish_service import pull_snapshot
-        result = pull_snapshot(db, snapshot_id=snapshot_id, run_id=req.run_id)
+        result = pull_snapshot(shared_db, db, snapshot_id=snapshot_id, run_id=req.run_id)
         return {"status": "ok", "data": result}
     except ValueError as e:
         return {"status": "error", "error": str(e)}

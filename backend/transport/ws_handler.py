@@ -11,8 +11,19 @@ import json
 from fastapi import WebSocket, WebSocketDisconnect
 
 from transport.connection_manager import manager
-from orchestration.pipeline_runner import run_analysis, run_idea_chat
 from observability.logger import get_logger
+
+# pipeline_runner는 langgraph를 포함하므로 첫 WS 연결 시 지연 로드
+_run_analysis = None
+_run_idea_chat = None
+
+def _ensure_ws_pipeline():
+    global _run_analysis, _run_idea_chat
+    if _run_analysis is not None:
+        return
+    from orchestration.pipeline_runner import run_analysis, run_idea_chat
+    _run_analysis = run_analysis
+    _run_idea_chat = run_idea_chat
 
 
 async def websocket_pipeline(websocket: WebSocket):
@@ -44,9 +55,11 @@ async def websocket_pipeline(websocket: WebSocket):
             payload = msg.get("payload", {})
 
             if msg_type == "analyze":
-                await run_analysis(websocket, payload)
+                _ensure_ws_pipeline()
+                await _run_analysis(websocket, payload)
             elif msg_type == "idea_chat":
-                await run_idea_chat(websocket, payload)
+                _ensure_ws_pipeline()
+                await _run_idea_chat(websocket, payload)
             elif msg_type == "ping":
                 await manager.send_json(websocket, {"type": "pong"})
             else:
