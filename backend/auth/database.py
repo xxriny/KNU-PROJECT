@@ -106,17 +106,30 @@ def init_db():
         User, Team, AnalysisSession, DesignChangeRequest,
         MemoItem, AnalysisResult,
     )
-    from auth.shared_models import PublishedSnapshot  # noqa: F401
+    from auth.shared_models import PublishedSnapshot, DevPrAnalysis, DevGapItem, DevKnowledgeArtifact  # noqa: F401
 
     # 로컬 테이블 생성 (PublishedSnapshot 제외)
+    shared_table_names = {
+        "published_snapshots",
+        "dev_pr_analysis",
+        "dev_gap_items",
+        "dev_knowledge_artifacts",
+    }
+
+    # 공유 DB 전용 테이블은 local.db에 중복 생성하지 않는다.
     local_tables = [
         t for name, t in Base.metadata.tables.items()
-        if name != "published_snapshots"
+        if name not in shared_table_names
     ]
     Base.metadata.create_all(bind=engine, tables=local_tables)
 
     # 공유 테이블 생성
-    shared_tables = [Base.metadata.tables["published_snapshots"]]
+    shared_tables = [
+        Base.metadata.tables["published_snapshots"],
+        Base.metadata.tables["dev_pr_analysis"],
+        Base.metadata.tables["dev_gap_items"],
+        Base.metadata.tables["dev_knowledge_artifacts"],
+    ]
     Base.metadata.create_all(bind=shared_engine, tables=shared_tables)
 
     _run_migrations()

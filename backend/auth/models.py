@@ -42,7 +42,7 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False)
     role = Column(
         String(20),
-        CheckConstraint("role IN ('pm', 'engineer', 'viewer', 'backend', 'frontend', 'devops')"),
+        CheckConstraint("role IN ('pm', 'engineer', 'backend', 'frontend', 'devops')"),
         nullable=False,
         default="engineer",
     )
