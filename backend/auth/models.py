@@ -12,6 +12,9 @@ from sqlalchemy import Column, String, ForeignKey, DateTime, Text, CheckConstrai
 from sqlalchemy.orm import relationship
 
 from auth.database import Base
+# author: xxrin
+# transport/auth 경로에서 auth.models.User를 계속 사용하므로 호환성을 위해 재노출합니다.
+from auth.shared_models import User
 
 
 def _new_uuid() -> str:
