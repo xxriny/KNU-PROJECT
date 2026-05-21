@@ -248,7 +248,7 @@ def stack_planner_node(state: PipelineState) -> Dict[str, Any]:
             "stack_planner_output": out.model_dump(),
             "next_crawler_inputs": next_crawler_inputs,
             "loop_count": current_loop + 1,
-            "thinking_log": (sget("thinking_log", []) or []) + [{"node": "stack_planner", "thinking": out.th}],
+            "thinking_log": [{"node": "stack_planner", "thinking": out.th}],
             "total_retries": sget("total_retries", 0) + total_retries
         }
         

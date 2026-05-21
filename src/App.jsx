@@ -14,6 +14,7 @@ import PricingScreen from "./components/billing/PricingScreen";
 
 import TopBar from "./components/layout/TopBar";
 import StudioCard from "./components/layout/StudioCard";
+import StudioSidebar from "./components/layout/StudioSidebar";
 import PanelWrapper from "./components/layout/PanelWrapper";
 import WorkspaceSwitcher from "./components/layout/WorkspaceSwitcher";
 import ToastContainer from "./components/ui/ToastContainer";
@@ -53,6 +54,7 @@ export default function App() {
   );
   const [isStudioOpen, setIsStudioOpen] = useState(true);
   const [showSidebarChat, setShowSidebarChat] = useState(false);
+  const [showProgressOverlay, setShowProgressOverlay] = useState(false);
 
   const activeOutputId = activeViewportTab?.kind === "output" ? activeViewportTab.id : null;
 
@@ -67,10 +69,10 @@ export default function App() {
       if (window.electronAPI) port = await window.electronAPI.getBackendPort();
       if (!port) port = 8765;
       setBackendPort(port);
+      // WebSocket 연결, 설정 fetch, 인증 확인 모두 동시 시작
       connectWebSocket(port);
       fetchConfig(port);
-      // auth 상태 체크는 backendPort 설정 후 별도 호출
-      setTimeout(() => checkAuthStatus(), 300);
+      checkAuthStatus();
     }
     initBackend();
   }, []);
@@ -90,6 +92,7 @@ export default function App() {
       setActiveIconPanel(null);
       setShowSessions(false);
       setShowGithubModal(false);
+      setShowProgressOverlay(true);
     }
   }, [pipelineStatus]);
 
@@ -109,27 +112,19 @@ export default function App() {
     }
 
     if (activeIconPanel) {
-      if (activeIconPanel === "home") return <HomeScreen />;
-      if (activeIconPanel === "progress") return <PipelineProgress />;
-
       const panel = ICON_PANELS.find(p => p.id === activeIconPanel);
       if (!panel) {
         setTimeout(() => setActiveIconPanel(null), 0);
         return <HomeScreen />;
       }
-
       return (
         <PanelWrapper title={panel.label || ""} onClose={() => setActiveIconPanel(null)}>
           <ResultViewer tabId={activeIconPanel} />
         </PanelWrapper>
       );
     }
-    switch (activeOutputId) {
-      case "progress": return <PipelineProgress />;
-      case "overview": return <ResultViewer tabId="overview" />;
-      case "home":
-      default: return <HomeScreen />;
-    }
+
+    return <HomeScreen />;
   };
 
   // authChecked=false → 로딩 스피너
@@ -189,12 +184,28 @@ export default function App() {
           onOpenPricing={() => { setShowPricingModal(true); }}
         />
 
-        <div className="flex-1 flex flex-col bg-transparent min-h-0 overflow-hidden">
+        <div className="flex-1 flex flex-col bg-transparent min-h-0 overflow-hidden relative">
           <div className="flex-1 min-h-0 overflow-hidden">
             <GlobalErrorBoundary>
               {renderCenter()}
             </GlobalErrorBoundary>
           </div>
+          {/* Progress 전체화면 오버레이 */}
+          {hasProgress && showProgressOverlay && (
+            <div className={`absolute inset-0 z-30 flex flex-col ${
+              isDarkMode ? "bg-[#0a0d14]" : "bg-slate-50"
+            }`}>
+              <button
+                onClick={() => setShowProgressOverlay(false)}
+                className={`absolute top-3 right-4 z-10 p-1.5 rounded-lg transition-colors ${isDarkMode ? "hover:bg-white/10 text-slate-500 hover:text-slate-300" : "hover:bg-slate-200 text-slate-400"}`}
+              >
+                <X size={14} />
+              </button>
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <PipelineProgress />
+              </div>
+            </div>
+          )}
         </div>
 
         <div
@@ -225,46 +236,32 @@ export default function App() {
 
           <div className="flex-1 flex flex-col overflow-hidden relative">
             {isStudioOpen ? (
-              <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar pb-24">
-                <div className="p-4 grid grid-cols-2 gap-3 shrink-0">
-                  {ICON_PANELS.map((panel) => {
-                    const isDisabled = false; // 항상 활성화
-                    const isActive = activeIconPanel === panel.id;
-                    return (
-                      <StudioCard
-                        key={panel.id}
-                        {...panel}
-                        isDarkMode={isDarkMode}
-                        isActive={isActive}
-                        isDisabled={isDisabled}
-                        onClick={() => !isDisabled && handleIconPanel(panel.id)}
-                      />
-                    );
-                  })}
-                </div>
+              <div className="flex-1 overflow-y-auto custom-scrollbar pb-24">
+                <StudioSidebar
+                  panels={ICON_PANELS}
+                  activeIconPanel={activeIconPanel}
+                  isDarkMode={isDarkMode}
+                  hasProgress={hasProgress}
+                  pipelineStatus={pipelineStatus}
+                  onPanel={handleIconPanel}
+                  onOpenProgress={() => setShowProgressOverlay(true)}
+                />
               </div>
             ) : (
-              <div className="flex-1 flex flex-col items-center py-4 gap-4 w-full overflow-y-auto custom-scrollbar pb-24">
-                <div className="w-10 border-t border-white/5 my-1" />
+              <div className="flex-1 flex flex-col items-center py-3 gap-2 w-full overflow-y-auto custom-scrollbar pb-24">
                 {ICON_PANELS.map((panel) => {
-                  const isDisabled = false; // 항상 활성화
                   const isActive = activeIconPanel === panel.id;
                   return (
-                    <div key={panel.id} className="w-full flex justify-center">
-                      <button
-                        onClick={() => !isDisabled && handleIconPanel(panel.id)}
-                        disabled={isDisabled}
-                        title={panel.label}
-                        className={`w-12 h-12 flex items-center justify-center rounded-xl transition-all ${isActive
-                          ? "bg-[var(--accent)]/20 text-[var(--accent)] shadow-glow"
-                          : isDisabled
-                            ? "text-slate-700 opacity-20 cursor-not-allowed"
-                            : "text-slate-500 hover:text-white hover:bg-white/10"
-                          }`}
-                      >
-                        <panel.Icon size={20} />
-                      </button>
-                    </div>
+                    <button
+                      key={panel.id}
+                      onClick={() => handleIconPanel(panel.id)}
+                      title={panel.label}
+                      className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${
+                        isActive ? "bg-[var(--accent)]/20 text-[var(--accent)]" : "text-slate-500 hover:text-white hover:bg-white/10"
+                      }`}
+                    >
+                      <panel.Icon size={17} />
+                    </button>
                   );
                 })}
               </div>

@@ -19,6 +19,7 @@ _SA_CHAIN = (
     "sa_merge_project",
     "component_scheduler",
     "sa_unified_modeler",
+    # sa_test_analysis + sa_project_structure run in parallel after sa_unified_modeler
     "sa_test_analysis",
     "sa_project_structure",
 )
@@ -142,8 +143,10 @@ def _build_sa_pipeline():
     workflow.add_edge(START, "sa_merge_project")
     workflow.add_edge("sa_merge_project", "component_scheduler")
     workflow.add_edge("component_scheduler", "sa_unified_modeler")
+    # Fan-out: sa_test_analysis와 sa_project_structure 병렬 실행
     workflow.add_edge("sa_unified_modeler", "sa_test_analysis")
-    workflow.add_edge("sa_test_analysis", "sa_project_structure")
+    workflow.add_edge("sa_unified_modeler", "sa_project_structure")
+    workflow.add_edge("sa_test_analysis", END)
     workflow.add_edge("sa_project_structure", END)
 
     return workflow.compile()
@@ -215,8 +218,10 @@ def get_analysis_pipeline(action_type: str = "CREATE"):
 
     workflow.add_edge("sa_merge_project", "component_scheduler")
     workflow.add_edge("component_scheduler", "sa_unified_modeler")
+    # Fan-out: sa_test_analysis와 sa_project_structure 병렬 실행
     workflow.add_edge("sa_unified_modeler", "sa_test_analysis")
-    workflow.add_edge("sa_test_analysis", "sa_project_structure")
+    workflow.add_edge("sa_unified_modeler", "sa_project_structure")
+    workflow.add_edge("sa_test_analysis", END)
     workflow.add_edge("sa_project_structure", END)
 
     return workflow.compile()

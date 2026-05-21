@@ -182,6 +182,6 @@ def sa_merge_project_node(ctx: NodeContext) -> dict:
         "sa_merge_project_output": {**output.model_dump(), "mode": action_type},
         "merged_project": merged_project,
         "action_type": action_type,
-        "thinking_log": (sget("thinking_log", []) or []) + [{"node": "sa_merge_project", "thinking": thinking_msg}],
+        "thinking_log": [{"node": "sa_merge_project", "thinking": thinking_msg}],
         "current_step": "sa_merge_project_done",
     }

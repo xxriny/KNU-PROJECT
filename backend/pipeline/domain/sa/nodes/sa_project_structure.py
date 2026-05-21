@@ -129,7 +129,5 @@ def sa_project_structure_node(ctx: NodeContext) -> dict:
         "sa_project_structure_output": output_dict,
         "sa_arch_bundle": sa_bundle,
         "current_step": "sa_project_structure_done",
-        "thinking_log": (sget("thinking_log", []) or []) + [
-            {"node": "sa_project_structure", "thinking": res.parsed.thinking or "프로젝트 구조 설계 완료"}
-        ],
+        "thinking_log": [{"node": "sa_project_structure", "thinking": res.parsed.thinking or "프로젝트 구조 설계 완료"}],
     }

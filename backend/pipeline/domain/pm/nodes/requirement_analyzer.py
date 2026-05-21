@@ -396,7 +396,7 @@ def requirement_analyzer_node(state: PipelineState) -> Dict[str, Any]:
             "features": features,           # 신규 규격
             "metadata": metadata,
             "total_retries": sget("total_retries", 0) + retry_count,
-            "thinking_log": (sget("thinking_log", []) or []) + [{"node": "requirement_analyzer", "thinking": thinking}],
+            "thinking_log": [{"node": "requirement_analyzer", "thinking": thinking}],
             "current_step": "requirement_analyzer_done",
             "action_type": action_type
         }
@@ -405,6 +405,6 @@ def requirement_analyzer_node(state: PipelineState) -> Dict[str, Any]:
         logger.exception("requirement_analyzer_node failed")
         return {
             "error": f"요구사항 분석 실패: {str(e)}",
-            "thinking_log": (sget("thinking_log", []) or []) + [{"node": "requirement_analyzer", "thinking": f"오류 발생: {e}"}],
+            "thinking_log": [{"node": "requirement_analyzer", "thinking": f"오류 발생: {e}"}],
             "current_step": "error"
         }

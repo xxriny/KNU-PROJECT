@@ -68,18 +68,21 @@ export const createAuthSlice = (set, get) => ({
 
   /** 앱 시작 시 서버에서 사용자 존재 여부 확인 */
   checkAuthStatus: async () => {
-    const { backendPort } = get();
+    const { backendPort, authToken } = get();
     if (!backendPort) return;
     try {
-      const res = await fetch(`http://127.0.0.1:${backendPort}/auth/status`);
-      const data = await res.json();
-      set({ hasUsers: data.has_users, authChecked: true });
+      // /auth/status와 /auth/me를 동시에 요청 (토큰이 있을 때)
+      const [statusRes, meRes] = await Promise.all([
+        fetch(`http://127.0.0.1:${backendPort}/auth/status`),
+        authToken
+          ? fetch(`http://127.0.0.1:${backendPort}/auth/me`, { headers: get().getAuthHeader() })
+          : Promise.resolve(null),
+      ]);
 
-      // 저장된 토큰이 있으면 유효성 재확인 + 최신 사용자 정보(plan 포함) 갱신
-      if (get().authToken) {
-        const meRes = await fetch(`http://127.0.0.1:${backendPort}/auth/me`, {
-          headers: get().getAuthHeader(),
-        });
+      const statusData = await statusRes.json();
+      set({ hasUsers: statusData.has_users, authChecked: true });
+
+      if (meRes) {
         if (!meRes.ok) {
           get().clearAuth();
         } else {
@@ -232,11 +235,11 @@ export const createAuthSlice = (set, get) => ({
 
     const isFirstVisit = !get().teamWorkspaces[teamId];
 
-    // 첫 방문 팀이면 데이터 병렬 fetch (UI 전환과 동시에 시작)
-    if (isFirstVisit) {
-      Promise.all([get().loadSnapshots(), get().loadLocalResults()]);
-    }
-    get().loadMyTeams();
+    // 팀 목록 + 첫 방문 시 스냅샷·로컬결과를 모두 병렬로 fire-and-forget
+    Promise.all([
+      get().loadMyTeams(),
+      ...(isFirstVisit ? [get().loadSnapshots(), get().loadLocalResults()] : []),
+    ]);
 
     // ── 2. 백그라운드에서 서버 확인 ──────────────────────────
     try {

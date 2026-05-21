@@ -264,6 +264,6 @@ def sa_unified_modeler_node(ctx: NodeContext) -> dict:
         "sa_unified_modeler_output": output.model_dump(),
         "sa_arch_bundle": sa_arch_bundle,
         "sa_output": {"status": "PASS", "data": expanded_data}, # UI 탭 활성화를 위한 폴백
-        "thinking_log": (sget("thinking_log", []) or []) + [{"node": "unified_modeler", "thinking": output.thinking or ""}],
+        "thinking_log": [{"node": "unified_modeler", "thinking": output.thinking or ""}],
         "current_step": "unified_modeling_done"
     }

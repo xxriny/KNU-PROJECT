@@ -153,6 +153,6 @@ def component_scheduler_node(ctx: NodeContext) -> dict:
     output = res.parsed
     return {
         "component_scheduler_output": output.model_dump(),
-        "thinking_log": (sget("thinking_log", []) or []) + [{"node": "component_scheduler", "thinking": output.thinking or ""}],
+        "thinking_log": [{"node": "component_scheduler", "thinking": output.thinking or ""}],
         "current_step": "component_scheduler_done"
     }

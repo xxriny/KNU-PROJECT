@@ -143,7 +143,5 @@ def sa_test_analysis_node(ctx: NodeContext) -> dict:
         "sa_test_analysis_output": output_dict,
         "sa_arch_bundle": sa_bundle,
         "current_step": "sa_test_analysis_done",
-        "thinking_log": (sget("thinking_log", []) or []) + [
-            {"node": "sa_test_analysis", "thinking": res.parsed.thinking or "테스트 전략 분석 완료"}
-        ],
+        "thinking_log": [{"node": "sa_test_analysis", "thinking": res.parsed.thinking or "테스트 전략 분석 완료"}],
     }

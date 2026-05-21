@@ -1,11 +1,9 @@
 import {
-  House, Activity, Table2, Layers, Globe, Database,
+  Table2, Layers, Globe, Database,
   ShieldCheck, FolderTree, GitBranch, ClipboardCheck, Github, ClipboardList, Share2,
 } from "lucide-react";
 
 export const ICON_PANELS = [
-  { id: "home", label: "Home", Icon: House, group: null, color: "text-white", bg: "bg-slate-500/10" },
-  { id: "progress", label: "Progress", Icon: Activity, group: null, color: "text-yellow-400", bg: "bg-yellow-500/10" },
   { id: "rtm", label: "RTM", Icon: Table2, group: "pm", color: "text-cyan-400", bg: "bg-cyan-500/10" },
   { id: "stack", label: "Stack", Icon: Layers, group: "pm", color: "text-indigo-400", bg: "bg-indigo-500/10" },
   { id: "sa_components", label: "Components", Icon: Layers, group: "sa", color: "text-teal-400", bg: "bg-teal-500/10" },
