@@ -10,7 +10,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Column, String, ForeignKey, DateTime, Text, Integer, Boolean,
-    CheckConstraint, Index,
+    CheckConstraint, Index, UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -45,9 +45,9 @@ class User(SharedBase):
     email = Column(String(255), unique=True, nullable=False)
     role = Column(
         String(20),
-        CheckConstraint("role IN ('pm', 'engineer', 'backend', 'frontend', 'devops')"),
+        CheckConstraint("role IN ('pm', 'software_engineer', 'backend', 'frontend', 'devops')"),
         nullable=False,
-        default="engineer",
+        default="software_engineer",
     )
     github_username = Column(String(255), nullable=True)
     github_id = Column(String(64), unique=True, nullable=True)
@@ -57,6 +57,29 @@ class User(SharedBase):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     team = relationship("Team", back_populates="users")
+
+class TeamMember(SharedBase):
+    """N:M 다중 팀 소속 관계 테이블."""
+    __tablename__ = "team_members"
+
+    id = Column(String(36), primary_key=True, default=_new_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    team_id = Column(String(36), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    role = Column(
+        String(20),
+        CheckConstraint("role IN ('pm', 'software_engineer', 'backend', 'frontend', 'devops')"),
+        nullable=False,
+        default="software_engineer",
+    )
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        # 동일한 사용자가 같은 팀에 중복 소속되지 않도록 제한
+        UniqueConstraint("user_id", "team_id", name="uq_user_team"),
+    )
+
+    user = relationship("User")
+    team = relationship("Team")
 
 
 class Subscription(SharedBase):
@@ -102,3 +125,19 @@ class PublishedSnapshot(SharedBase):
     __table_args__ = (
         Index("ix_published_snapshots_team_id", "team_id"),
     )
+
+class TeamInvite(SharedBase):
+    __tablename__ = "team_invites"
+
+    id = Column(String(36), primary_key=True, default=_new_uuid)
+    team_id = Column(String(36), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(100), unique=True, index=True, nullable=False)
+    creator_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role = Column(String(20), nullable=False, default="engineer")
+    max_uses = Column(Integer, nullable=False, default=1)
+    used_count = Column(Integer, nullable=False, default=0)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    team = relationship("Team")
+    creator = relationship("User")

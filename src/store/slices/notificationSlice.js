@@ -1,10 +1,11 @@
 export const createNotificationSlice = (set, get) => ({
   notifications: [],
   
-  addNotification: (message, type = "info", duration = 5000) => {
+  // meta: { teamId, action } 등 액션 페이로드 (선택)
+  addNotification: (message, type = "info", meta = null, duration = 6000) => {
     const id = Date.now().toString();
-    const notification = { id, message, type, duration };
-    
+    const notification = { id, message, type, meta, duration };
+
     set((state) => ({
       notifications: [notification, ...state.notifications]
     }));

@@ -3,15 +3,11 @@
  */
 import React, { useState, useEffect, useRef } from "react";
 import useAppStore from "../store/useAppStore";
-import { Key, Cpu, Users, Sun, Moon, Github, Check, X, Loader2, Shield, ChevronDown, CreditCard, Zap } from "lucide-react";
+import { Github, Check, X, Loader2, ChevronDown } from "lucide-react";
 
 export default function SettingsPanel({ onShowPricing }) {
   const {
-    apiKey, setApiKey,
-    model, setModel,
-    availableModels,
-    backendHasKey,
-    isDarkMode, toggleDarkMode,
+    isDarkMode,
     backendPort,
     startGithubDeviceFlow,
     pollGithubDeviceFlow,
@@ -25,45 +21,9 @@ export default function SettingsPanel({ onShowPricing }) {
   } = useAppStore();
   const authToken = useAppStore((s) => s.authToken);
   const currentUser = useAppStore((s) => s.currentUser);
-  const userPlan = useAppStore((s) => s.userPlan);
   const isGithubConnected = !!currentUser?.github_id;
 
-  const [teamName, setTeamNameLocal] = useState("");
-  const [teamLoading, setTeamLoading] = useState(false);
-  const [teamStatus, setTeamStatus] = useState(null); // null | "ok" | "error"
   const [oauthConfig, setOauthConfig] = useState({ client_id: "", client_secret: "", github_repo: "" });
-
-  // 팀원 관리 state
-  const [members, setMembers] = useState([]);
-  const [membersLoading, setMembersLoading] = useState(false);
-  const [roleUpdating, setRoleUpdating] = useState(null); // user_id being updated
-  const [showMembers, setShowMembers] = useState(false);
-
-  const fetchMembers = async () => {
-    if (!authToken) return;
-    setMembersLoading(true);
-    try {
-      const res = await fetch(`http://127.0.0.1:${backendPort}/api/teams/me/members`, {
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      const data = await res.json();
-      setMembers(data.members || []);
-    } catch (_) {}
-    finally { setMembersLoading(false); }
-  };
-
-  const updateRole = async (userId, newRole) => {
-    setRoleUpdating(userId);
-    try {
-      await fetch(`http://127.0.0.1:${backendPort}/api/users/${userId}/role`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
-        body: JSON.stringify({ role: newRole }),
-      });
-      setMembers((prev) => prev.map((m) => m.id === userId ? { ...m, role: newRole } : m));
-    } catch (_) {}
-    finally { setRoleUpdating(null); }
-  };
 
   // 레포 피커 state
   const [repoList, setRepoList] = useState([]);
@@ -100,13 +60,11 @@ export default function SettingsPanel({ onShowPricing }) {
     })
       .then((r) => r.json())
       .then((d) => {
-        if (d.team?.name) setTeamNameLocal(d.team.name);
         setOauthConfig((p) => ({
           ...p,
           client_id: d.team?.github_client_id || "",
           github_repo: d.team?.github_repo || "",
         }));
-        // ★ githubToken이 있을 때만 덮어씀 — 빈 토큰으로 localStorage가 망가지는 것 방지
         if (d.team?.github_repo && githubToken) {
           const parts = d.team.github_repo.split("/");
           if (parts.length === 2) {
@@ -115,29 +73,7 @@ export default function SettingsPanel({ onShowPricing }) {
         }
       })
       .catch(() => {});
-  }, [backendPort, authToken]); // githubToken은 의도적으로 dep에서 제외 (초기화 루프 방지)
-
-  const saveTeamName = async () => {
-    if (!teamName.trim()) return;
-    setTeamLoading(true);
-    setTeamStatus(null);
-    try {
-      const port = backendPort || 8000;
-      const res = await fetch(`http://127.0.0.1:${port}/api/teams/me`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
-        body: JSON.stringify({ name: teamName.trim() }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      if (json.status === "ok") setTeamStatus("ok");
-      else throw new Error(json.detail || "저장 실패");
-    } catch (e) {
-      setTeamStatus("error");
-    } finally {
-      setTeamLoading(false);
-    }
-  };
+  }, [backendPort, authToken]);
 
   const saveOauthConfig = async () => {
     setOauthLoading(true);
@@ -164,17 +100,8 @@ export default function SettingsPanel({ onShowPricing }) {
   };
 
   // ── Auto Save Logic ──
-  const teamSaveTimer = useRef(null);
   const oauthSaveTimer = useRef(null);
   const isFirstMount = useRef(true);
-
-  useEffect(() => {
-    if (isFirstMount.current) return;
-    if (!teamName.trim()) return;
-    clearTimeout(teamSaveTimer.current);
-    teamSaveTimer.current = setTimeout(saveTeamName, 1000);
-    return () => clearTimeout(teamSaveTimer.current);
-  }, [teamName]);
 
   useEffect(() => {
     if (isFirstMount.current) {
@@ -319,12 +246,11 @@ export default function SettingsPanel({ onShowPricing }) {
   );
 
   const ROLE_META = {
-    pm:       { label: "PM",        cls: "bg-purple-500/15 text-purple-400 border-purple-500/20" },
-    engineer: { label: "Engineer",  cls: "bg-blue-500/15 text-blue-400 border-blue-500/20" },
-    backend:  { label: "백엔드",    cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20" },
-    frontend: { label: "프론트엔드",cls: "bg-amber-500/15 text-amber-400 border-amber-500/20" },
-    devops:   { label: "DevOps",    cls: "bg-rose-500/15 text-rose-400 border-rose-500/20" },
-    viewer:   { label: "Viewer",    cls: "bg-slate-500/15 text-slate-400 border-slate-500/20" },
+    pm:               { label: "PM",       full: "PM (프로덕트 매니저)",        cls: "bg-purple-500/15 text-purple-400 border-purple-500/20" },
+    software_engineer:{ label: "SWE",      full: "Software Engineer (개발자)",  cls: "bg-blue-500/15 text-blue-400 border-blue-500/20" },
+    backend:          { label: "Backend",  full: "Backend (백엔드)",            cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20" },
+    frontend:         { label: "Frontend", full: "Frontend (프론트엔드)",       cls: "bg-amber-500/15 text-amber-400 border-amber-500/20" },
+    devops:           { label: "DevOps",   full: "DevOps",                      cls: "bg-rose-500/15 text-rose-400 border-rose-500/20" },
   };
   const RoleBadge = ({ role }) => {
     const meta = ROLE_META[role] || { label: role, cls: "bg-slate-500/15 text-slate-400 border-slate-500/20" };
@@ -333,161 +259,7 @@ export default function SettingsPanel({ onShowPricing }) {
     );
   };
 
-  return (
-    <div className="flex flex-col h-full overflow-y-auto custom-scrollbar">
-      {/* Page header */}
-      <div className={`px-6 py-5 border-b shrink-0 ${isDarkMode ? "border-white/5" : "border-slate-200"}`}>
-        <h1 className={`text-lg font-black tracking-tight ${isDarkMode ? "text-white" : "text-slate-900"}`}>설정</h1>
-        <p className="text-xs opacity-40 mt-0.5">워크스페이스 및 팀 설정을 관리합니다</p>
-      </div>
-
-      <div className="p-5 space-y-4 max-w-md mx-auto w-full">
-
-        {/* AI 설정 */}
-        <div className={sectionCls}>
-          <SectionHeader icon={Cpu} title="AI 설정" />
-          <div className="p-4 space-y-3">
-            <div className="space-y-1.5">
-              <label className="flex items-center justify-between text-xs font-semibold opacity-60">
-                <span className="flex items-center gap-1.5"><Key size={11} /> Gemini API Key</span>
-                {backendHasKey && !apiKey && <span className="text-emerald-400 font-bold">.env 사용 중</span>}
-              </label>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder={backendHasKey ? ".env에서 자동 로드됨" : "sk-..."}
-                className={inputCls}
-              />
-              {backendHasKey && !apiKey && (
-                <p className="text-[10px] opacity-40">직접 입력 시 .env보다 우선 적용됩니다</p>
-              )}
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold opacity-60">모델 선택</label>
-              <select
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className={inputCls}
-              >
-                {availableModels.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* 팀 설정 */}
-        <div className={sectionCls}>
-          <SectionHeader icon={Users} title="팀 설정" />
-          <div className="p-4 space-y-3">
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold opacity-60">팀 이름</label>
-              <div className="flex gap-2 items-center">
-                <input
-                  type="text"
-                  value={teamName}
-                  onChange={(e) => { setTeamNameLocal(e.target.value); setTeamStatus(null); }}
-                  placeholder="팀 이름을 입력하세요"
-                  className={`${inputCls} flex-1`}
-                />
-                <div className="w-6 flex items-center justify-center shrink-0">
-                  {teamLoading ? (
-                    <Loader2 size={14} className="animate-spin text-blue-400" />
-                  ) : teamStatus === "ok" ? (
-                    <Check size={14} className="text-emerald-400" />
-                  ) : teamStatus === "error" ? (
-                    <X size={14} className="text-red-400" />
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* 팀원 관리 */}
-          <div className={`border-t ${isDarkMode ? "border-white/5" : "border-slate-100"}`}>
-            <button
-              onClick={() => { setShowMembers((v) => !v); if (!showMembers) fetchMembers(); }}
-              className={`w-full flex items-center gap-2.5 px-4 py-3 text-xs font-semibold transition-colors ${
-                isDarkMode ? "hover:bg-white/5" : "hover:bg-slate-50"
-              }`}
-            >
-              <Shield size={13} className="opacity-50" />
-              <span className="opacity-70">팀원 권한 관리</span>
-              <ChevronDown size={12} className={`ml-auto opacity-40 transition-transform duration-200 ${showMembers ? "rotate-180" : ""}`} />
-            </button>
-
-            {showMembers && (
-              <div className={`px-4 pb-3 space-y-1.5 border-t ${isDarkMode ? "border-white/5" : "border-slate-100"}`}>
-                <div className="pt-2">
-                  {membersLoading ? (
-                    <div className="flex items-center justify-center py-5">
-                      <Loader2 size={16} className="animate-spin opacity-30" />
-                    </div>
-                  ) : members.length === 0 ? (
-                    <p className="text-xs opacity-30 text-center py-4">팀원이 없습니다.</p>
-                  ) : (
-                    members.map((m) => {
-                      const isMe = m.id === currentUser?.id;
-                      const canEdit = currentUser?.role === "pm" && !isMe;
-                      return (
-                        <div
-                          key={m.id}
-                          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${
-                            isDarkMode ? "bg-white/[0.03] hover:bg-white/[0.06]" : "bg-slate-50 hover:bg-slate-100/80"
-                          } transition-colors`}
-                        >
-                          <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${
-                            isDarkMode ? "bg-white/10 text-white/60" : "bg-slate-200 text-slate-600"
-                          }`}>
-                            {m.name?.[0]?.toUpperCase() || "?"}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className={`text-xs font-semibold truncate ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>
-                              {m.name}
-                              {isMe && <span className="ml-1.5 text-[10px] opacity-40 font-normal">나</span>}
-                            </p>
-                            {m.github_login && (
-                              <p className="text-[10px] opacity-40 truncate">@{m.github_login}</p>
-                            )}
-                          </div>
-                          {canEdit ? (
-                            <div className="relative shrink-0">
-                              <select
-                                value={m.role}
-                                disabled={roleUpdating === m.id}
-                                onChange={(e) => updateRole(m.id, e.target.value)}
-                                style={{ colorScheme: isDarkMode ? "dark" : "light" }}
-                                className={`text-[10px] font-bold px-2.5 py-1 rounded-full border appearance-none cursor-pointer transition-colors outline-none ${
-                                  ROLE_META[m.role]?.cls || "bg-slate-500/15 text-slate-400 border-slate-500/20"
-                                } ${isDarkMode ? "bg-black/20" : ""}`}
-                              >
-                                <option value="pm">PM</option>
-                                <option value="engineer">Engineer</option>
-                                <option value="backend">백엔드</option>
-                                <option value="frontend">프론트엔드</option>
-                                <option value="devops">DevOps</option>
-                                <option value="viewer">Viewer</option>
-                              </select>
-                              {roleUpdating === m.id && (
-                                <Loader2 size={10} className="animate-spin absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                              )}
-                            </div>
-                          ) : (
-                            <RoleBadge role={m.role} />
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* GitHub */}
+  const sectionGithub = (
         <div className={sectionCls}>
           <SectionHeader
             icon={Github}
@@ -725,61 +497,13 @@ export default function SettingsPanel({ onShowPricing }) {
             </div>
           </div>
         </div>
+  );
 
-        {/* 플랜 / 빌링 */}
-        <div className={sectionCls}>
-          <div className={`px-5 py-3 flex items-center justify-between border-b ${isDarkMode ? "border-white/5" : "border-[var(--border)]"}`}>
-            <div className="flex items-center gap-2">
-              <CreditCard size={13} className="text-blue-400 shrink-0" />
-              <span className="text-xs font-semibold opacity-50">플랜</span>
-            </div>
-            <span
-              className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full"
-              style={{
-                background: userPlan === "free"
-                  ? "rgba(100,116,139,0.2)"
-                  : userPlan === "pro"
-                    ? "rgba(59,130,246,0.2)"
-                    : "rgba(139,92,246,0.2)",
-                color: userPlan === "free" ? "#94A3B8"
-                  : userPlan === "pro" ? "#60A5FA"
-                  : "#A78BFA",
-              }}
-            >
-              {userPlan || "free"}
-            </span>
-          </div>
-          <button
-            onClick={() => onShowPricing?.()}
-            className={`w-full flex items-center gap-3 px-5 py-3.5 text-sm transition-colors ${
-              isDarkMode ? "hover:bg-white/5" : "hover:bg-slate-50"
-            }`}
-          >
-            <Zap size={14} className="text-yellow-400 shrink-0" />
-            <span className="opacity-70 text-xs font-semibold">
-              {userPlan === "free" ? "Pro로 업그레이드" : "플랜 관리"}
-            </span>
-          </button>
-        </div>
 
-        {/* 기타 */}
-        <div className={sectionCls}>
-          <button
-            onClick={toggleDarkMode}
-            className={`w-full flex items-center gap-3 px-5 py-3.5 text-sm transition-colors ${
-              isDarkMode ? "hover:bg-white/5" : "hover:bg-slate-50"
-            }`}
-          >
-            {isDarkMode
-              ? <Sun size={14} className="text-yellow-400 shrink-0" />
-              : <Moon size={14} className="text-blue-400 shrink-0" />
-            }
-            <span className="opacity-70 text-xs font-semibold">
-              {isDarkMode ? "라이트 모드로 전환" : "다크 모드로 전환"}
-            </span>
-          </button>
-        </div>
-
+  return (
+    <div className="h-full overflow-y-auto custom-scrollbar">
+      <div className="p-5 space-y-4">
+        {sectionGithub}
       </div>
     </div>
   );

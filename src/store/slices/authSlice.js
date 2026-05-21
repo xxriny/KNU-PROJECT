@@ -3,6 +3,8 @@
  * 로그인/로그아웃, 현재 사용자, 역할/플랜 정보
  */
 
+import { EMPTY_RESULT_FIELDS } from "../storeHelpers";
+
 const AUTH_KEY = "navigator_auth";
 
 function loadStoredAuth() {
@@ -33,6 +35,9 @@ export const createAuthSlice = (set, get) => ({
   userPlan: stored.user?.plan ?? "free",
   authChecked: false,
   hasUsers: null,
+  myTeams: [],           // 다중 팀 목록
+  teamWorkspaces: {},    // { [teamId]: parked workspace snapshot }
+  analysisOwnerTeamId: null, // 현재 실행 중인 분석을 시작한 팀
 
   // ── 액션 ────────────────────────────────────────────────
   setAuth: (token, user) => {
@@ -140,11 +145,119 @@ export const createAuthSlice = (set, get) => ({
       throw new Error(err.detail || "팀 생성 실패");
     }
     const data = await res.json();
-    // 서버가 업데이트된 user를 반환하면 스토어 갱신
     if (data.user) {
       get().setAuth(get().authToken, data.user);
     }
+    get().loadMyTeams();
     return data;
+  },
+
+  /** 내 팀 목록 불러오기 */
+  loadMyTeams: async () => {
+    const { backendPort, isAuthenticated, getAuthHeader } = get();
+    if (!backendPort || !isAuthenticated()) return;
+    try {
+      const res = await fetch(`http://127.0.0.1:${backendPort}/api/users/me/teams`, {
+        headers: getAuthHeader(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        set({ myTeams: data.teams || [] });
+      }
+    } catch (e) {
+      console.error("Failed to load my teams", e);
+    }
+  },
+
+  // 파킹/복원 대상 필드 목록
+  _workspaceFields: [
+    "pipelineStatus", "pipelineError", "pipelineNodes", "thinkingLog",
+    "agileVerifyResult", "agileImpactResult",
+    "currentSessionId", "userComments", "chatHistory", "chatInput",
+    "activeViewportTab", "activeIconPanel",
+    "snapshots", "activeSnapshot", "localResults", "publishError",
+    ...Object.keys(EMPTY_RESULT_FIELDS),
+  ],
+
+  /** 현재 팀 워크스페이스 상태를 teamWorkspaces에 파킹 */
+  _parkCurrentWorkspace: () => {
+    const s = get();
+    const teamId = s.currentUser?.team_id;
+    if (!teamId) return;
+    const snapshot = {};
+    for (const f of s._workspaceFields) snapshot[f] = s[f];
+    // 팀 전용 세션 목록도 파킹
+    snapshot._sessions = (s.sessions || []).filter(
+      (sess) => !sess.team_id || sess.team_id === teamId
+    );
+    set((prev) => ({
+      teamWorkspaces: { ...prev.teamWorkspaces, [teamId]: snapshot },
+    }));
+  },
+
+  /** teamWorkspaces에서 팀 상태 복원, 없으면 빈 상태 */
+  _restoreWorkspace: (teamId) => {
+    const parked = get().teamWorkspaces[teamId];
+    const BLANK_WORKSPACE = {
+      pipelineStatus: "idle", pipelineError: null, pipelineNodes: {}, thinkingLog: [],
+      agileVerifyResult: null, agileImpactResult: null,
+      currentSessionId: null, userComments: [], chatHistory: [], chatInput: "",
+      activeViewportTab: { kind: "output", id: "home" }, activeIconPanel: null,
+      snapshots: [], activeSnapshot: null, localResults: [], publishError: null,
+      ...EMPTY_RESULT_FIELDS,
+    };
+    const workspace = parked || BLANK_WORKSPACE;
+    const { _sessions, ...rest } = workspace;
+    set((s) => ({
+      ...rest,
+      sessions: _sessions || (s.sessions || []).filter(
+        (sess) => !sess.team_id || sess.team_id === teamId
+      ),
+    }));
+  },
+
+  /** 팀 전환 (옵티미스틱: UI 즉시 전환 → API 백그라운드 확인 → 실패 시 롤백) */
+  switchTeam: async (teamId) => {
+    const { backendPort, getAuthHeader, currentUser } = get();
+    if (currentUser?.team_id === teamId) return;
+
+    // ── 1. 즉시 UI 전환 (API 기다리지 않음) ──────────────────
+    get()._parkCurrentWorkspace();
+    const prevUser = currentUser;
+
+    // 현재 사용자 정보를 팀만 바꿔서 임시 적용
+    const optimisticUser = { ...currentUser, team_id: teamId };
+    get().setAuth(get().authToken, optimisticUser);
+    get()._restoreWorkspace(teamId);
+
+    const isFirstVisit = !get().teamWorkspaces[teamId];
+
+    // 첫 방문 팀이면 데이터 병렬 fetch (UI 전환과 동시에 시작)
+    if (isFirstVisit) {
+      Promise.all([get().loadSnapshots(), get().loadLocalResults()]);
+    }
+    get().loadMyTeams();
+
+    // ── 2. 백그라운드에서 서버 확인 ──────────────────────────
+    try {
+      const res = await fetch(`http://127.0.0.1:${backendPort}/api/users/me/teams/switch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeader() },
+        body: JSON.stringify({ team_id: teamId }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "팀 전환 실패");
+      const data = await res.json();
+      // 서버에서 받은 정확한 유저 정보로 교체 (role 등 반영)
+      get().setAuth(get().authToken, data.user);
+      return data.user;
+    } catch (e) {
+      // ── 3. 실패 시 롤백 ────────────────────────────────────
+      get()._parkCurrentWorkspace();
+      get().setAuth(get().authToken, prevUser);
+      get()._restoreWorkspace(prevUser.team_id);
+      get().addNotification(`팀 전환 실패: ${e.message}`, "error");
+      throw e;
+    }
   },
 
   /** GitHub OAuth Web Flow: 인증 URL + session_id 가져오기 */

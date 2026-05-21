@@ -8,7 +8,7 @@ PM Agent Pipeline — 유틸리티 v6.3 (FastAPI 구조 적용)
 - 재시도 로직에 지수 백오프 및 Jitter 추가 (Rate Limit 대응)
 """
 
-import json, re, os, threading, time, random
+import json, re, os, threading, time, random, urllib.request
 from pathlib import Path
 from contextvars import ContextVar
 from collections import OrderedDict
@@ -78,18 +78,37 @@ def _remember_cache_entry(cache: OrderedDict[str, Any], key: str, value: Any):
         cache.popitem(last=False)
 
 # ── API 키 해석 ────────────────────────────────
+def _fetch_key_from_server() -> str:
+    """서버(8001)의 /keys/active 엔드포인트에서 Gemini 키를 가져온다."""
+    server_url = os.environ.get("NAVIGATOR_SERVER_URL", "http://127.0.0.1:8001")
+    try:
+        req = urllib.request.Request(
+            f"{server_url}/keys/active",
+            headers={"X-Internal-Secret": os.environ.get("INTERNAL_SECRET", "navigator-internal")},
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read())
+            return data.get("api_key", "")
+    except Exception:
+        return ""
+
+
 def get_effective_key(api_key: str) -> str:
     """
-    전달받은 api_key가 비어있거나 프론트엔드 플레이스홀더('[.env]') 일 경우
-    환경변수 GEMINI_API_KEY를 사용하며, 영문/숫자 유효성 검사를 수행합니다.
+    키 우선순위:
+    1. 사용자가 직접 전달한 키
+    2. 서버(8001) /keys/active 에서 가져온 키
+    3. 백엔드 .env의 GEMINI_API_KEY 환경변수
     """
     key = (api_key or "").strip()
     if key in ("", "[.env]", "[env]"):
+        key = _fetch_key_from_server()
+    if not key:
         key = os.environ.get("GEMINI_API_KEY", "")
     if not key:
         raise ValueError(
             "Gemini API Key가 설정되지 않았습니다. "
-            "백엔드 .env 파일에 GEMINI_API_KEY=<키> 를 추가해 주세요."
+            "서버에 키를 등록하거나 백엔드 .env에 GEMINI_API_KEY를 추가해 주세요."
         )
     if not key.isascii():
         raise ValueError("API 키에 한글 등 비ASCII 문자가 포함되어 있습니다.")

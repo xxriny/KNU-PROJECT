@@ -396,3 +396,133 @@ async def update_change_request(
     cr.approved_by = current_user.id
     db.commit()
     return {"status": "ok", "new_status": cr.status}
+
+# ── 팀 초대 시스템 (Team Invites) ──────────────────────────────
+from auth.shared_models import TeamInvite
+from auth.schemas import TeamInviteCreateRequest, TeamInviteResponse
+import string
+import random
+
+def _generate_invite_code(length=12):
+    return "".join(random.choices(string.ascii_letters + string.digits, k=length))
+
+@auth_router.post("/auth/teams/{team_id}/invites", response_model=TeamInviteResponse)
+async def create_team_invite(
+    team_id: str,
+    req: TeamInviteCreateRequest,
+    current_user: User = Depends(require_pm),
+    db: Session = Depends(get_shared_db),
+):
+    if current_user.team_id != team_id:
+        raise HTTPException(status_code=403, detail="자신이 속한 팀의 초대만 생성할 수 있습니다.")
+    
+    invite = TeamInvite(
+        team_id=team_id,
+        code=_generate_invite_code(),
+        creator_id=current_user.id,
+        role=req.role,
+        max_uses=req.max_uses,
+        expires_at=datetime.utcnow() + timedelta(days=req.expires_in_days)
+    )
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
+    return invite
+
+
+@auth_router.get("/auth/teams/{team_id}/invites")
+async def list_team_invites(
+    team_id: str,
+    current_user: User = Depends(require_pm),
+    db: Session = Depends(get_shared_db),
+):
+    if current_user.team_id != team_id:
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+    invites = db.query(TeamInvite).filter(TeamInvite.team_id == team_id).all()
+    return {"status": "ok", "items": invites}
+
+
+@auth_router.delete("/auth/teams/{team_id}/invites/{code}")
+async def delete_team_invite(
+    team_id: str,
+    code: str,
+    current_user: User = Depends(require_pm),
+    db: Session = Depends(get_shared_db),
+):
+    if current_user.team_id != team_id:
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+    
+    invite = db.query(TeamInvite).filter(TeamInvite.code == code, TeamInvite.team_id == team_id).first()
+    if not invite:
+        raise HTTPException(status_code=404, detail="초대 코드를 찾을 수 없습니다.")
+    
+    db.delete(invite)
+    db.commit()
+    return {"status": "ok", "message": "초대 코드가 삭제되었습니다."}
+
+
+@auth_router.get("/auth/invites/{code}")
+async def get_invite_info(
+    code: str,
+    db: Session = Depends(get_shared_db),
+):
+    invite = db.query(TeamInvite).filter(TeamInvite.code == code).first()
+    if not invite:
+        raise HTTPException(status_code=404, detail="유효하지 않은 초대 코드입니다.")
+    
+    if invite.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="만료된 초대 코드입니다.")
+    
+    if invite.max_uses > 0 and invite.used_count >= invite.max_uses:
+        raise HTTPException(status_code=400, detail="사용 횟수가 초과된 초대 코드입니다.")
+        
+    team = db.query(Team).filter(Team.id == invite.team_id).first()
+    return {
+        "status": "ok",
+        "team_name": team.name if team else "알 수 없는 팀",
+        "role": invite.role,
+        "expires_at": invite.expires_at,
+    }
+
+
+from auth.shared_models import TeamMember
+
+@auth_router.post("/auth/invites/{code}/join")
+async def join_team_via_invite(
+    code: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_shared_db),
+):
+    invite = db.query(TeamInvite).filter(TeamInvite.code == code).first()
+    if not invite:
+        raise HTTPException(status_code=404, detail="유효하지 않은 초대 코드입니다.")
+    
+    if invite.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="만료된 초대 코드입니다.")
+    
+    if invite.max_uses > 0 and invite.used_count >= invite.max_uses:
+        raise HTTPException(status_code=400, detail="사용 횟수가 초과된 초대 코드입니다.")
+        
+    
+    # 이미 해당 팀 멤버인지 확인 (자기 초대 포함)
+    existing = db.query(TeamMember).filter(
+        TeamMember.user_id == user.id,
+        TeamMember.team_id == invite.team_id
+    ).first()
+
+    if existing:
+        raise HTTPException(status_code=400, detail="이미 해당 팀의 멤버입니다.")
+
+    tm = TeamMember(user_id=user.id, team_id=invite.team_id, role=invite.role)
+    db.add(tm)
+
+    user.team_id = invite.team_id
+    user.role = invite.role
+    
+    invite.used_count += 1
+    db.commit()
+    db.refresh(user)
+    
+    plan = _get_plan(db, user.team_id)
+    return build_user_response(user, plan)
+

@@ -48,6 +48,6 @@ def require_pm(user: User = Depends(get_current_user)) -> User:
 
 
 def require_engineer(user: User = Depends(get_current_user)) -> User:
-    if user.role not in ("pm", "engineer", "backend", "frontend", "devops"):
+    if user.role not in ("pm", "software_engineer", "engineer", "backend", "frontend", "devops"):
         raise HTTPException(status_code=403, detail="엔지니어 이상 권한이 필요합니다.")
     return user

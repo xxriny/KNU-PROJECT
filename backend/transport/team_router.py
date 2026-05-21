@@ -132,7 +132,7 @@ async def update_user_role(
     current_user: User = Depends(require_pm),
     db: Session = Depends(get_shared_db),
 ):
-    if req.role not in ("pm", "engineer", "backend", "frontend", "devops"):
+    if req.role not in ("pm", "software_engineer", "backend", "frontend", "devops"):
         raise HTTPException(status_code=400, detail="유효하지 않은 역할입니다.")
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
@@ -150,21 +150,24 @@ class TeamCreateRequest(BaseModel):
     name: str
 
 
+from auth.shared_models import TeamMember
+
 @team_router.post("/api/teams")
 async def create_team(
     req: TeamCreateRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_shared_db),
 ):
-    """팀이 없는 사용자가 새 팀을 생성합니다. 생성자는 자동으로 PM 역할을 받습니다."""
-    if current_user.team_id:
-        raise HTTPException(status_code=409, detail="이미 팀에 속해 있습니다.")
-
+    """새 팀을 생성합니다. 생성자는 자동으로 PM 역할을 받습니다."""
     team = Team(name=req.name.strip())
     db.add(team)
     db.flush()
 
-    # 생성자를 PM으로 설정하고 팀에 배정
+    # N:M 관계 (team_members) 추가
+    tm = TeamMember(user_id=current_user.id, team_id=team.id, role="pm")
+    db.add(tm)
+
+    # 활성 팀 문맥 전환
     current_user.team_id = team.id
     current_user.role = "pm"
 
@@ -179,3 +182,60 @@ async def create_team(
         "user": build_user_response(current_user, plan="free"),
         "team": {"id": team.id, "name": team.name},
     }
+
+
+# ── 다중 팀 조회 및 전환 (N:M) ───────────────────────────────
+
+@team_router.get("/api/users/me/teams")
+async def list_my_teams(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_shared_db),
+):
+    """사용자가 소속된 모든 팀 목록을 반환합니다."""
+    memberships = db.query(TeamMember).filter(TeamMember.user_id == current_user.id).all()
+    teams_data = []
+    for tm in memberships:
+        t = db.query(Team).filter(Team.id == tm.team_id).first()
+        if t:
+            teams_data.append({
+                "id": t.id,
+                "name": t.name,
+                "role": tm.role,
+                "is_active": (t.id == current_user.team_id)
+            })
+    return {"teams": teams_data}
+
+
+class SwitchTeamRequest(BaseModel):
+    team_id: str
+
+
+@team_router.post("/api/users/me/teams/switch")
+async def switch_active_team(
+    req: SwitchTeamRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_shared_db),
+):
+    """현재 활성화된 팀을 변경합니다."""
+    tm = db.query(TeamMember).filter(
+        TeamMember.user_id == current_user.id,
+        TeamMember.team_id == req.team_id
+    ).first()
+    
+    if not tm:
+        raise HTTPException(status_code=403, detail="해당 팀의 멤버가 아닙니다.")
+        
+    current_user.team_id = tm.team_id
+    current_user.role = tm.role
+    db.commit()
+    db.refresh(current_user)
+    
+    # 플랜 조회 필요
+    from auth.router import _get_plan
+    plan = _get_plan(db, current_user.team_id)
+    
+    return {
+        "status": "ok",
+        "user": build_user_response(current_user, plan=plan)
+    }
+
