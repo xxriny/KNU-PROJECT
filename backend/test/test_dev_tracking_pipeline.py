@@ -1517,6 +1517,50 @@ def test_github_webhook_endpoint_rejects_bad_signature(monkeypatch):
     assert result["signature_verified"] is False
 
 
+def test_github_webhook_endpoint_skips_duplicate_head_sha(monkeypatch):
+    import pipeline.domain.dev_tracking as dev_tracking
+    from transport.rest_handler import github_webhook_endpoint
+
+    class FakeAnalysis:
+        def __init__(self):
+            self.created_at = None
+
+    class FakeQuery:
+        def filter(self, *args, **kwargs):
+            return self
+
+        def order_by(self, *args, **kwargs):
+            return self
+
+        def first(self):
+            return FakeAnalysis()
+
+    class FakeSharedDB:
+        def query(self, model):
+            return FakeQuery()
+
+    called = {"run": False}
+
+    def fake_run_dev_tracking_analysis(payload, *, shared_db=None):
+        called["run"] = True
+        return {"status": "pending_pm_approval", "timeline": [], "data": {}}
+
+    monkeypatch.setattr(dev_tracking, "run_dev_tracking_analysis", fake_run_dev_tracking_analysis)
+
+    class FakeRequest:
+        headers = {"X-GitHub-Event": "pull_request"}
+
+        async def body(self):
+            return json.dumps(_github_pr_payload(action="opened")).encode("utf-8")
+
+    result = asyncio.run(github_webhook_endpoint(FakeRequest(), shared_db=FakeSharedDB()))
+
+    assert result["status"] == "ok"
+    assert result["handled"] is False
+    assert "duplicate head_sha" in result["reason"]
+    assert called["run"] is False
+
+
 def test_pr_status_check_updater_sets_pending_for_pm_approval(monkeypatch):
     from pipeline.domain.dev_tracking import nodes
 
