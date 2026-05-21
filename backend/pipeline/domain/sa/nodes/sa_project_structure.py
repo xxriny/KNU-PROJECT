@@ -58,7 +58,8 @@ Preserve all existing directories, files, and component_mapping. Only add new pa
 
 
 def _build_user_msg(sa_bundle: dict, pm_bundle: dict, rtm: list, action_type: str,
-                    previous_project_structure: dict = None) -> str:
+                    previous_project_structure: dict = None,
+                    dev_knowledge_context: str = "") -> str:
     data = sa_bundle.get("data", {})
     components = data.get("components", [])
 
@@ -74,8 +75,15 @@ def _build_user_msg(sa_bundle: dict, pm_bundle: dict, rtm: list, action_type: st
         prev_json = json.dumps(previous_project_structure, ensure_ascii=False)[:3000]
         prev_section = f"<previous_project_structure>\n{prev_json}\n</previous_project_structure>\n\n"
 
+    knowledge_section = ""
+    # author: xxrin
+    # 업데이트 모드 구조 설계가 승인된 변경과 맞도록 Dev Tracking 컨텍스트를 전달합니다.
+    if dev_knowledge_context:
+        knowledge_section = f"## Dev Tracking Knowledge\n{dev_knowledge_context}\n\n"
+
     return (
         f"{prev_section}"
+        f"{knowledge_section}"
         f"## Action Type: {action_type}\n\n"
         f"## Tech Stacks ({len(tech_stacks)}개)\n```json\n{stacks_text}\n```\n\n"
         f"## Components ({len(components)}개)\n```json\n{components_text}\n```\n\n"
@@ -101,7 +109,14 @@ def sa_project_structure_node(ctx: NodeContext) -> dict:
         return {"current_step": "sa_project_structure_done"}
 
     previous_project_structure = sget("previous_project_structure", None)
-    user_msg = _build_user_msg(sa_bundle, pm_bundle, rtm, action_type, previous_project_structure)
+    user_msg = _build_user_msg(
+        sa_bundle,
+        pm_bundle,
+        rtm,
+        action_type,
+        previous_project_structure,
+        str(sget("dev_knowledge_context", "") or ""),
+    )
 
     system_prompt = UPDATE_SYSTEM_PROMPT if action_type == "UPDATE" else CREATE_SYSTEM_PROMPT
 

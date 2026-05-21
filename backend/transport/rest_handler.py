@@ -7,17 +7,20 @@ main.py에서 app.include_router(rest_router) 호출.
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
+import hmac
+import json
 import os
 import re
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from auth.deps import get_current_user, get_current_user_optional
 from auth.database import get_db, get_shared_db
 from sqlalchemy.orm import Session
-from auth.shared_models import User
-from pydantic import BaseModel
+from auth.models import User
+from pydantic import BaseModel, Field
 from version import APP_VERSION, DEFAULT_MODEL
 from observability.logger import get_logger
 # pipeline 관련 임포트는 첫 요청 시 지연 로드 (langgraph 콜드스타트 방지)
@@ -91,6 +94,11 @@ class AnalysisRequest(BaseModel):
     source_dir: str = ""
     user_id: Optional[str] = None
     team_id: Optional[str] = None
+    use_dev_knowledge: bool = True
+    owner: str = ""
+    repo: str = ""
+    branch_name: str = ""
+    dev_knowledge_query: str = ""
 
 
 class IdeaChatRequest(BaseModel):
@@ -242,7 +250,7 @@ def _compact_result_value(value, *, depth: int = 0):
 
 
 @rest_router.post("/api/analyze")
-async def analyze(req: AnalysisRequest):
+async def analyze(req: AnalysisRequest, shared_db: Session = Depends(get_shared_db)):
     _ensure_pipeline()
     try:
         api_key = req.api_key
@@ -263,6 +271,24 @@ async def analyze(req: AnalysisRequest):
             if code_inventory:
                 extra_state["code_inventory"] = code_inventory
 
+        dev_knowledge_context = ""
+        if req.use_dev_knowledge and action_type in {"UPDATE", "REVERSE_ENGINEER"}:
+            try:
+                from pipeline.domain.dev_tracking.knowledge import query_dev_knowledge_artifacts
+
+                knowledge = query_dev_knowledge_artifacts(
+                    shared_db,
+                    team_id=req.team_id or "",
+                    owner=req.owner,
+                    repo=req.repo,
+                    branch_name=req.branch_name,
+                    query=req.dev_knowledge_query or req.idea,
+                    limit=5,
+                )
+                dev_knowledge_context = knowledge.get("context_text", "")
+            except Exception as knowledge_error:
+                get_logger().warning(f"Dev Tracking knowledge lookup skipped for SA analysis: {knowledge_error}")
+
         return _to_response(execute_pipeline(
             get_analysis_pipeline(action_type),
             {
@@ -272,6 +298,7 @@ async def analyze(req: AnalysisRequest):
                 "project_context": context,
                 "source_dir": req.source_dir,
                 "action_type": action_type,
+                "dev_knowledge_context": dev_knowledge_context,
                 "run_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
                 **extra_state,
             },
@@ -436,6 +463,12 @@ class AgileImpactRequest(BaseModel):
     model: str = DEFAULT_MODEL
     session_id: Optional[str] = None
     use_llm: bool = True
+    use_dev_knowledge: bool = True
+    team_id: str = ""
+    owner: str = ""
+    repo: str = ""
+    branch_name: str = ""
+    dev_knowledge_query: str = ""
 
 
 @rest_router.post("/api/agile/verify")
@@ -457,12 +490,29 @@ async def agile_verify(req: AgileVerifyRequest):
 
 
 @rest_router.post("/api/agile/impact")
-async def agile_impact(req: AgileImpactRequest):
+async def agile_impact(req: AgileImpactRequest, shared_db: Session = Depends(get_shared_db)):
     """변경 영향 분석 (RAG + LLM 2-stage)."""
     if not req.change_description.strip():
         return {"status": "error", "error": "change_description이 비어있습니다."}
     try:
         from pipeline.domain.agile.nodes.impact import run_impact_analyzer
+        dev_knowledge_context = ""
+        if req.use_dev_knowledge:
+            try:
+                from pipeline.domain.dev_tracking.knowledge import query_dev_knowledge_artifacts
+
+                knowledge = query_dev_knowledge_artifacts(
+                    shared_db,
+                    team_id=req.team_id,
+                    owner=req.owner,
+                    repo=req.repo,
+                    branch_name=req.branch_name,
+                    query=req.dev_knowledge_query or req.change_description,
+                    limit=5,
+                )
+                dev_knowledge_context = knowledge.get("context_text", "")
+            except Exception as knowledge_error:
+                get_logger().warning(f"Dev Tracking knowledge lookup skipped: {knowledge_error}")
         result = run_impact_analyzer(
             change_description=req.change_description,
             sa_data=req.sa_data,
@@ -470,6 +520,7 @@ async def agile_impact(req: AgileImpactRequest):
             model=req.model,
             session_id=req.session_id,
             use_llm=req.use_llm,
+            dev_knowledge_context=dev_knowledge_context,
         )
         return {"status": "ok", "data": result.model_dump()}
     except Exception as e:
@@ -678,6 +729,90 @@ class GitHubIssuesImportRequest(BaseModel):
     model: str = DEFAULT_MODEL
 
 
+class DevTrackingRequest(BaseModel):
+    # author:xxrin
+    # navi_v3 PR 기반 Dev Tracking MVP endpoint의 요청 형식.
+    trigger: str = "GITHUB_PR_WEBHOOK"
+    repository: dict
+    pull_request: dict
+    actor: dict = Field(default_factory=dict)
+    source_dir: Optional[str] = None
+    github_token: Optional[str] = None
+    api_key: str = ""
+    model: str = DEFAULT_MODEL
+    # author:xxrin
+    # None은 api_key 기반 기본 동작을 유지하고, false는 해당 노드 LLM 호출을 명시적으로 끈다.
+    use_llm_forensic_profiler: Optional[bool] = None
+    use_llm_gap_analyzer: Optional[bool] = None
+    use_llm_intent_classifier: Optional[bool] = None
+    compress_prompt: bool = True
+    notify_pr: bool = False
+    team_id: Optional[str] = None
+    created_by: str = ""
+
+
+class DevKnowledgeQueryRequest(BaseModel):
+    team_id: str = ""
+    owner: str = ""
+    repo: str = ""
+    branch_name: str = ""
+    artifact_type: str = ""
+    query: str = ""
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+def _verify_github_webhook_signature(
+    raw_body: bytes,
+    signature_header: str,
+    secret: str,
+) -> tuple[bool, str]:
+    if not secret:
+        return True, "webhook secret is not configured; signature verification skipped"
+    if not signature_header:
+        return False, "missing X-Hub-Signature-256"
+    if not signature_header.startswith("sha256="):
+        return False, "invalid X-Hub-Signature-256 format"
+
+    expected = "sha256=" + hmac.new(
+        secret.encode("utf-8"),
+        raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, signature_header):
+        return False, "invalid X-Hub-Signature-256"
+    return True, ""
+
+
+def _normalize_github_pr_webhook(payload: dict) -> dict:
+    repository = payload.get("repository") if isinstance(payload.get("repository"), dict) else {}
+    pull_request = payload.get("pull_request") if isinstance(payload.get("pull_request"), dict) else {}
+    sender = payload.get("sender") if isinstance(payload.get("sender"), dict) else {}
+    owner_obj = repository.get("owner") if isinstance(repository.get("owner"), dict) else {}
+    head = pull_request.get("head") if isinstance(pull_request.get("head"), dict) else {}
+    base = pull_request.get("base") if isinstance(pull_request.get("base"), dict) else {}
+
+    return {
+        "trigger": "GITHUB_PR_WEBHOOK",
+        "repository": {
+            "owner": owner_obj.get("login") or repository.get("owner") or "",
+            "repo": repository.get("name") or "",
+        },
+        "pull_request": {
+            "pr_number": pull_request.get("number") or payload.get("number"),
+            "branch_name": head.get("ref") or "",
+            "base_branch": base.get("ref") or "",
+            "head_sha": head.get("sha") or "",
+            "created_at": pull_request.get("created_at") or "",
+            "title": pull_request.get("title") or "",
+            "description": pull_request.get("body") or "",
+        },
+        "actor": {
+            "github_id": sender.get("login") or "",
+            "role": "developer",
+        },
+    }
+
+
 @rest_router.post("/api/tasks")
 async def create_task_endpoint(req: TaskCreateRequest):
     """새 태스크 생성 (PM 승인 대기)."""
@@ -700,6 +835,143 @@ async def create_task_endpoint(req: TaskCreateRequest):
         return {"status": "error", "error": str(e)}
 
 
+@rest_router.post("/api/webhook/github")
+async def github_webhook_endpoint(
+    request: Request,
+    shared_db: Session = Depends(get_shared_db),
+):
+    """GitHub PR webhook adapter for Dev Tracking."""
+    try:
+        from pipeline.domain.dev_tracking import run_dev_tracking_analysis
+
+        raw_body = await request.body()
+        event = request.headers.get("X-GitHub-Event", "")
+        signature = request.headers.get("X-Hub-Signature-256", "")
+        secret = os.environ.get("NAVIGATOR_GITHUB_WEBHOOK_SECRET", "")
+
+        verified, verification_error = _verify_github_webhook_signature(raw_body, signature, secret)
+        if not verified:
+            return {
+                "status": "error",
+                "error": verification_error,
+                "handled": False,
+                "signature_verified": False,
+            }
+
+        try:
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            return {"status": "error", "error": "Invalid JSON payload", "handled": False}
+
+        if event != "pull_request":
+            return {
+                "status": "ok",
+                "handled": False,
+                "reason": f"ignored event: {event or 'unknown'}",
+                "signature_verified": bool(secret),
+                "signature_warning": verification_error if not secret else "",
+            }
+
+        action = str(payload.get("action") or "")
+        if action not in {"opened", "synchronize", "reopened"}:
+            return {
+                "status": "ok",
+                "handled": False,
+                "reason": f"ignored pull_request action: {action or 'unknown'}",
+                "signature_verified": bool(secret),
+                "signature_warning": verification_error if not secret else "",
+            }
+
+        normalized = _normalize_github_pr_webhook(payload)
+        normalized.update(
+            {
+                "source_dir": "",
+                "github_oauth_token": os.environ.get("NAVIGATOR_GITHUB_TOKEN")
+                or os.environ.get("GITHUB_TOKEN")
+                or "",
+                "notify_pr": True,
+                "team_id": os.environ.get("NAVIGATOR_DEFAULT_TEAM_ID", ""),
+                "created_by": normalized.get("actor", {}).get("github_id", ""),
+            }
+        )
+        result = run_dev_tracking_analysis(normalized, shared_db=shared_db)
+        return {
+            "status": "ok",
+            "handled": True,
+            "signature_verified": bool(secret),
+            "signature_warning": verification_error if not secret else "",
+            "data": result,
+        }
+    except Exception as e:
+        get_logger().exception("github_webhook_endpoint failed")
+        return {"status": "error", "error": str(e), "handled": False}
+
+
+@rest_router.post("/api/dev-tracking/pr")
+async def dev_tracking_pr_endpoint(
+    req: DevTrackingRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    shared_db: Session = Depends(get_shared_db),
+):
+    """PR 기반 Dev Tracking MVP 실행"""
+    try:
+        # author:xxrin
+        # 이 endpoint는 분리된 dev_tracking service를 호출하는 어댑터 역할만 함
+        from pipeline.domain.dev_tracking import run_dev_tracking_analysis
+
+        github_token = req.github_token
+        if not github_token and current_user:
+            github_token = current_user.github_oauth_token
+        #payload
+        payload = {
+            "trigger": req.trigger,
+            "repository": req.repository,
+            "pull_request": req.pull_request,
+            "actor": req.actor,
+            "source_dir": req.source_dir or "",
+            "github_oauth_token": github_token or "",
+            "api_key": req.api_key,
+            "model": req.model or DEFAULT_MODEL,
+            "use_llm_forensic_profiler": req.use_llm_forensic_profiler,
+            "use_llm_gap_analyzer": req.use_llm_gap_analyzer,
+            "use_llm_intent_classifier": req.use_llm_intent_classifier,
+            "compress_prompt": req.compress_prompt,
+            "notify_pr": req.notify_pr,
+            "team_id": req.team_id or (current_user.team_id if current_user else ""),
+            "created_by": req.created_by or (current_user.id if current_user else ""),
+        }
+        result = run_dev_tracking_analysis(payload, shared_db=shared_db)
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        get_logger().exception("dev_tracking_pr_endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/dev-tracking/knowledge/query")
+async def dev_tracking_knowledge_query_endpoint(
+    req: DevKnowledgeQueryRequest,
+    shared_db: Session = Depends(get_shared_db),
+):
+    """Dev Tracking 지식 아티팩트를 조회해 PM/SA 프롬프트 컨텍스트로 반환한다."""
+    try:
+        from pipeline.domain.dev_tracking.knowledge import query_dev_knowledge_artifacts
+
+        result = query_dev_knowledge_artifacts(
+            shared_db,
+            team_id=req.team_id,
+            owner=req.owner,
+            repo=req.repo,
+            branch_name=req.branch_name,
+            artifact_type=req.artifact_type,
+            query=req.query,
+            limit=req.limit,
+        )
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        get_logger().exception("dev_tracking_knowledge_query_endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
 @rest_router.get("/api/tasks")
 async def list_tasks_endpoint(status: Optional[str] = None, team_id: Optional[str] = None):
     """태스크 목록 조회."""
@@ -713,17 +985,135 @@ async def list_tasks_endpoint(status: Optional[str] = None, team_id: Optional[st
 
 
 @rest_router.patch("/api/tasks/{task_id}")
-async def update_task_endpoint(task_id: str, req: TaskUpdateRequest):
+async def update_task_endpoint(
+    task_id: str,
+    req: TaskUpdateRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     """태스크 상태 업데이트 (승인/거절/완료)."""
     allowed_statuses = {"unassigned", "pending_approval", "in_progress", "pr_pending", "completed", "rejected"}
     if req.status not in allowed_statuses:
         return {"status": "error", "error": f"Invalid status. Allowed: {allowed_statuses}"}
     try:
-        from pipeline.domain.agile.task_coordinator import update_task_status, get_task, execute_approved_task, init_tasks_db
+        import json
+        from pipeline.domain.agile.task_coordinator import get_task, update_task_status, execute_approved_task, init_tasks_db
         init_tasks_db()
-        task = update_task_status(task_id, req.status, req.reviewed_by, req.result)
+        existing_task = get_task(task_id)
+        if not existing_task:
+            return {"status": "error", "error": "Task not found"}
+
+        # Dev GAP 승인/거절은 PM 의사결정이므로 인증 사용자와 역할 검사를 강제한다.
+        is_dev_gap_decision = (
+            existing_task.get("task_type") == "dev_gap_approval"
+            and req.status in {"in_progress", "rejected"}
+        )
+        if is_dev_gap_decision:
+            if not current_user:
+                return {"status": "error", "error": "Authentication required for Dev GAP approval"}
+            if getattr(current_user, "role", "") not in {"pm", "admin"}:
+                return {"status": "error", "error": "PM or admin role required for Dev GAP approval"}
+
+        reviewed_by = (
+            str(getattr(current_user, "id", "") or "")
+            if is_dev_gap_decision and current_user
+            else req.reviewed_by
+        )
+
+        task = update_task_status(task_id, req.status, reviewed_by, req.result)
         if not task:
             return {"status": "error", "error": "Task not found"}
+
+        if task.get("task_type") == "dev_gap_approval" and req.status == "in_progress":
+            exec_result = execute_approved_task(task)
+            # PM 승인 결과를 GitHub commit status에 반영한다.
+            # GitHub status 업데이트 실패는 승인 완료 처리를 막지 않고 result에 경고로 남긴다.
+            try:
+                exec_payload = json.loads(exec_result)
+            except Exception:
+                exec_payload = {"raw_result": exec_result}
+            try:
+                from pipeline.domain.dev_tracking.nodes import update_pr_status_check
+
+                status_check = update_pr_status_check(
+                    {"pr_context": task.get("payload", {}).get("pr_context", {})},
+                    "success",
+                    "PM approved the intentional implementation change.",
+                )
+            except Exception as status_error:
+                status_check = {
+                    "status": "WARN",
+                    "status_updated": False,
+                    "error": str(status_error) or type(status_error).__name__,
+                }
+            try:
+                from pipeline.domain.dev_tracking.nodes import run_dev_gap_decision_followup
+
+                followup = run_dev_gap_decision_followup(
+                    task,
+                    "APPROVED_INTENTIONAL_CHANGE",
+                    reviewed_by,
+                    exec_payload,
+                )
+            except Exception as followup_error:
+                followup = {
+                    "status": "WARN",
+                    "error": str(followup_error) or type(followup_error).__name__,
+                }
+            exec_payload["status_check"] = status_check
+            exec_payload["followup"] = followup
+            exec_result = json.dumps(exec_payload, ensure_ascii=False)
+            updated = update_task_status(task_id, "completed", reviewed_by=reviewed_by, result=exec_result)
+            if updated:
+                task = updated
+        elif task.get("task_type") == "dev_gap_approval" and req.status == "rejected":
+            payload = task.get("payload", {}) if isinstance(task.get("payload"), dict) else {}
+            reject_payload = {
+                "message": "Dev Tracking GAP report rejected by PM.",
+                "approval_status": "REJECTED_UNINTENTIONAL_CHANGE",
+                "pr_context": payload.get("pr_context", {}),
+                "recommended_actions": ["REQUEST_FIX"],
+            }
+            if req.result:
+                try:
+                    reject_payload.update(json.loads(req.result))
+                except Exception:
+                    reject_payload["raw_result"] = req.result
+            # PM 거절 결과를 GitHub commit status에 반영한다.
+            # 실패하더라도 task 상태는 rejected로 유지하고 result에 경고를 저장한다.
+            try:
+                from pipeline.domain.dev_tracking.nodes import update_pr_status_check
+
+                status_check = update_pr_status_check(
+                    {"pr_context": payload.get("pr_context", {})},
+                    "failure",
+                    "PM rejected the implementation change.",
+                )
+            except Exception as status_error:
+                status_check = {
+                    "status": "WARN",
+                    "status_updated": False,
+                    "error": str(status_error) or type(status_error).__name__,
+                }
+            try:
+                from pipeline.domain.dev_tracking.nodes import run_dev_gap_decision_followup
+
+                followup = run_dev_gap_decision_followup(
+                    task,
+                    "REJECTED_UNINTENTIONAL_CHANGE",
+                    reviewed_by,
+                    reject_payload,
+                )
+            except Exception as followup_error:
+                followup = {
+                    "status": "WARN",
+                    "error": str(followup_error) or type(followup_error).__name__,
+                }
+            reject_payload["status_check"] = status_check
+            reject_payload["followup"] = followup
+            reject_result = json.dumps(reject_payload, ensure_ascii=False)
+            updated = update_task_status(task_id, "rejected", reviewed_by=reviewed_by, result=reject_result)
+            if updated:
+                task = updated
 
         return {"status": "ok", "data": task}
     except Exception as e:

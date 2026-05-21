@@ -333,7 +333,9 @@ def _validate_llm_intent_classification(
 
 
 def dev_task_planner(state: dict[str, Any]) -> dict[str, Any]:
-    # author:xxrin
+    # author: xxrin
+    # PR 이벤트 입력을 공통 컨텍스트(pr_context)로 정규화합니다.
+    # 이후 노드가 입력 포맷 차이 없이 동일 키를 안정적으로 참조하도록 하기 위함입니다.
     # GitHub PR/webhook payload를 이후 노드들이 공통으로 쓰는 pr_context로 정리한다.
     repository = _as_dict(state.get("repository"))
     pull_request = _as_dict(state.get("pull_request"))
@@ -1640,6 +1642,9 @@ def task_coordinator(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def analysis_persister(state: dict[str, Any], shared_db: Any = None) -> dict[str, Any]:
+    # author: xxrin
+    # 분석 결과와 GAP 분류 결과를 shared.db에 영속 저장합니다.
+    # PM 승인 이후에도 추적 가능한 감사 이력과 재조회 가능한 근거 데이터를 남기기 위함입니다.
     if shared_db is None:
         return {
             "status": "SKIPPED",
@@ -1718,7 +1723,9 @@ def analysis_persister(state: dict[str, Any], shared_db: Any = None) -> dict[str
 
 
 def develop_embedding(state: dict[str, Any], shared_db: Any = None) -> dict[str, Any]:
-    # author:xxrin
+    # author: xxrin
+    #  Dev GAP 보고서를 아티팩트로 저장하고 검색 텍스트를 함께 기록합니다.
+    # SA/Agile/PM 단계에서 과거 의사결정 컨텍스트를 재사용하기 위함입니다.
     # MVP에서는 RAG 직접 쓰기를 막고, 추후 저장 어댑터가 사용할 metadata를 반환한다.
     # Dev GAP 리포트는 별도 artifacts 모듈에서 정규화하고 shared.db에 저장한다.
     pr_context = _as_dict(state.get("pr_context"))
@@ -1747,8 +1754,10 @@ def develop_embedding(state: dict[str, Any], shared_db: Any = None) -> dict[str,
 
 
 def develop_loop_controller(state: dict[str, Any]) -> dict[str, Any]:
-    # author:xxrin
-    # 구버전 feature 루프가 아니라 PR 묶음 처리 기준으로 loop 결정을 내린다.
+    # author: xxrin
+    # 승인 상태와 대기 PR 큐를 기준으로 다음 액션을 결정합니다.
+    # PM 승인 대기 시 중단하고, 추가 PR이 있으면 연속 처리하도록 흐름을 제어하기 위함입니다.
+    # 구버전 feature 루프가 아니라 PR 묶음 처리 기준으로 loop 결정을 내림
     if state.get("approval_status") == "PENDING_PM_APPROVAL":
         decision = "BLOCKED"
         next_action = "pm_approval_pending"

@@ -74,7 +74,13 @@ Your task is incremental update — preserve existing strategy, only modify/add 
 """
 
 
-def _build_user_msg(sa_bundle: dict, rtm: list, action_type: str, previous_test_cases: dict = None) -> str:
+def _build_user_msg(
+    sa_bundle: dict,
+    rtm: list,
+    action_type: str,
+    previous_test_cases: dict = None,
+    dev_knowledge_context: str = "",
+) -> str:
     data = sa_bundle.get("data", {})
     components = data.get("components", [])
     apis = data.get("apis", [])
@@ -90,8 +96,15 @@ def _build_user_msg(sa_bundle: dict, rtm: list, action_type: str, previous_test_
         prev_json = json.dumps(previous_test_cases, ensure_ascii=False)[:3000]
         prev_section = f"<previous_test_strategy>\n{prev_json}\n</previous_test_strategy>\n\n"
 
+    knowledge_section = ""
+    # author: xxrin
+    # 테스트 전략이 의도/비의도 GAP 판단을 반영하도록 Dev Tracking 컨텍스트를 포함합니다.
+    if dev_knowledge_context:
+        knowledge_section = f"## Dev Tracking Knowledge\n{dev_knowledge_context}\n\n"
+
     return (
         f"{prev_section}"
+        f"{knowledge_section}"
         f"## Action Type: {action_type}\n\n"
         f"## Components ({len(components)}개)\n```json\n{components_text}\n```\n\n"
         f"## APIs ({len(apis)}개)\n```json\n{apis_text}\n```\n\n"
@@ -116,7 +129,13 @@ def sa_test_analysis_node(ctx: NodeContext) -> dict:
         return {"current_step": "sa_test_analysis_done"}
 
     previous_test_cases = sget("previous_test_cases", None)
-    user_msg = _build_user_msg(sa_bundle, rtm, action_type, previous_test_cases)
+    user_msg = _build_user_msg(
+        sa_bundle,
+        rtm,
+        action_type,
+        previous_test_cases,
+        str(sget("dev_knowledge_context", "") or ""),
+    )
 
     system_prompt = UPDATE_SYSTEM_PROMPT if action_type == "UPDATE" else CREATE_SYSTEM_PROMPT
 

@@ -65,6 +65,7 @@ def _build_user_message(
     rag_context: str,
     rtm: list,
     project_context: str = "",
+    dev_knowledge_context: str = "",
 ) -> str:
     """LLM 메시지 조립"""
     pruned_rtm = [
@@ -80,8 +81,15 @@ def _build_user_message(
     if project_context:
         prev_design_section = f"[Previous Design Context]\n{project_context}\n\n"
 
+    knowledge_section = ""
+    # author: xxrin
+    # PM 승인 의도를 SA 병합 계획에 반영하기 위해 Dev Tracking 결정 컨텍스트를 주입합니다.
+    if dev_knowledge_context:
+        knowledge_section = f"[Dev Tracking Knowledge]\n{dev_knowledge_context}\n"
+
     return (
         f"{prev_design_section}"
+        f"{knowledge_section}"
         f"[Action Type] {action_type}\n"
         f"[Input Idea] {input_idea}\n"
         f"[Code Context]\n{rag_context or '(none)'}\n"
@@ -139,7 +147,12 @@ def sa_merge_project_node(ctx: NodeContext) -> dict:
 
     # 2. 메시지 조립
     user_content = _build_user_message(
-        action_type, input_idea, rag_context, requirements_rtm, project_context
+        action_type,
+        input_idea,
+        rag_context,
+        requirements_rtm,
+        project_context,
+        str(sget("dev_knowledge_context", "") or ""),
     )
 
     # 3. Call LLM for merge strategy
@@ -174,6 +187,7 @@ def sa_merge_project_node(ctx: NodeContext) -> dict:
         "previous_components": previous_components,
         "previous_apis": previous_apis,
         "previous_tables": previous_tables,
+        "dev_knowledge_context": str(sget("dev_knowledge_context", "") or ""),
     }
 
     thinking_msg = output.thinking or "프로젝트 병합 전략 수립 완료"

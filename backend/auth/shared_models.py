@@ -141,3 +141,73 @@ class TeamInvite(SharedBase):
 
     team = relationship("Team")
     creator = relationship("User")
+
+class DevPrAnalysis(SharedBase):
+    # author: xxrin
+    # Dev Tracking 영속화 테스트와 PR 분석 이력 저장을 위해 추가한 모델입니다.
+    __tablename__ = "dev_pr_analyses"
+
+    id = Column(String(36), primary_key=True, default=_new_uuid)
+    team_id = Column(String(36), nullable=True)
+    owner = Column(String(255), nullable=False, default="")
+    repo = Column(String(255), nullable=False, default="")
+    pr_number = Column(Integer, nullable=False, default=0)
+    branch_name = Column(String(255), nullable=False, default="")
+    base_branch = Column(String(255), nullable=True, default="")
+    head_sha = Column(String(255), nullable=True, default="")
+    source_dir = Column(Text, nullable=True, default="")
+    spec_snapshot_id = Column(String(36), nullable=True, default="")
+    approval_status = Column(String(64), nullable=True, default="")
+    analysis_status = Column(String(64), nullable=True, default="")
+    task_id = Column(String(64), nullable=True, default="")
+    pm_report = Column(Text, nullable=True, default="{}")
+    timeline = Column(Text, nullable=True, default="[]")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    gap_items = relationship("DevGapItem", back_populates="analysis", cascade="all, delete-orphan")
+
+
+class DevGapItem(SharedBase):
+    # author: xxrin
+    # DevPrAnalysis 레코드와 연결된 GAP 분류 항목을 저장하기 위해 추가했습니다.
+    __tablename__ = "dev_gap_items"
+
+    id = Column(String(36), primary_key=True, default=_new_uuid)
+    analysis_id = Column(String(36), ForeignKey("dev_pr_analyses.id", ondelete="CASCADE"), nullable=False)
+    gap_id = Column(String(128), nullable=False, default="")
+    severity = Column(String(16), nullable=True, default="")
+    type = Column(String(64), nullable=True, default="")
+    spec_target = Column(Text, nullable=True, default="")
+    implementation_target = Column(Text, nullable=True, default="")
+    intent = Column(String(32), nullable=True, default="")
+    recommended_action = Column(String(64), nullable=True, default="")
+    description = Column(Text, nullable=True, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    analysis = relationship("DevPrAnalysis", back_populates="gap_items")
+
+
+class DevKnowledgeArtifact(SharedBase):
+    # author: xxrin
+    # PM/SA 컨텍스트 로딩에 사용하는 검색 가능한 Dev Tracking 아티팩트 저장용 모델입니다.
+    __tablename__ = "dev_knowledge_artifacts"
+
+    id = Column(String(36), primary_key=True, default=_new_uuid)
+    team_id = Column(String(36), nullable=True, default="")
+    artifact_type = Column(String(64), nullable=False, default="DEV_GAP_REPORT")
+    source = Column(String(64), nullable=False, default="dev_tracking")
+    owner = Column(String(255), nullable=True, default="")
+    repo = Column(String(255), nullable=True, default="")
+    pr_number = Column(Integer, nullable=True, default=0)
+    branch_name = Column(String(255), nullable=True, default="")
+    task_id = Column(String(64), nullable=True, default="")
+    decision_status = Column(String(64), nullable=True, default="")
+    content_json = Column(Text, nullable=False, default="{}")
+    searchable_text = Column(Text, nullable=True, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_dev_knowledge_team_created", "team_id", "created_at"),
+        Index("ix_dev_knowledge_repo_pr", "owner", "repo", "pr_number"),
+    )

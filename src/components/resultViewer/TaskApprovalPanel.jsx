@@ -443,6 +443,15 @@ export default function TaskApprovalPanel() {
           const cfg        = STATUS_CONFIG[task.status] || STATUS_CONFIG.unassigned;
           const isExpanded = expandedIds.has(task.id);
           const isMyTask   = task.assignee && task.assignee === currentUser?.name;
+          const isDevGapApproval = task.task_type === "dev_gap_approval";
+          const payload = task.payload || {};
+          const pmReport = payload.pm_report || {};
+          const prContext = payload.pr_context || {};
+          const gapReport = Array.isArray(payload.gap_report) ? payload.gap_report : [];
+          // author:xxrin
+          // LLM fallback 상태를 PM이 놓치지 않도록 PM Report warning을 Dev GAP 카드에 표시한다.
+          const llmWarnings = Array.isArray(pmReport.llm_warnings) ? pmReport.llm_warnings : [];
+          const highGapCount = gapReport.filter((gap) => gap?.severity === "HIGH").length;
 
           return (
             <div key={task.id} className={`rounded-2xl border transition-all ${cfg.bg} ${cfg.border}`}>
@@ -489,6 +498,55 @@ export default function TaskApprovalPanel() {
                   )}
 
                   {/* PM 액션: pending_approval → 승인(in_progress) / 거절(rejected) */}
+                  {isDevGapApproval && (
+                    <div className={`rounded-xl border p-3 space-y-2 ${isDarkMode ? "bg-black/20 border-white/10" : "bg-white border-slate-200"}`}>
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                        <span className={`px-2 py-1 rounded ${isDarkMode ? "bg-white/10 text-slate-200" : "bg-slate-100 text-slate-700"}`}>
+                          PR #{prContext.pr_number || "-"}
+                        </span>
+                        <span className={`px-2 py-1 rounded font-mono ${isDarkMode ? "bg-white/10 text-slate-300" : "bg-slate-100 text-slate-600"}`}>
+                          {prContext.branch_name || "unknown branch"}
+                        </span>
+                        <span className="px-2 py-1 rounded bg-red-500/10 text-red-400">
+                          GAP {gapReport.length}
+                        </span>
+                        {highGapCount > 0 && (
+                          <span className="px-2 py-1 rounded bg-orange-500/10 text-orange-400">
+                            HIGH {highGapCount}
+                          </span>
+                        )}
+                      </div>
+                      {pmReport.summary && (
+                        <p className="text-xs leading-relaxed opacity-80">{pmReport.summary}</p>
+                      )}
+                      {llmWarnings.length > 0 && (
+                        <div className={`rounded-xl border p-3 space-y-2 ${isDarkMode ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-100" : "bg-yellow-50 border-yellow-200 text-yellow-900"}`}>
+                          <div className="flex items-center gap-2 text-xs font-bold">
+                            <AlertTriangle size={14} className="shrink-0" />
+                            <span>LLM analysis failed. Manual PM review required.</span>
+                          </div>
+                          <div className="space-y-1">
+                            {llmWarnings.map((warning, index) => (
+                              <p key={`${warning.node || "llm"}-${index}`} className="text-[11px] leading-relaxed opacity-85">
+                                <span className="font-semibold">{warning.node || "llm"}:</span>{" "}
+                                {warning.message || warning.llm_error_message || "Fallback analysis was used."}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {Array.isArray(pmReport.recommended_pm_actions) && pmReport.recommended_pm_actions.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {pmReport.recommended_pm_actions.map((action) => (
+                            <span key={action} className={`text-[11px] px-2 py-0.5 rounded border ${isDarkMode ? "border-white/10 text-slate-300" : "border-slate-200 text-slate-600"}`}>
+                              {action}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {isPM && task.status === "pending_approval" && (
                     <div className="flex gap-2 pt-1">
                       <button
