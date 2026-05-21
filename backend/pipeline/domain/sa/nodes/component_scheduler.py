@@ -84,6 +84,10 @@ def _build_user_message(merged_project: dict, inventory: dict, action_type: str,
             lines.append(f"- {p}: {[it.get('name') for it in items]}")
         lines.append("</project_inventory>")
         inventory_str = "\n".join(lines)
+    # author: xxrin
+    # 승인된 GAP 결정과 스케줄러 결과가 어긋나지 않도록 Dev Tracking 컨텍스트를 노출합니다.
+    knowledge_context = str(merged_project.get("dev_knowledge_context") or "")
+    knowledge_section = f"\n[Dev Tracking Knowledge]\n{knowledge_context}\n" if knowledge_context else ""
 
     # UPDATE 모드: 이전 컴포넌트 목록을 맨 앞에 배치
     prev_comps_section = ""
@@ -113,6 +117,7 @@ def _build_user_message(merged_project: dict, inventory: dict, action_type: str,
     return (
         f"{prev_comps_section}"
         f"{inventory_str}\n\n"
+        f"{knowledge_section}"
         f"{snippets}\n\n"
         f"Strategy: {merged_project.get('merge_strategy', '')}\n"
         f"RTM:\n{p_rtm}\n\n"
@@ -156,3 +161,4 @@ def component_scheduler_node(ctx: NodeContext) -> dict:
         "thinking_log": (sget("thinking_log", []) or []) + [{"node": "component_scheduler", "thinking": output.thinking or ""}],
         "current_step": "component_scheduler_done"
     }
+    knowledge_section = f"\n[Dev Tracking Knowledge]\n{knowledge_context}\n" if knowledge_context else ""

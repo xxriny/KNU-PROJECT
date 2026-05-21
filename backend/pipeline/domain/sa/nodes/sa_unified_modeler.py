@@ -92,7 +92,8 @@ OUTPUT_GUIDE = """
 
 def _build_user_message(components: list, rtm: list, inventory: dict, action_type: str,
                         snippets: str = "",
-                        previous_apis: list = None, previous_tables: list = None) -> str:
+                        previous_apis: list = None, previous_tables: list = None,
+                        dev_knowledge_context: str = "") -> str:
     p_rtm = "\n".join(f"{r.get('feature_id', r.get('id'))}:{r.get('description', r.get('desc'))}" for r in rtm)
 
     def _g(obj, k):
@@ -151,8 +152,13 @@ def _build_user_message(components: list, rtm: list, inventory: dict, action_typ
     else:
         final_instruction = "[Instruction/CRITICAL] Based ONLY on the facts in the inventory and snippets, extract the 'actually existing' API and DB structures 100% as-is. NEVER hallucinate missing parts. No Hallucination!"
 
+    # author: xxrin
+    # API/DB 모델링이 승인된 GAP 결정과 일치하도록 Dev Tracking 컨텍스트를 주입합니다.
+    knowledge_section = f"[Dev Tracking Knowledge]\n{dev_knowledge_context}\n\n" if dev_knowledge_context else ""
+
     return (
         f"{prev_design_section}"
+        f"{knowledge_section}"
         f"{' '.join(inventory_lines)}\n\n"
         f"{snippets}\n\n"
         f"Comp:\n{p_comp}\n"
@@ -229,7 +235,9 @@ def sa_unified_modeler_node(ctx: NodeContext) -> dict:
 
     user_content = _build_user_message(
         components_out, rtm, inventory, action_type, snippets_text,
-        previous_apis=previous_apis, previous_tables=previous_tables
+        previous_apis=previous_apis,
+        previous_tables=previous_tables,
+        dev_knowledge_context=str(sget("dev_knowledge_context", "") or ""),
     )
     cache_name = cache_manager.get_google_cache(run_id)
 
