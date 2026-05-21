@@ -1689,6 +1689,45 @@ def test_dev_gap_decision_followup_warns_on_rejection_comment_failure(monkeypatc
     assert result["pr_comment"]["error"] == "gh auth required"
 
 
+def test_doc_updater_runs_sync_docs_on_approved_decision(monkeypatch):
+    from pipeline.domain.dev_tracking.doc_updater import run_doc_updater_for_dev_gap_decision
+    import pipeline.domain.agile.nodes.doc_sync as doc_sync_mod
+
+    captured = {}
+
+    def fake_sync_docs(**kwargs):
+        captured.update(kwargs)
+        return {"synced": True, "action": "updated"}
+
+    monkeypatch.setattr(doc_sync_mod, "sync_docs", fake_sync_docs)
+
+    result = run_doc_updater_for_dev_gap_decision(
+        {
+            "decision_status": "APPROVED_INTENTIONAL_CHANGE",
+            "pr_context": {"owner": "xxrin", "repo": "navigator"},
+        }
+    )
+
+    assert result["synced"] is True
+    assert captured["owner"] == "xxrin"
+    assert captured["repo"] == "navigator"
+    assert captured["result_data"]["sa_output"]["decision_status"] == "APPROVED_INTENTIONAL_CHANGE"
+
+
+def test_doc_updater_skips_sync_docs_on_rejected_decision():
+    from pipeline.domain.dev_tracking.doc_updater import run_doc_updater_for_dev_gap_decision
+
+    result = run_doc_updater_for_dev_gap_decision(
+        {
+            "decision_status": "REJECTED_UNINTENTIONAL_CHANGE",
+            "pr_context": {"owner": "xxrin", "repo": "navigator"},
+        }
+    )
+
+    assert result["synced"] is False
+    assert result["action"] == "skipped"
+
+
 def test_dev_gap_approval_endpoint_updates_success_status(monkeypatch):
     import pipeline.domain.agile.task_coordinator as agile_task_coordinator
     import pipeline.domain.dev_tracking.nodes as dev_nodes

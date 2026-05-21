@@ -4,6 +4,7 @@ import os
 from typing import Any, Callable
 
 from .artifacts import build_dev_gap_decision_artifact, persist_dev_knowledge_artifact
+from .doc_updater import run_doc_updater_for_dev_gap_decision
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -59,38 +60,22 @@ def run_dev_gap_decision_followup(
     # 승인/거절 이후 후속 처리를 노드와 분리해서 실행한다.
     artifact = build_dev_gap_decision_artifact(task, decision_status, reviewed_by, result_payload)
     pr_context = _as_dict(artifact.get("pr_context"))
-    github_token = (
-        str(os.getenv("NAVIGATOR_GITHUB_TOKEN") or "")
-        or str(os.getenv("GITHUB_TOKEN") or "")
-    )
     owner = str(pr_context.get("owner") or "")
     repo = str(pr_context.get("repo") or "")
 
-    doc_sync_result: dict[str, Any]
-    if decision_status == "APPROVED_INTENTIONAL_CHANGE":
-        try:
-            from pipeline.domain.agile.nodes.doc_sync import sync_docs
-
-            doc_sync_result = sync_docs(
-                result_data={"sa_output": artifact},
-                github_token=github_token,
-                owner=owner,
-                repo=repo,
-                page_title="NAVIGATOR Dev Gap Decisions",
-                project_name=repo or "NAVIGATOR",
-            )
-        except Exception as doc_error:
-            doc_sync_result = {
-                "synced": False,
-                "action": "error",
-                "message": str(doc_error) or type(doc_error).__name__,
-            }
-    else:
-        doc_sync_result = {
-            "synced": False,
-            "action": "skipped",
-            "message": "Rejected Dev GAP decisions are not published to docs.",
+    # author: xxrin
+    # 무엇: PM 승인 후 문서 반영을 doc_updater 계층으로 위임한다.
+    # 왜: PM 승인 플로우의 문서 반영 책임을 명시적으로 분리해 유지보수성을 높이기 위함이다.
+    doc_sync_result: dict[str, Any] = run_doc_updater_for_dev_gap_decision(
+        {
+            **artifact,
+            "pr_context": {
+                **_as_dict(artifact.get("pr_context")),
+                "owner": owner,
+                "repo": repo,
+            },
         }
+    )
 
     if run_gh is None:
         def _missing_gh(args: list[str], cwd: str, input_text: str | None = None) -> tuple[int, str, str]:

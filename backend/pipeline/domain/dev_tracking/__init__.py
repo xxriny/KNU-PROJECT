@@ -8,5 +8,9 @@ author:xxrin
 """
 
 from .service import run_dev_tracking_analysis
+from .doc_updater import run_doc_updater_for_dev_gap_decision
 
-__all__ = ["run_dev_tracking_analysis"]
+__all__ = [
+    "run_dev_tracking_analysis",
+    "run_doc_updater_for_dev_gap_decision",
+]
