@@ -17,10 +17,11 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Team, User, Subscription
+from models import Team, User, Subscription, TeamInvite
 from schemas import (
     LoginRequest, RegisterRequest, TokenResponse, UserResponse,
     TeamResponse, TeamCreateRequest, TeamUpdateRequest, DevicePollRequest,
+    TeamInviteCreateRequest, TeamInviteResponse,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -235,6 +236,106 @@ async def list_members(
         {"id": u.id, "name": u.name, "email": u.email, "role": u.role}
         for u in members
     ]}
+
+
+# ── Team Invites ─────────────────────────────────────────────
+
+@router.post("/teams/{team_id}/invites", response_model=TeamInviteResponse)
+async def create_team_invite(
+    team_id: str,
+    req: TeamInviteCreateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if user.team_id != team_id:
+        raise HTTPException(status_code=403, detail="자신의 팀만 초대할 수 있습니다.")
+    if user.role != "pm":
+        raise HTTPException(status_code=403, detail="PM 권한이 필요합니다.")
+        
+    code = secrets.token_urlsafe(16)
+    expires_at = datetime.utcnow() + timedelta(days=req.expires_in_days)
+    
+    invite = TeamInvite(
+        team_id=team_id,
+        code=code,
+        creator_id=user.id,
+        role=req.role,
+        max_uses=req.max_uses,
+        expires_at=expires_at,
+    )
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
+    return invite
+
+
+@router.get("/teams/{team_id}/invites", response_model=list[TeamInviteResponse])
+async def list_team_invites(
+    team_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if user.team_id != team_id:
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+    invites = db.query(TeamInvite).filter(TeamInvite.team_id == team_id).all()
+    return invites
+
+
+@router.delete("/teams/{team_id}/invites/{code}")
+async def cancel_team_invite(
+    team_id: str,
+    code: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if user.team_id != team_id or user.role != "pm":
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+    invite = db.query(TeamInvite).filter(TeamInvite.code == code, TeamInvite.team_id == team_id).first()
+    if invite:
+        db.delete(invite)
+        db.commit()
+    return {"status": "ok"}
+
+
+@router.get("/invites/{code}", response_model=TeamResponse)
+async def get_invite_info(
+    code: str,
+    db: Session = Depends(get_db),
+):
+    invite = db.query(TeamInvite).filter(TeamInvite.code == code).first()
+    if not invite:
+        raise HTTPException(status_code=404, detail="유효하지 않거나 만료된 초대입니다.")
+    if invite.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="만료된 초대입니다.")
+    if invite.max_uses > 0 and invite.used_count >= invite.max_uses:
+        raise HTTPException(status_code=400, detail="최대 사용 횟수를 초과한 초대입니다.")
+        
+    return TeamResponse(id=invite.team.id, name=invite.team.name, plan=_team_plan(db, invite.team.id))
+
+
+@router.post("/invites/{code}/join", response_model=UserResponse)
+async def join_team_via_invite(
+    code: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    invite = db.query(TeamInvite).filter(TeamInvite.code == code).first()
+    if not invite:
+        raise HTTPException(status_code=404, detail="유효하지 않은 초대 코드입니다.")
+    if invite.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="만료된 초대입니다.")
+    if invite.max_uses > 0 and invite.used_count >= invite.max_uses:
+        raise HTTPException(status_code=400, detail="사용 한도가 초과된 초대입니다.")
+
+    # 팀 합류
+    user.team_id = invite.team_id
+    user.role = invite.role
+    
+    invite.used_count += 1
+    db.commit()
+    db.refresh(user)
+    
+    return _build_user_response(db, user)
 
 
 # ── GitHub OAuth Device Flow ──────────────────────────────────

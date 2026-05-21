@@ -5,6 +5,7 @@ python-jose[cryptography]==3.3.0
 bcrypt==4.2.0
 httpx==0.27.2
 pydantic==2.9.2
+python-dotenv>=1.0.0
 
 # 빌링 (Stripe 연동 시 주석 해제)
 # stripe==11.1.0

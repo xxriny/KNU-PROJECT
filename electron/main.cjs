@@ -281,11 +281,11 @@ function createWindow() {
     minWidth: 1200,
     minHeight: 700,
     title: "NAVIGATOR",
-    backgroundColor: "#020617",
+    backgroundColor: "#0D1117",
     titleBarStyle: "hidden",
     titleBarOverlay: {
-      color: "#020617",
-      symbolColor: "#94a3b8",
+      color: "#0D1117",
+      symbolColor: "#8B949E",
       height: 36,
     },
     autoHideMenuBar: true,
@@ -363,8 +363,8 @@ ipcMain.handle("set-titlebar-theme", (event, isDark) => {
 
     // 2. 오버레이 색상 적용
     const themeColors = isDark 
-      ? { color: "#020617", symbolColor: "#94a3b8" }  // Dark (index.css --bg-primary 기반)
-      : { color: "#f8fafc", symbolColor: "#475569" }; // Light (index.css --bg-secondary 기반)
+      ? { color: "#0D1117", symbolColor: "#8B949E" }  // Dark
+      : { color: "#F1F5F9", symbolColor: "#475569" }; // Light
 
     mainWindow.setTitleBarOverlay({
       ...themeColors,

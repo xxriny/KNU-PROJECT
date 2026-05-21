@@ -142,3 +142,29 @@ class GeminiApiKey(Base):
     __table_args__ = (
         Index("ix_gemini_api_keys_team_id", "team_id"),
     )
+
+
+# ── TeamInvite ─────────────────────────────────────────────
+
+class TeamInvite(Base):
+    """팀 초대 링크. PM이 생성하여 팀원을 초대."""
+    __tablename__ = "team_invites"
+
+    id         = Column(String(36),  primary_key=True, default=_new_uuid)
+    team_id    = Column(String(36),  ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    code       = Column(String(100), unique=True, nullable=False, index=True)
+    creator_id = Column(String(36),  ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    role       = Column(
+        String(20),
+        CheckConstraint("role IN ('pm','engineer','backend','frontend','devops')"),
+        nullable=False,
+        default="engineer",
+    )
+    max_uses   = Column(Integer,     nullable=False, default=1)  # 0 = 무제한
+    used_count = Column(Integer,     nullable=False, default=0)
+    expires_at = Column(DateTime,    nullable=False)
+    created_at = Column(DateTime,    default=datetime.utcnow)
+
+    team    = relationship("Team")
+    creator = relationship("User")
+

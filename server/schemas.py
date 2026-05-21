@@ -66,6 +66,28 @@ class DevicePollRequest(BaseModel):
     device_code: str
 
 
+# ── Team Invite ─────────────────────────────────────────────
+
+class TeamInviteCreateRequest(BaseModel):
+    role: str = "engineer"
+    max_uses: int = 1
+    expires_in_days: int = 7
+
+
+class TeamInviteResponse(BaseModel):
+    id: str
+    team_id: str
+    code: str
+    creator_id: Optional[str] = None
+    role: str
+    max_uses: int
+    used_count: int
+    expires_at: datetime
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # ── Billing ─────────────────────────────────────────────────
 
 class PlanInfo(BaseModel):

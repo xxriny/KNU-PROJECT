@@ -4,9 +4,9 @@ title NAVIGATOR
 
 cd /d "%~dp0"
 
-echo [1/4] Killing old processes...
-taskkill /f /im node.exe /t 2>nul
-taskkill /f /im python.exe /t 2>nul
+echo [1/4] Killing old NAVIGATOR processes...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":5173 " 2^>nul') do taskkill /f /pid %%a 2>nul
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8765 " 2^>nul') do taskkill /f /pid %%a 2>nul
 taskkill /f /im electron.exe /t 2>nul
 
 echo [2/4] Starting Vite dev server...
@@ -16,7 +16,7 @@ echo [3/4] Waiting for Vite on port 5173...
 set /a VITE_WAIT_COUNT=0
 set /a VITE_WAIT_MAX=90
 :wait_vite
-powershell -Command "try { $c = New-Object System.Net.Sockets.TcpClient('localhost', 5173); if ($c.Connected) { $c.Close(); exit 0 } else { exit 1 } } catch { exit 1 }"
+powershell -Command "try { $tcp = New-Object System.Net.Sockets.TcpClient('localhost', 5173); $ok = $tcp.Connected; $tcp.Close(); if ($ok) { exit 0 } else { exit 1 } } catch { exit 1 }"
 if %errorlevel% neq 0 (
     set /a VITE_WAIT_COUNT+=1
     if %VITE_WAIT_COUNT% geq %VITE_WAIT_MAX% (
@@ -35,7 +35,8 @@ npm run dev:electron:now
 
 :cleanup
 echo Cleaning up...
-taskkill /f /im node.exe /t 2>nul
-taskkill /f /im python.exe /t 2>nul
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":5173 " 2^>nul') do taskkill /f /pid %%a 2>nul
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8765 " 2^>nul') do taskkill /f /pid %%a 2>nul
+taskkill /f /im electron.exe /t 2>nul
 echo Done.
 pause
