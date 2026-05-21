@@ -922,6 +922,41 @@ async def github_webhook_endpoint(
             }
 
         normalized = _normalize_github_pr_webhook(payload)
+        # author: xxrin
+        # 무엇: 동일 PR head_sha가 이미 분석된 경우 webhook 재진입을 차단한다.
+        # 왜: 중복 분석으로 동일 승인 태스크/코멘트가 반복 생성되는 것을 방지하기 위해서다.
+        try:
+            from auth.shared_models import DevPrAnalysis
+
+            pr_ctx = normalized.get("pull_request", {}) if isinstance(normalized, dict) else {}
+            repo_ctx = normalized.get("repository", {}) if isinstance(normalized, dict) else {}
+            head_sha = str(pr_ctx.get("head_sha") or "").strip()
+            owner = str(repo_ctx.get("owner") or "").strip()
+            repo = str(repo_ctx.get("repo") or "").strip()
+            pr_number = int(pr_ctx.get("pr_number") or 0)
+            duplicate = None
+            if head_sha and owner and repo and pr_number > 0:
+                duplicate = (
+                    shared_db.query(DevPrAnalysis)
+                    .filter(DevPrAnalysis.owner == owner)
+                    .filter(DevPrAnalysis.repo == repo)
+                    .filter(DevPrAnalysis.pr_number == pr_number)
+                    .filter(DevPrAnalysis.head_sha == head_sha)
+                    .order_by(DevPrAnalysis.created_at.desc())
+                    .first()
+                )
+            if duplicate is not None:
+                return {
+                    "status": "ok",
+                    "handled": False,
+                    "reason": "duplicate head_sha already analyzed",
+                    "signature_verified": bool(secret),
+                    "signature_warning": verification_error if not secret else "",
+                }
+        except Exception:
+            # duplicate check 실패는 webhook 처리 자체를 막지 않는다.
+            pass
+
         normalized.update(
             {
                 "source_dir": "",
