@@ -16,7 +16,7 @@ from jose import JWTError, jwt
 import bcrypt as _bcrypt_lib
 from sqlalchemy.orm import Session
 
-from auth.shared_models import User, Team, Subscription
+from auth.shared_models import User, Team, Subscription, TeamMember
 
 _SECRET_KEY = os.environ.get("NAVIGATOR_JWT_SECRET", "navigator-dev-secret-change-in-production")
 _ALGORITHM = "HS256"
@@ -95,6 +95,12 @@ def create_user(
         team_id=team.id if team else None,
     )
     db.add(user)
+    db.flush()
+
+    if team:
+        tm = TeamMember(user_id=user.id, team_id=team.id, role=role)
+        db.add(tm)
+
     db.commit()
     db.refresh(user)
     return user

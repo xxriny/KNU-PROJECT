@@ -41,8 +41,8 @@ def _colname(col: dict) -> str:
 # ── LLM 의존성 (지연 임포트) ─────────────────────────────────
 
 def _get_llm(api_key: str, model: str):
-    from pipeline.core.utils import get_llm
-    key = api_key or os.environ.get("GEMINI_API_KEY", "")
+    from pipeline.core.utils import get_llm, get_effective_key
+    key = get_effective_key(api_key)
     return get_llm(key, model=model, temperature=0)
 
 
@@ -375,7 +375,11 @@ def run_verifier(
     use_llm: V-006 의미론적 일관성 (기본 LLM)
     use_deep_llm: V-007~V-009 추가 LLM 검증 (더 깊은 분석)
     """
-    effective_key = api_key or os.environ.get("GEMINI_API_KEY", "")
+    try:
+        from pipeline.core.utils import get_effective_key
+        effective_key = get_effective_key(api_key)
+    except ValueError:
+        effective_key = ""
 
     violations: list[ViolationItem] = []
     violations += _v001_api_component_ref(sa_data)

@@ -209,5 +209,5 @@ def guardian_node(state: PipelineState) -> Dict[str, Any]:
             "rejection_reason": final_reason,
             "thinking": " | ".join(thinking_steps)
         },
-        "thinking_log": (sget("thinking_log", []) or []) + [{"node": "guardian", "thinking": " | ".join(thinking_steps)}]
+        "thinking_log": [{"node": "guardian", "thinking": " | ".join(thinking_steps)}]
     }

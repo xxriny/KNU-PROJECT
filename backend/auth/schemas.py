@@ -4,13 +4,14 @@ Pydantic 스키마: 인증 요청/응답 모델
 
 from typing import Optional
 from pydantic import BaseModel, EmailStr
+from datetime import datetime
 
 
 class RegisterRequest(BaseModel):
     name: str
     email: str
     password: str
-    role: str = "engineer"
+    role: str = "software_engineer"
     github_username: Optional[str] = None
     team_name: Optional[str] = None
 
@@ -79,3 +80,23 @@ class ChangeRequestUpdate(BaseModel):
 
 class DevicePollRequest(BaseModel):
     device_code: str
+
+
+class TeamInviteCreateRequest(BaseModel):
+    role: str = "software_engineer"
+    max_uses: int = 1
+    expires_in_days: int = 7
+
+
+class TeamInviteResponse(BaseModel):
+    id: str
+    team_id: str
+    code: str
+    creator_id: str
+    role: str
+    max_uses: int
+    used_count: int
+    expires_at: datetime
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

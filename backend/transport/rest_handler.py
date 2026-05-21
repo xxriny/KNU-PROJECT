@@ -150,7 +150,11 @@ async def health_check():
 
 @rest_router.get("/api/config")
 async def get_config():
-    has_key = bool(os.environ.get("GEMINI_API_KEY", "").strip())
+    from pipeline.core.utils import get_effective_key
+    try:
+        has_key = bool(get_effective_key(""))
+    except ValueError:
+        has_key = False
     return {
         "has_api_key": has_key,
         "default_model": DEFAULT_MODEL,
@@ -1431,12 +1435,19 @@ class PullRequest(BaseModel):
 async def pull_snapshot_endpoint(
     snapshot_id: str,
     req: PullRequest,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     shared_db: Session = Depends(get_shared_db),
 ):
     """공유 스냅샷 데이터를 지정된 로컬 run_id 세션에 덮어써 저장(Pull)."""
     try:
         from storage.publish_service import pull_snapshot
+        from auth.shared_models import PublishedSnapshot
+        snap = shared_db.query(PublishedSnapshot).filter(PublishedSnapshot.id == snapshot_id).first()
+        if not snap:
+            return {"status": "error", "error": "스냅샷을 찾을 수 없습니다."}
+        if snap.team_id and snap.team_id != current_user.team_id:
+            return {"status": "error", "error": "현재 팀의 스냅샷이 아닙니다."}
         result = pull_snapshot(shared_db, db, snapshot_id=snapshot_id, run_id=req.run_id)
         return {"status": "ok", "data": result}
     except ValueError as e:

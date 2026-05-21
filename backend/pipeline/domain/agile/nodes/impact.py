@@ -11,8 +11,8 @@ from pipeline.domain.agile.schemas import ImpactedComponent, ImpactResult
 
 
 def _get_llm(api_key: str, model: str):
-    from pipeline.core.utils import get_llm
-    key = api_key or os.environ.get("GEMINI_API_KEY", "")
+    from pipeline.core.utils import get_llm, get_effective_key
+    key = get_effective_key(api_key)
     return get_llm(key, model=model, temperature=0)
 
 
@@ -80,10 +80,17 @@ def run_impact_analyzer(
 JSON만 반환:"""
 
     try:
-        if not use_llm or (not api_key and not os.environ.get("GEMINI_API_KEY", "")):
+        if not use_llm:
             return _fallback_impact(change_description, sa_data)
 
-        llm = _get_llm(api_key, model)
+        from pipeline.core.utils import get_effective_key
+        try:
+            effective_key = get_effective_key(api_key)
+        except ValueError:
+            # 키가 없으면 키워드 기반 분석(fallback)으로 전환
+            return _fallback_impact(change_description, sa_data)
+
+        llm = _get_llm(effective_key, model)
         response = llm.invoke(prompt)
         content = response.content if hasattr(response, "content") else response
         if isinstance(content, list):

@@ -359,11 +359,19 @@ export default function TaskApprovalPanel() {
                   className={`w-full px-3 py-2 rounded-lg text-xs font-semibold border outline-none ${isDarkMode ? "bg-slate-800 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-800"}`}
                 >
                   <option value="">미할당</option>
-                  {teamMembers.filter((m) => m.role !== "pm").map((m) => (
-                    <option key={m.id} value={m.name}>
-                      {m.name} — {m.role}
-                    </option>
-                  ))}
+                  {teamMembers.filter((m) => m.role !== "pm").map((m) => {
+                    const roleLabel = {
+                      software_engineer: "Software Engineer (개발자)",
+                      backend:           "Backend (백엔드)",
+                      frontend:          "Frontend (프론트엔드)",
+                      devops:            "DevOps",
+                    }[m.role] || m.role;
+                    return (
+                      <option key={m.id} value={m.name}>
+                        {m.name} — {roleLabel}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
               <div className="flex gap-2 pt-1">

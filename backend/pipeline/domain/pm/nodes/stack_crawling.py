@@ -180,7 +180,7 @@ def stack_crawling_node(state: PipelineState) -> Dict[str, Any]:
                 "results": [r.model_dump() for r in all_results],
                 "thinking": thinking_msg
             },
-            "thinking_log": (sget("thinking_log", []) or []) + [{"node": "stack_crawling", "thinking": thinking_msg}]
+            "thinking_log": [{"node": "stack_crawling", "thinking": thinking_msg}]
         }
         
     except Exception as e:

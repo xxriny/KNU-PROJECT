@@ -28,6 +28,26 @@ def _merge_thinking_logs(existing_logs, new_logs):
     return merged[-200:]
 
 
+def _deep_merge_dict(a: dict, b: dict) -> dict:
+    """dict b를 a에 깊게 병합 (dict 값만 재귀, 나머지는 b 우선)."""
+    result = dict(a)
+    for k, v in b.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge_dict(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
+def _merge_sa_arch_bundle(existing: dict, new_val: dict) -> dict:
+    """병렬 SA 노드가 동시에 sa_arch_bundle을 수정할 때 data 섹션을 깊게 병합."""
+    if not existing:
+        return new_val or {}
+    if not new_val:
+        return existing
+    return _deep_merge_dict(existing, new_val)
+
+
 def _keep_last_step(existing_step, new_step):
     """여러 노드에서 동시에 current_step을 업데이트할 때 마지막 값 유지"""
     if not new_step:
@@ -96,7 +116,7 @@ class _AnalysisFields(TypedDict, total=False):
     sa_phase7: dict                  # 인터페이스/가드레일 설계 결과
     sa_phase8: dict                  # 위상 정렬 결과
     sa_output: dict                  # SA 최종 통합 산출물
-    sa_arch_bundle: dict             # SA 최종 임베딩 대상 번들
+    sa_arch_bundle: Annotated[dict, _merge_sa_arch_bundle]  # SA 최종 번들 (병렬 노드 병합 지원)
     sa_merge_project_output: dict    # merge_project 노드 전용 출력
     component_scheduler_output: dict # component_scheduler 노드 전용 출력
     api_data_modeler_output: dict    # [DEPRECATED] api_modeler_output, db_schema_architect_output 사용 권장

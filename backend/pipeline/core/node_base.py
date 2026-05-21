@@ -83,26 +83,21 @@ def pipeline_node(node_name: str):
                 if not isinstance(result, dict):
                     result = {}
 
-                # 3. 토큰 사용량 및 비용 합산
+                # 3. 토큰 사용량 및 비용 합산 (reducer가 누적하므로 이 노드의 delta만 반환)
                 new_logs = active_usage_log.get()
                 node_cost = 0.0
                 if new_logs:
                     for log in new_logs:
                         log["node"] = node_name
-                    
-                    existing_usage = state.get("accumulated_usage", []) or []
-                    result["accumulated_usage"] = existing_usage + new_logs
-                    
-                    existing_cost = state.get("accumulated_cost", 0.0) or 0.0
-                    node_cost = sum(log["cost"] - log.get("savings", 0.0) for log in new_logs)
-                    result["accumulated_cost"] = max(0.0, existing_cost + node_cost)
 
-                # 4. Thinking Log 처리
+                    node_cost = sum(log["cost"] - log.get("savings", 0.0) for log in new_logs)
+                    result["accumulated_usage"] = new_logs          # delta only
+                    result["accumulated_cost"] = max(0.0, node_cost) # delta only
+
+                # 4. Thinking Log 처리 (reducer가 누적하므로 새 항목만 반환)
                 thinking_text = result.pop("_thinking", None)
                 if thinking_text is not None and "thinking_log" not in result:
-                    result["thinking_log"] = ctx.thinking_log + [
-                        {"node": node_name, "thinking": thinking_text}
-                    ]
+                    result["thinking_log"] = [{"node": node_name, "thinking": thinking_text}]
 
                 # 5. 다음 스텝 설정
                 if "current_step" not in result:

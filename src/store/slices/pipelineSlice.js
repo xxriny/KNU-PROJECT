@@ -29,32 +29,89 @@ export const createPipelineSlice = (set, get) => ({
 
   _handleWsMessage: (msg) => {
     const { type, node, data } = msg;
+    const { analysisOwnerTeamId, currentUser } = get();
+    // 분석을 시작한 팀과 현재 활성 팀이 다르면 → 백그라운드 팀에 라우팅
+    const isBackground =
+      analysisOwnerTeamId && analysisOwnerTeamId !== currentUser?.team_id;
+
     switch (type) {
       case "status":
-        set((state) => ({ pipelineNodes: { ...state.pipelineNodes, [node]: data.status } }));
+        if (isBackground) {
+          get()._updateParkedWorkspace(analysisOwnerTeamId, {
+            pipelineNodes: {
+              ...(get().teamWorkspaces[analysisOwnerTeamId]?.pipelineNodes || {}),
+              [node]: data.status,
+            },
+          });
+        } else {
+          set((state) => ({ pipelineNodes: { ...state.pipelineNodes, [node]: data.status } }));
+        }
         break;
       case "thinking":
-        set((state) => ({
-          thinkingLog: [...state.thinkingLog, { node, text: data.text, timestamp: Date.now() }]
-        }));
+        if (isBackground) {
+          const prev = get().teamWorkspaces[analysisOwnerTeamId]?.thinkingLog || [];
+          get()._updateParkedWorkspace(analysisOwnerTeamId, {
+            thinkingLog: [...prev, { node, text: data.text, timestamp: Date.now() }],
+          });
+        } else {
+          set((state) => ({
+            thinkingLog: [...state.thinkingLog, { node, text: data.text, timestamp: Date.now() }]
+          }));
+        }
         break;
       case "result":
-        get()._processResult(data, node);
+        if (isBackground) {
+          // 백그라운드 팀 워크스페이스에 결과 저장
+          get()._updateParkedWorkspace(analysisOwnerTeamId, {
+            pipelineStatus: "done",
+            ...spreadResultData(data),
+          });
+          set({ analysisOwnerTeamId: null });
+          // 어느 팀 분석이 완료됐는지 알림
+          const ownerTeam = get().myTeams.find((t) => t.id === analysisOwnerTeamId);
+          const teamName = ownerTeam?.name || "다른 팀";
+          get().addNotification(
+            `"${teamName}" 분석 완료`,
+            "success",
+            { teamId: analysisOwnerTeamId, action: "switchTeam" },
+          );
+        } else {
+          get()._processResult(data, node);
+          set({ analysisOwnerTeamId: null });
+        }
         break;
       case "error":
-        set({ pipelineStatus: "error", pipelineError: data.message });
-        get().addDebugLog({
-          level: "error",
-          message: `Pipeline WS Error: ${data.message}`,
-          rawData: data
-        });
-        get().addNotification(`파이프라인 오류: ${data.message}`, "error");
+        if (isBackground) {
+          get()._updateParkedWorkspace(analysisOwnerTeamId, {
+            pipelineStatus: "error",
+            pipelineError: data.message,
+          });
+          set({ analysisOwnerTeamId: null });
+        } else {
+          set({ pipelineStatus: "error", pipelineError: data.message });
+          set({ analysisOwnerTeamId: null });
+          get().addDebugLog({
+            level: "error",
+            message: `Pipeline WS Error: ${data.message}`,
+            rawData: data
+          });
+          get().addNotification(`파이프라인 오류: ${data.message}`, "error");
+        }
         break;
       case "rag_retrieval":
       case "rag_status":
-        // RAG 관련 상태는 필요 시 추가 (현재는 생략 가능)
         break;
     }
+  },
+
+  /** parked workspace의 특정 필드만 업데이트 */
+  _updateParkedWorkspace: (teamId, patch) => {
+    set((s) => ({
+      teamWorkspaces: {
+        ...s.teamWorkspaces,
+        [teamId]: { ...(s.teamWorkspaces[teamId] || {}), ...patch },
+      },
+    }));
   },
 
   _processResult: (data, node = "complete") => {
@@ -116,9 +173,9 @@ export const createPipelineSlice = (set, get) => ({
     const normalizedMode = normalizeMode(selectedMode);
     const sourceDir = get().projectFolder || "";
     get().createSession(initialTitle);
-    
-    // 분석 시작 시 기존 메모(userComments)는 유지하고, 
-    // 결과 필드는 running 상태에 맞춰 필요한 것만 초기화합니다.
+    // 분석 시작한 팀 등록 (팀 전환 시 백그라운드 라우팅에 사용)
+    set({ analysisOwnerTeamId: currentUser?.team_id || null });
+
     set({
       pipelineStatus: "running",
       pipelineError: null,

@@ -247,9 +247,7 @@ def sa_advisor_node(ctx: NodeContext) -> dict:
             "sa_advisor_output": advisor_data,
             "sa_output": {**advisor_data, "data": expanded_data},
             "sa_arch_bundle": sa_arch_bundle,
-            "thinking_log": (sget("thinking_log", []) or []) + [
-                {"node": "sa_advisor", "thinking": output.thinking or ""}
-            ],
+            "thinking_log": [{"node": "sa_advisor", "thinking": output.thinking or ""}],
             "current_step": "sa_advisor_done",
         }
 
@@ -267,7 +265,5 @@ def sa_advisor_node(ctx: NodeContext) -> dict:
             "sa_advisor_output": advisor_data,
             "sa_output": {**advisor_data, "data": expanded_data},
             "sa_arch_bundle": sa_arch_bundle,
-            "thinking_log": (sget("thinking_log", []) or []) + [
-                {"node": "sa_advisor", "thinking": f"LLM 실패, 폴백: {e}"}
-            ],
+            "thinking_log": [{"node": "sa_advisor", "thinking": f"LLM 실패, 폴백: {e}"}],
         }

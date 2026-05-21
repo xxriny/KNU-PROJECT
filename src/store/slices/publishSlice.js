@@ -33,9 +33,8 @@ export const createPublishSlice = (set, get) => ({
         authToken,
       );
       if (res.status === "ok") {
-        // 목록 새로고침
-        await get().loadSnapshots();
-        await get().loadLocalResults();
+        // 목록 새로고침 (병렬)
+        await Promise.all([get().loadSnapshots(), get().loadLocalResults()]);
         return { success: true, data: res.data };
       }
       set({ publishError: res.error || "Publish 실패" });

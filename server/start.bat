@@ -20,9 +20,10 @@ if not exist "venv\Scripts\activate.bat" (
 
 echo [2/3] Installing / updating dependencies...
 call venv\Scripts\activate.bat
-pip install -r requirements.txt --quiet
+python -m pip install -r requirements.txt
 if errorlevel 1 (
-    echo [ERROR] pip install failed.
+    echo.
+    echo [ERROR] pip install failed. See output above for details.
     pause
     exit /b 1
 )
