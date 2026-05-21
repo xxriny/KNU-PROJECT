@@ -707,6 +707,49 @@ class TaskUpdateRequest(BaseModel):
     result: str = ""
 
 
+def _normalize_status_check(result: dict | None) -> dict:
+    normalized = {
+        "status": "WARN",
+        "status_updated": False,
+        "state": "",
+        "context": "NAVIGATOR Dev Tracking",
+        "description": "",
+        "error": "",
+    }
+    if isinstance(result, dict):
+        normalized.update(result)
+    return normalized
+
+
+def _normalize_followup(result: dict | None, *, decision_status: str) -> dict:
+    normalized = {
+        "status": "WARN",
+        "artifact": {},
+        "rag_metadata": {"stored": False, "write_enabled": False},
+        "doc_sync": {},
+        "pr_comment": {},
+    }
+    if isinstance(result, dict):
+        normalized.update(result)
+    if not isinstance(normalized.get("rag_metadata"), dict):
+        normalized["rag_metadata"] = {"stored": False, "write_enabled": False}
+    normalized["doc_sync"] = {
+        "synced": False,
+        "action": "unknown",
+        "message": "",
+        "updater": "doc_updater",
+        "decision_status": decision_status,
+        **(normalized.get("doc_sync") if isinstance(normalized.get("doc_sync"), dict) else {}),
+    }
+    normalized["pr_comment"] = {
+        "status": "WARN",
+        "comment_created": False,
+        "error": "",
+        **(normalized.get("pr_comment") if isinstance(normalized.get("pr_comment"), dict) else {}),
+    }
+    return normalized
+
+
 class DocSyncRequest(BaseModel):
     result_data: dict
     github_token: str
@@ -1041,6 +1084,7 @@ async def update_task_endpoint(
                     "status_updated": False,
                     "error": str(status_error) or type(status_error).__name__,
                 }
+            status_check = _normalize_status_check(status_check)
             try:
                 from pipeline.domain.dev_tracking.nodes import run_dev_gap_decision_followup
 
@@ -1055,6 +1099,10 @@ async def update_task_endpoint(
                     "status": "WARN",
                     "error": str(followup_error) or type(followup_error).__name__,
                 }
+            followup = _normalize_followup(
+                followup,
+                decision_status="APPROVED_INTENTIONAL_CHANGE",
+            )
             exec_payload["status_check"] = status_check
             exec_payload["followup"] = followup
             exec_result = json.dumps(exec_payload, ensure_ascii=False)
@@ -1090,6 +1138,7 @@ async def update_task_endpoint(
                     "status_updated": False,
                     "error": str(status_error) or type(status_error).__name__,
                 }
+            status_check = _normalize_status_check(status_check)
             try:
                 from pipeline.domain.dev_tracking.nodes import run_dev_gap_decision_followup
 
@@ -1104,6 +1153,10 @@ async def update_task_endpoint(
                     "status": "WARN",
                     "error": str(followup_error) or type(followup_error).__name__,
                 }
+            followup = _normalize_followup(
+                followup,
+                decision_status="REJECTED_UNINTENTIONAL_CHANGE",
+            )
             reject_payload["status_check"] = status_check
             reject_payload["followup"] = followup
             reject_result = json.dumps(reject_payload, ensure_ascii=False)

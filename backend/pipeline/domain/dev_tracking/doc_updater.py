@@ -1,6 +1,51 @@
 from __future__ import annotations
 
+import os
 from typing import Any
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _resolve_github_token(artifact: dict[str, Any]) -> str:
+    explicit = str(artifact.get("github_token") or "").strip()
+    if explicit:
+        return explicit
+    return str(os.getenv("NAVIGATOR_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN") or "").strip()
+
+
+def _build_doc_sync_request(artifact: dict[str, Any]) -> dict[str, Any]:
+    pr_context = _as_dict(artifact.get("pr_context"))
+    owner = str(pr_context.get("owner") or "")
+    repo = str(pr_context.get("repo") or "")
+    pr_number = pr_context.get("pr_number")
+
+    page_title = "NAVIGATOR Dev Gap Decisions"
+    if pr_number not in (None, ""):
+        page_title = f"NAVIGATOR Dev Gap Decisions - PR #{pr_number}"
+
+    return {
+        "result_data": {"sa_output": artifact},
+        "github_token": _resolve_github_token(artifact),
+        "owner": owner,
+        "repo": repo,
+        "page_title": page_title,
+        "project_name": repo or "NAVIGATOR",
+    }
+
+
+def _build_update_metadata(artifact: dict[str, Any]) -> dict[str, Any]:
+    pr_context = _as_dict(artifact.get("pr_context"))
+    result_payload = _as_dict(artifact.get("result"))
+    return {
+        "reviewed_by": str(artifact.get("reviewed_by") or ""),
+        "approval_reason": str(result_payload.get("reason") or result_payload.get("approval_reason") or ""),
+        "decision_note": str(result_payload.get("note") or ""),
+        "doc_section": "dev_tracking/pm_approved_gap_decisions",
+        "pr_number": pr_context.get("pr_number"),
+        "branch_name": pr_context.get("branch_name"),
+    }
 
 
 def run_doc_updater_for_dev_gap_decision(
@@ -16,12 +61,7 @@ def run_doc_updater_for_dev_gap_decision(
     왜:
     - PM 승인 플로우에서 문서 반영 책임을 doc_updater 계층으로 명시하기 위함이다.
     """
-    pr_context = artifact.get("pr_context") if isinstance(artifact, dict) else {}
-    if not isinstance(pr_context, dict):
-        pr_context = {}
-
-    owner = str(pr_context.get("owner") or "")
-    repo = str(pr_context.get("repo") or "")
+    artifact = _as_dict(artifact)
     decision_status = str(artifact.get("decision_status") or "")
 
     if decision_status != "APPROVED_INTENTIONAL_CHANGE":
@@ -29,23 +69,72 @@ def run_doc_updater_for_dev_gap_decision(
             "synced": False,
             "action": "skipped",
             "message": "Rejected or pending Dev GAP decisions are not published to docs.",
+            "updater": "doc_updater",
+            "decision_status": decision_status,
         }
 
     try:
         from pipeline.domain.agile.nodes.doc_sync import sync_docs
-
-        return sync_docs(
-            result_data={"sa_output": artifact},
-            github_token="",
-            owner=owner,
-            repo=repo,
-            page_title="NAVIGATOR Dev Gap Decisions",
-            project_name=repo or "NAVIGATOR",
-        )
+        req = _build_doc_sync_request(artifact)
+        max_attempts = int(artifact.get("doc_update_max_attempts") or 2)
+        if max_attempts < 1:
+            max_attempts = 1
+        result = None
+        last_error = ""
+        attempts = 0
+        for _ in range(max_attempts):
+            attempts += 1
+            try:
+                result = sync_docs(**req)
+                break
+            except Exception as attempt_exc:
+                last_error = str(attempt_exc) or type(attempt_exc).__name__
+                result = None
+        if isinstance(result, dict):
+            return {
+                **result,
+                "updater": "doc_updater",
+                "decision_status": decision_status,
+                "update_metadata": _build_update_metadata(artifact),
+                "request_meta": {
+                    "owner": req.get("owner", ""),
+                    "repo": req.get("repo", ""),
+                    "page_title": req.get("page_title", ""),
+                    "project_name": req.get("project_name", ""),
+                    "has_github_token": bool(req.get("github_token")),
+                    "attempts": attempts,
+                    "max_attempts": max_attempts,
+                },
+            }
+        if last_error:
+            return {
+                "synced": False,
+                "action": "error",
+                "message": last_error,
+                "updater": "doc_updater",
+                "decision_status": decision_status,
+                "request_meta": {
+                    "owner": req.get("owner", ""),
+                    "repo": req.get("repo", ""),
+                    "page_title": req.get("page_title", ""),
+                    "project_name": req.get("project_name", ""),
+                    "has_github_token": bool(req.get("github_token")),
+                    "attempts": attempts,
+                    "max_attempts": max_attempts,
+                },
+            }
+        return {
+            "synced": False,
+            "action": "error",
+            "message": "doc_sync returned non-dict result",
+            "updater": "doc_updater",
+            "decision_status": decision_status,
+        }
     except Exception as exc:
         return {
             "synced": False,
             "action": "error",
             "message": str(exc) or type(exc).__name__,
+            "updater": "doc_updater",
+            "decision_status": decision_status,
         }
-

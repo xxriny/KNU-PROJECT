@@ -59,9 +59,15 @@ def run_dev_gap_decision_followup(
 ) -> dict[str, Any]:
     # 승인/거절 이후 후속 처리를 노드와 분리해서 실행한다.
     artifact = build_dev_gap_decision_artifact(task, decision_status, reviewed_by, result_payload)
+    payload = _as_dict(task.get("payload"))
     pr_context = _as_dict(artifact.get("pr_context"))
     owner = str(pr_context.get("owner") or "")
     repo = str(pr_context.get("repo") or "")
+    github_token = (
+        str(payload.get("github_token") or "").strip()
+        or str(os.getenv("NAVIGATOR_GITHUB_TOKEN") or "").strip()
+        or str(os.getenv("GITHUB_TOKEN") or "").strip()
+    )
 
     # author: xxrin
     # 무엇: PM 승인 후 문서 반영을 doc_updater 계층으로 위임한다.
@@ -69,6 +75,7 @@ def run_dev_gap_decision_followup(
     doc_sync_result: dict[str, Any] = run_doc_updater_for_dev_gap_decision(
         {
             **artifact,
+            "github_token": github_token,
             "pr_context": {
                 **_as_dict(artifact.get("pr_context")),
                 "owner": owner,
