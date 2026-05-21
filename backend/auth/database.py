@@ -1,29 +1,37 @@
 """
 SQLAlchemy SQLite 데이터베이스 설정.
 
-local.db  — 개인 데이터: users, teams, sessions, results, memos, agile_tasks
-shared.db — 공유 데이터: published_snapshots (향후 배포 예정)
+local.db  — 개인 데이터: sessions, results, memos, change_requests, agile_tasks
+shared.db — 공유 데이터: users, teams, subscriptions, published_snapshots
+            (NAVIGATOR-SERVER가 owns shared.db; 기본 경로는 ../NAVIGATOR-SERVER/shared.db)
 """
 
 import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
+# ── 로컬 DB (개인 산출물) ───────────────────────────────────
 _STORAGE_DIR = os.environ.get(
     "NAVIGATOR_STORAGE_DIR",
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "storage"),
 )
 os.makedirs(_STORAGE_DIR, exist_ok=True)
 
-# ── 로컬 DB (개인 산출물) ───────────────────────────────────
 LOCAL_DB_PATH = os.path.join(_STORAGE_DIR, "local.db")
 LOCAL_DB_URL = f"sqlite:///{LOCAL_DB_PATH}"
 
 engine = create_engine(LOCAL_DB_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# ── 공유 DB (팀 스냅샷, 향후 배포) ─────────────────────────
-SHARED_DB_PATH = os.path.join(_STORAGE_DIR, "shared.db")
+# ── 공유 DB (users, teams, subscriptions — NAVIGATOR-SERVER 소유) ─
+_AUTH_DIR      = os.path.dirname(os.path.abspath(__file__))   # backend/auth/
+_BACKEND_DIR   = os.path.dirname(_AUTH_DIR)                    # backend/
+_NAVIGATOR_DIR = os.path.dirname(_BACKEND_DIR)                 # NAVIGATOR/
+
+SHARED_DB_PATH = os.environ.get(
+    "NAVIGATOR_SHARED_DB_PATH",
+    os.path.join(_NAVIGATOR_DIR, "server", "shared.db"),
+)
 SHARED_DB_URL = f"sqlite:///{SHARED_DB_PATH}"
 
 shared_engine = create_engine(SHARED_DB_URL, connect_args={"check_same_thread": False})
@@ -31,6 +39,12 @@ SharedSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=shared
 
 
 class Base(DeclarativeBase):
+    """로컬 DB 전용 Base."""
+    pass
+
+
+class SharedBase(DeclarativeBase):
+    """공유 DB 전용 Base (users, teams, subscriptions, published_snapshots)."""
     pass
 
 
@@ -58,7 +72,7 @@ def _add_column_if_missing(conn, table: str, column: str, col_def: str) -> None:
 
 
 def _migrate_role_constraint(conn) -> None:
-    """users.role CheckConstraint를 새 역할 포함하도록 확장."""
+    """users.role CheckConstraint를 새 역할 포함하도록 확장 (shared.db)."""
     schema = conn.execute(
         text("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'")
     ).scalar() or ""
@@ -86,8 +100,9 @@ def _migrate_role_constraint(conn) -> None:
 
 
 def _run_migrations() -> None:
-    """기존 local.db에 나중에 추가된 컬럼을 안전하게 추가합니다."""
-    with engine.begin() as conn:
+    """기존 DB에 나중에 추가된 컬럼을 안전하게 추가합니다."""
+    # 공유 DB 마이그레이션 (users, teams)
+    with shared_engine.begin() as conn:
         _add_column_if_missing(conn, "teams", "github_client_id",     "TEXT")
         _add_column_if_missing(conn, "teams", "github_client_secret", "TEXT")
         _add_column_if_missing(conn, "users", "github_username",      "TEXT")
@@ -95,6 +110,9 @@ def _run_migrations() -> None:
         _add_column_if_missing(conn, "users", "github_login",         "TEXT")
         _add_column_if_missing(conn, "users", "github_oauth_token",   "TEXT")
         _migrate_role_constraint(conn)
+
+    # 로컬 DB 마이그레이션 (agile_tasks 등)
+    with engine.begin() as conn:
         try:
             _add_column_if_missing(conn, "agile_tasks", "team_id", "TEXT DEFAULT ''")
         except Exception:
@@ -102,21 +120,15 @@ def _run_migrations() -> None:
 
 
 def init_db():
+    from auth.shared_models import User, Team, Subscription, PublishedSnapshot  # noqa: F401
     from auth.models import (  # noqa: F401
-        User, Team, AnalysisSession, DesignChangeRequest,
-        MemoItem, AnalysisResult,
+        AnalysisSession, DesignChangeRequest, MemoItem, AnalysisResult,
     )
-    from auth.shared_models import PublishedSnapshot  # noqa: F401
 
-    # 로컬 테이블 생성 (PublishedSnapshot 제외)
-    local_tables = [
-        t for name, t in Base.metadata.tables.items()
-        if name != "published_snapshots"
-    ]
-    Base.metadata.create_all(bind=engine, tables=local_tables)
+    # 공유 테이블 생성 (shared.db)
+    SharedBase.metadata.create_all(bind=shared_engine)
 
-    # 공유 테이블 생성
-    shared_tables = [Base.metadata.tables["published_snapshots"]]
-    Base.metadata.create_all(bind=shared_engine, tables=shared_tables)
+    # 로컬 테이블 생성 (local.db)
+    Base.metadata.create_all(bind=engine)
 
     _run_migrations()

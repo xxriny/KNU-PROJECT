@@ -11,9 +11,9 @@ from pipeline.domain.agile.schemas import ImpactedComponent, ImpactResult
 
 
 def _get_llm(api_key: str, model: str):
-    from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore
+    from pipeline.core.utils import get_llm
     key = api_key or os.environ.get("GEMINI_API_KEY", "")
-    return ChatGoogleGenerativeAI(model=model, google_api_key=key, temperature=0)
+    return get_llm(key, model=model, temperature=0)
 
 
 def _parse_impact_json(text: str) -> dict:

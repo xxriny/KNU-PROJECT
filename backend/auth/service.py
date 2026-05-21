@@ -16,7 +16,7 @@ from jose import JWTError, jwt
 import bcrypt as _bcrypt_lib
 from sqlalchemy.orm import Session
 
-from auth.models import User, Team
+from auth.shared_models import User, Team, Subscription
 
 _SECRET_KEY = os.environ.get("NAVIGATOR_JWT_SECRET", "navigator-dev-secret-change-in-production")
 _ALGORITHM = "HS256"
@@ -83,6 +83,8 @@ def create_user(
             team = Team(name=team_name)
             db.add(team)
             db.flush()
+            # 새 팀에 무료 플랜 자동 생성
+            db.add(Subscription(team_id=team.id, plan="free", status="active"))
 
     user = User(
         name=name,
@@ -240,13 +242,12 @@ def create_or_update_github_user(
         if not user.github_username:
             user.github_username = github_login
     else:
-        # 최초 가입자는 관리자(pm) 권한을 부여합니다.
-        is_first = db.query(User).count() == 0
+        # 신규 가입 — team_id는 null로 시작, 프론트 TeamCreateScreen에서 팀을 만들 때 PM 부여
         user = User(
             name=name,
             email=email,
             password_hash=hash_password(str(uuid.uuid4())),
-            role="pm" if is_first else "engineer",
+            role="engineer",
             github_username=github_login,
             github_id=github_id,
             github_login=github_login,
@@ -254,21 +255,12 @@ def create_or_update_github_user(
         )
         db.add(user)
 
-    # 팀이 없는 사용자는 기존 팀에 배정하거나 기본 팀을 생성합니다.
-    if not user.team_id:
-        team = db.query(Team).first()
-        if not team:
-            team = Team(name="Default Team")
-            db.add(team)
-            db.flush()
-        user.team_id = team.id
-
     db.commit()
     db.refresh(user)
     return user
 
 
-def build_user_response(user: User) -> dict:
+def build_user_response(user: User, plan: str = "free") -> dict:
     team_name = user.team.name if user.team else None
     return {
         "id": user.id,
@@ -280,4 +272,5 @@ def build_user_response(user: User) -> dict:
         "github_login": user.github_login,
         "team_id": user.team_id,
         "team_name": team_name,
+        "plan": plan,
     }

@@ -148,7 +148,7 @@ def build_design_doc_markdown_llm(
     """LLM을 사용하여 result_data에서 격식 있는 고성능 소프트웨어 아키텍처 보고서를 생성."""
     import json
     import logging
-    from langchain_google_genai import ChatGoogleGenerativeAI
+    from pipeline.core.utils import get_llm
 
     sa_data = result_data.get("sa_output") or {}
     if isinstance(sa_data, dict) and "data" in sa_data:
@@ -232,7 +232,7 @@ def build_design_doc_markdown_llm(
     )
 
     try:
-        llm = ChatGoogleGenerativeAI(model=model, google_api_key=api_key, temperature=0.3)
+        llm = get_llm(api_key, model=model, temperature=0.3)
         response = llm.invoke(f"{system_prompt}\n\n{json.dumps(context, ensure_ascii=False)}")
         content = response.content.strip()
         # 마크다운 백틱 래퍼 제거 처리

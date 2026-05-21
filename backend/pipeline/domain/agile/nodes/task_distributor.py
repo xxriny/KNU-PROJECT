@@ -56,9 +56,9 @@ Assign unassigned development tasks to team members based on:
 
 def _get_team_members(team_id: str) -> list[dict]:
     """팀 멤버 목록 조회 (pm 제외)."""
-    from auth.database import SessionLocal
-    from auth.models import User
-    db = SessionLocal()
+    from auth.database import SharedSessionLocal
+    from auth.shared_models import User
+    db = SharedSessionLocal()
     try:
         users = db.query(User).filter(
             User.team_id == team_id,

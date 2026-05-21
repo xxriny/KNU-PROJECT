@@ -40,11 +40,17 @@ DOCS
 **/vector_db/
 **/storage/
 **/*.sqlite3
+**/*.db
 **/*.bin
 **/*.gguf
 backend/models/
 backend/Data/*.json
 backend/storage/sessions/*.json
+
+# Server (NAVIGATOR/server/)
+server/shared.db
+server/venv/
+server/.env
 
 # Benchmark Reports
 backend/pipeline/domain/pm/benchmark/reports/*.md

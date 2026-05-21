@@ -1,0 +1,14 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+sqlalchemy==2.0.36
+python-jose[cryptography]==3.3.0
+bcrypt==4.2.0
+httpx==0.27.2
+pydantic==2.9.2
+
+# 빌링 (Stripe 연동 시 주석 해제)
+# stripe==11.1.0
+
+# Vertex AI / Gemini (서버 키 직접 호출 시)
+# google-cloud-aiplatform
+# google-generativeai

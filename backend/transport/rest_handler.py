@@ -16,7 +16,7 @@ from fastapi.security import OAuth2PasswordBearer
 from auth.deps import get_current_user, get_current_user_optional
 from auth.database import get_db, get_shared_db
 from sqlalchemy.orm import Session
-from auth.models import User
+from auth.shared_models import User
 from pydantic import BaseModel
 from version import APP_VERSION, DEFAULT_MODEL
 from observability.logger import get_logger

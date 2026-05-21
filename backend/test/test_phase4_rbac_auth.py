@@ -24,7 +24,8 @@ class TestAuthImports:
         assert callable(init_db)
 
     def test_models_importable(self):
-        from auth.models import User, Team, AnalysisSession, DesignChangeRequest
+        from auth.shared_models import User, Team
+        from auth.models import AnalysisSession, DesignChangeRequest
         assert User.__tablename__ == "users"
         assert Team.__tablename__ == "teams"
         assert AnalysisSession.__tablename__ == "analysis_sessions"

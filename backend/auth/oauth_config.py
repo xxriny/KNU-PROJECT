@@ -3,7 +3,7 @@ Navigator GitHub OAuth App 자격증명 (동적 로딩 지원).
 """
 import os
 from sqlalchemy.orm import Session
-from auth.models import Team
+from auth.shared_models import Team
 
 # NAVIGATOR 앱 자체 GitHub OAuth App Client ID.
 # 앱 배포 시 개발자가 한 번만 등록하면 됨 (사용자 설정 불필요).

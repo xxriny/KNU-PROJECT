@@ -40,6 +40,7 @@ print(">>> [Python] Loading backend subsystems...", flush=True)
 
 # ── 계층 임포트 ──────────────────────────────────────────
 from transport.rest_handler import rest_router
+from transport.team_router import team_router
 from transport.ws_handler import websocket_pipeline
 from observability.metrics import make_metrics_app
 from observability.logger import get_logger
@@ -76,6 +77,7 @@ app.add_middleware(
 
 # ── 라우터 등록 ──────────────────────────────────────────
 app.include_router(auth_router)
+app.include_router(team_router)
 app.include_router(rest_router)
 app.add_api_websocket_route("/ws/pipeline", websocket_pipeline)
 

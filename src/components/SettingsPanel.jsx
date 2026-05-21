@@ -3,9 +3,9 @@
  */
 import React, { useState, useEffect, useRef } from "react";
 import useAppStore from "../store/useAppStore";
-import { Key, Cpu, Users, Sun, Moon, Github, Check, X, Loader2, Shield, ChevronDown } from "lucide-react";
+import { Key, Cpu, Users, Sun, Moon, Github, Check, X, Loader2, Shield, ChevronDown, CreditCard, Zap } from "lucide-react";
 
-export default function SettingsPanel() {
+export default function SettingsPanel({ onShowPricing }) {
   const {
     apiKey, setApiKey,
     model, setModel,
@@ -25,6 +25,7 @@ export default function SettingsPanel() {
   } = useAppStore();
   const authToken = useAppStore((s) => s.authToken);
   const currentUser = useAppStore((s) => s.currentUser);
+  const userPlan = useAppStore((s) => s.userPlan);
   const isGithubConnected = !!currentUser?.github_id;
 
   const [teamName, setTeamNameLocal] = useState("");
@@ -723,6 +724,42 @@ export default function SettingsPanel() {
               ) : "변경 시 자동 저장"}
             </div>
           </div>
+        </div>
+
+        {/* 플랜 / 빌링 */}
+        <div className={sectionCls}>
+          <div className={`px-5 py-3 flex items-center justify-between border-b ${isDarkMode ? "border-white/5" : "border-[var(--border)]"}`}>
+            <div className="flex items-center gap-2">
+              <CreditCard size={13} className="text-blue-400 shrink-0" />
+              <span className="text-xs font-semibold opacity-50">플랜</span>
+            </div>
+            <span
+              className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full"
+              style={{
+                background: userPlan === "free"
+                  ? "rgba(100,116,139,0.2)"
+                  : userPlan === "pro"
+                    ? "rgba(59,130,246,0.2)"
+                    : "rgba(139,92,246,0.2)",
+                color: userPlan === "free" ? "#94A3B8"
+                  : userPlan === "pro" ? "#60A5FA"
+                  : "#A78BFA",
+              }}
+            >
+              {userPlan || "free"}
+            </span>
+          </div>
+          <button
+            onClick={() => onShowPricing?.()}
+            className={`w-full flex items-center gap-3 px-5 py-3.5 text-sm transition-colors ${
+              isDarkMode ? "hover:bg-white/5" : "hover:bg-slate-50"
+            }`}
+          >
+            <Zap size={14} className="text-yellow-400 shrink-0" />
+            <span className="opacity-70 text-xs font-semibold">
+              {userPlan === "free" ? "Pro로 업그레이드" : "플랜 관리"}
+            </span>
+          </button>
         </div>
 
         {/* 기타 */}

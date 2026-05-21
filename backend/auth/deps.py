@@ -6,8 +6,8 @@ from fastapi import Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from auth.database import get_db
-from auth.models import User
+from auth.database import get_shared_db
+from auth.shared_models import User
 from auth.service import decode_token, get_user_by_id
 
 
@@ -22,7 +22,7 @@ def _extract_token(authorization: Optional[str] = Header(default=None)) -> Optio
 
 def get_current_user_optional(
     token: Optional[str] = Depends(_extract_token),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_shared_db),
 ) -> Optional[User]:
     if not token:
         return None

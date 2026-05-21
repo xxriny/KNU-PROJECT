@@ -41,9 +41,9 @@ def _colname(col: dict) -> str:
 # ── LLM 의존성 (지연 임포트) ─────────────────────────────────
 
 def _get_llm(api_key: str, model: str):
-    from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore
+    from pipeline.core.utils import get_llm
     key = api_key or os.environ.get("GEMINI_API_KEY", "")
-    return ChatGoogleGenerativeAI(model=model, google_api_key=key, temperature=0)
+    return get_llm(key, model=model, temperature=0)
 
 
 # ── V-001: API 엔드포인트 컴포넌트 참조 검사 ──────────────────

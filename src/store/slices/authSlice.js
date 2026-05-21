@@ -1,6 +1,6 @@
 /**
  * authSlice — 인증 상태 관리
- * 로그인/로그아웃, 현재 사용자, 역할 정보
+ * 로그인/로그아웃, 현재 사용자, 역할/플랜 정보
  */
 
 const AUTH_KEY = "navigator_auth";
@@ -30,18 +30,24 @@ export const createAuthSlice = (set, get) => ({
   authToken: stored.token,
   currentUser: stored.user,
   userRole: stored.user?.role ?? null,
-  authChecked: false,       // 최초 상태 체크 완료 여부
-  hasUsers: null,           // null = 아직 체크 안 함
+  userPlan: stored.user?.plan ?? "free",
+  authChecked: false,
+  hasUsers: null,
 
   // ── 액션 ────────────────────────────────────────────────
   setAuth: (token, user) => {
     saveAuth(token, user);
-    set({ authToken: token, currentUser: user, userRole: user?.role ?? null });
+    set({
+      authToken: token,
+      currentUser: user,
+      userRole: user?.role ?? null,
+      userPlan: user?.plan ?? "free",
+    });
   },
 
   clearAuth: () => {
     clearStoredAuth();
-    set({ authToken: null, currentUser: null, userRole: null });
+    set({ authToken: null, currentUser: null, userRole: null, userPlan: "free" });
   },
 
   isAuthenticated: () => !!get().authToken,
@@ -64,13 +70,16 @@ export const createAuthSlice = (set, get) => ({
       const data = await res.json();
       set({ hasUsers: data.has_users, authChecked: true });
 
-      // 저장된 토큰이 있으면 유효성 재확인
+      // 저장된 토큰이 있으면 유효성 재확인 + 최신 사용자 정보(plan 포함) 갱신
       if (get().authToken) {
         const meRes = await fetch(`http://127.0.0.1:${backendPort}/auth/me`, {
           headers: get().getAuthHeader(),
         });
         if (!meRes.ok) {
           get().clearAuth();
+        } else {
+          const meData = await meRes.json();
+          get().setAuth(get().authToken, meData);
         }
       }
     } catch {
@@ -116,6 +125,26 @@ export const createAuthSlice = (set, get) => ({
   /** 로그아웃 */
   logout: () => {
     get().clearAuth();
+  },
+
+  /** 팀 생성 (로그인 후 팀이 없는 사용자) */
+  createTeam: async (teamName) => {
+    const { backendPort } = get();
+    const res = await fetch(`http://127.0.0.1:${backendPort}/api/teams`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...get().getAuthHeader() },
+      body: JSON.stringify({ name: teamName }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "팀 생성 실패");
+    }
+    const data = await res.json();
+    // 서버가 업데이트된 user를 반환하면 스토어 갱신
+    if (data.user) {
+      get().setAuth(get().authToken, data.user);
+    }
+    return data;
   },
 
   /** GitHub OAuth Web Flow: 인증 URL + session_id 가져오기 */

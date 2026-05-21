@@ -1,5 +1,8 @@
 """
-SQLAlchemy ORM 모델: User, Team, AnalysisSession, DesignChangeRequest
+SQLAlchemy ORM 모델 — 로컬 DB (local.db) 전용.
+
+User, Team은 shared.db로 이전되었으므로 auth.shared_models를 사용하세요.
+여기서는 cross-DB FK를 plain String으로 저장합니다 (SQLite는 DB 간 FK 불가).
 """
 
 import uuid
@@ -15,64 +18,16 @@ def _new_uuid() -> str:
     return str(uuid.uuid4())
 
 
-class Team(Base):
-    __tablename__ = "teams"
-
-    id = Column(String(36), primary_key=True, default=_new_uuid)
-    name = Column(String(255), nullable=False)
-    github_repo = Column(String(500), nullable=True)
-    github_token = Column(String(500), nullable=True)
-    
-    # 동적 OAuth 구성을 위한 필드
-    github_client_id = Column(String(255), nullable=True)
-    github_client_secret = Column(String(255), nullable=True)
-    
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    users = relationship("User", back_populates="team", cascade="all, delete-orphan")
-    sessions = relationship("AnalysisSession", back_populates="team")
-
-
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(String(36), primary_key=True, default=_new_uuid)
-    team_id = Column(String(36), ForeignKey("teams.id", ondelete="CASCADE"), nullable=True)
-    name = Column(String(255), nullable=False)
-    email = Column(String(255), unique=True, nullable=False)
-    role = Column(
-        String(20),
-        CheckConstraint("role IN ('pm', 'engineer', 'backend', 'frontend', 'devops')"),
-        nullable=False,
-        default="engineer",
-    )
-    github_username = Column(String(255), nullable=True)
-    github_id = Column(String(64), unique=True, nullable=True)
-    github_login = Column(String(255), nullable=True)
-    github_oauth_token = Column(String(500), nullable=True)
-    password_hash = Column(String(255), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    team = relationship("Team", back_populates="users")
-    sessions_created = relationship("AnalysisSession", back_populates="creator")
-    change_requests = relationship(
-        "DesignChangeRequest",
-        foreign_keys="DesignChangeRequest.requested_by",
-        back_populates="requester",
-    )
-
-
 class AnalysisSession(Base):
     __tablename__ = "analysis_sessions"
 
     run_id = Column(String(255), primary_key=True)
-    team_id = Column(String(36), ForeignKey("teams.id"), nullable=True)
-    created_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    # team_id / created_by는 shared.db의 teams/users를 참조하므로 FK 없이 plain string
+    team_id = Column(String(36), nullable=True)
+    created_by = Column(String(36), nullable=True)
     title = Column(String(500), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    team = relationship("Team", back_populates="sessions")
-    creator = relationship("User", back_populates="sessions_created")
     change_requests = relationship("DesignChangeRequest", back_populates="session")
 
 
@@ -81,8 +36,9 @@ class DesignChangeRequest(Base):
 
     id = Column(String(36), primary_key=True, default=_new_uuid)
     session_id = Column(String(255), ForeignKey("analysis_sessions.run_id"), nullable=True)
-    requested_by = Column(String(36), ForeignKey("users.id"), nullable=True)
-    approved_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    # requested_by / approved_by: shared.db users.id를 plain string으로 저장
+    requested_by = Column(String(36), nullable=True)
+    approved_by = Column(String(36), nullable=True)
     target_section = Column(String(500), nullable=True)
     description = Column(Text, nullable=False)
     status = Column(
@@ -93,20 +49,16 @@ class DesignChangeRequest(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     session = relationship("AnalysisSession", back_populates="change_requests")
-    requester = relationship(
-        "User",
-        foreign_keys=[requested_by],
-        back_populates="change_requests",
-    )
 
 
 class MemoItem(Base):
-    """사용자 메모 — ChromaDB memo_db 대체 (팀 DB 단일화)."""
+    """사용자 메모 — 로컬 DB 저장."""
     __tablename__ = "memo_items"
 
     id = Column(String(36), primary_key=True, default=_new_uuid)
     session_id = Column(String(255), nullable=False)
-    team_id = Column(String(36), ForeignKey("teams.id"), nullable=True)
+    # team_id: shared.db teams.id를 plain string으로 저장
+    team_id = Column(String(36), nullable=True)
     text = Column(Text, nullable=False)
     selected_text = Column(Text, default="")
     section = Column(String(255), default="Global")
@@ -129,5 +81,3 @@ class AnalysisResult(Base):
     saved_at = Column(DateTime, default=datetime.utcnow)
 
     session = relationship("AnalysisSession")
-
-

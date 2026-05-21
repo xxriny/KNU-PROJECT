@@ -9,6 +9,8 @@ import StatusBar from "./components/StatusBar";
 import SessionPanel from "./components/SessionPanel";
 import SettingsPanel from "./components/SettingsPanel";
 import LoginScreen from "./components/auth/LoginScreen";
+import TeamCreateScreen from "./components/auth/TeamCreateScreen";
+import PricingScreen from "./components/billing/PricingScreen";
 
 // Extracted Components
 import TopBar from "./components/layout/TopBar";
@@ -37,12 +39,18 @@ export default function App() {
   const authToken = useAppStore((state) => state.authToken);
   const authChecked = useAppStore((state) => state.authChecked);
   const hasUsers = useAppStore((state) => state.hasUsers);
+  const currentUser = useAppStore((state) => state.currentUser);
+  const userPlan = useAppStore((state) => state.userPlan);
   const checkAuthStatus = useAppStore((state) => state.checkAuthStatus);
   const activeIconPanel = useAppStore((state) => state.activeIconPanel);
   const setActiveIconPanel = useAppStore((state) => state.setActiveIconPanel);
 
   const [showSessions, setShowSessions] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showPricingInSettings, setShowPricingInSettings] = useState(false);
+  const [pricingDismissed, setPricingDismissed] = useState(
+    () => localStorage.getItem("pricing_dismissed") === "1"
+  );
   const [isStudioOpen, setIsStudioOpen] = useState(true);
   const [showSidebarChat, setShowSidebarChat] = useState(false);
 
@@ -101,8 +109,18 @@ export default function App() {
     }
     if (showSettingsModal) {
       return (
-        <PanelWrapper title="설정" onClose={() => setShowSettingsModal(false)}>
-          <SettingsPanel />
+        <PanelWrapper title={showPricingInSettings ? "플랜" : "설정"} onClose={() => {
+          setShowSettingsModal(false);
+          setShowPricingInSettings(false);
+        }}>
+          {showPricingInSettings ? (
+            <PricingScreen
+              onContinue={() => setShowPricingInSettings(false)}
+              onClose={() => setShowPricingInSettings(false)}
+            />
+          ) : (
+            <SettingsPanel onShowPricing={() => setShowPricingInSettings(true)} />
+          )}
         </PanelWrapper>
       );
     }
@@ -131,7 +149,7 @@ export default function App() {
     }
   };
 
-  // 인증 체크 전 — 백엔드 응답 대기 중 앱 접근 차단
+  // authChecked=false → 로딩 스피너
   if (!authChecked) {
     return (
       <div className="h-screen w-screen flex items-center justify-center"
@@ -144,10 +162,27 @@ export default function App() {
     );
   }
 
-  // 인증 체크 완료 후 토큰 없으면 항상 LoginScreen 표시
-  // hasUsers === null (백엔드 미응답)도 로그인 화면으로 처리
-  if (authChecked && !authToken) {
+  // authToken=false → LoginScreen
+  if (!authToken) {
     return <LoginScreen isFirstRun={hasUsers === false} />;
+  }
+
+  // isTeam=false → TeamCreateScreen
+  if (!currentUser?.team_id) {
+    return <TeamCreateScreen />;
+  }
+
+  // isPaid=true → PricingScreen (유료 플랜 첫 로그인 안내, 또는 스킵)
+  const isPaid = userPlan && userPlan !== "free";
+  if (isPaid && !pricingDismissed) {
+    return (
+      <PricingScreen
+        onContinue={() => {
+          localStorage.setItem("pricing_dismissed", "1");
+          setPricingDismissed(true);
+        }}
+      />
+    );
   }
 
   return (
