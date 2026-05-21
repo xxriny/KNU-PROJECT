@@ -142,7 +142,11 @@ async def health_check():
 
 @rest_router.get("/api/config")
 async def get_config():
-    has_key = bool(os.environ.get("GEMINI_API_KEY", "").strip())
+    from pipeline.core.utils import get_effective_key
+    try:
+        has_key = bool(get_effective_key(""))
+    except ValueError:
+        has_key = False
     return {
         "has_api_key": has_key,
         "default_model": DEFAULT_MODEL,
