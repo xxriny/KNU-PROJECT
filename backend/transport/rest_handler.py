@@ -17,7 +17,7 @@ from auth.deps import get_current_user, get_current_user_optional
 from auth.database import get_db, get_shared_db
 from sqlalchemy.orm import Session
 from auth.shared_models import User
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from version import APP_VERSION, DEFAULT_MODEL
 from observability.logger import get_logger
 # pipeline 관련 임포트는 첫 요청 시 지연 로드 (langgraph 콜드스타트 방지)
@@ -1006,4 +1006,50 @@ async def github_issues_import(req: GitHubIssuesImportRequest):
         }
     except Exception as e:
         get_logger().exception("github_issues_import endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+# ── Dev Tracking ──────────────────────────────────────────────────────────────
+
+class DevTrackingRequest(BaseModel):
+    trigger: str = "GITHUB_PR_WEBHOOK"
+    repository: dict
+    pull_request: dict
+    actor: dict = Field(default_factory=dict)
+    source_dir: Optional[str] = None
+    github_token: Optional[str] = None
+    notify_pr: bool = False
+    team_id: Optional[str] = None
+    created_by: str = ""
+
+
+@rest_router.post("/api/dev-tracking/pr")
+async def dev_tracking_pr_endpoint(
+    req: DevTrackingRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    shared_db: Session = Depends(get_shared_db),
+):
+    """PR 기반 Dev Tracking 분석 실행"""
+    try:
+        from pipeline.domain.dev_tracking import run_dev_tracking_analysis
+
+        github_token = req.github_token
+        if not github_token and current_user:
+            github_token = current_user.github_oauth_token
+
+        payload = {
+            "trigger": req.trigger,
+            "repository": req.repository,
+            "pull_request": req.pull_request,
+            "actor": req.actor,
+            "source_dir": req.source_dir or "",
+            "github_oauth_token": github_token or "",
+            "notify_pr": req.notify_pr,
+            "team_id": req.team_id or (current_user.team_id if current_user else ""),
+            "created_by": req.created_by or (current_user.id if current_user else ""),
+        }
+        result = run_dev_tracking_analysis(payload, shared_db=shared_db)
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        get_logger().exception("dev_tracking_pr_endpoint failed")
         return {"status": "error", "error": str(e)}
