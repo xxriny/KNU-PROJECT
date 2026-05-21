@@ -8,18 +8,16 @@ echo  NAVIGATOR Server (Auth / Billing / Gemini Key)
 echo ================================================
 echo.
 
-REM ── 가상환경 확인 및 생성 ─────────────────────────────────────
 if not exist "venv\Scripts\activate.bat" (
     echo [1/3] Creating Python virtual environment...
     python -m venv venv
     if errorlevel 1 (
-        echo [ERROR] Failed to create venv. Make sure Python 3.11+ is installed.
+        echo [ERROR] Failed to create venv. Python 3.11+ required.
         pause
         exit /b 1
     )
 )
 
-REM ── 의존성 설치 ───────────────────────────────────────────────
 echo [2/3] Installing / updating dependencies...
 call venv\Scripts\activate.bat
 pip install -r requirements.txt --quiet
@@ -29,7 +27,6 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM ── 서버 시작 ─────────────────────────────────────────────────
 echo [3/3] Starting NAVIGATOR Server on port 8001...
 echo.
 echo  Endpoints:
