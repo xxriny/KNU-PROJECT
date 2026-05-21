@@ -1689,6 +1689,83 @@ def test_dev_gap_decision_followup_warns_on_rejection_comment_failure(monkeypatc
     assert result["pr_comment"]["error"] == "gh auth required"
 
 
+def test_doc_updater_runs_sync_docs_on_approved_decision(monkeypatch):
+    from pipeline.domain.dev_tracking.doc_updater import run_doc_updater_for_dev_gap_decision
+    import pipeline.domain.agile.nodes.doc_sync as doc_sync_mod
+
+    captured = {}
+
+    def fake_sync_docs(**kwargs):
+        captured.update(kwargs)
+        return {"synced": True, "action": "updated"}
+
+    monkeypatch.setattr(doc_sync_mod, "sync_docs", fake_sync_docs)
+
+    result = run_doc_updater_for_dev_gap_decision(
+        {
+            "decision_status": "APPROVED_INTENTIONAL_CHANGE",
+            "pr_context": {"owner": "xxrin", "repo": "navigator", "pr_number": 99},
+            "reviewed_by": "pm-1",
+            "result": {"reason": "요구사항 의도 반영"},
+        }
+    )
+
+    assert result["synced"] is True
+    assert result["updater"] == "doc_updater"
+    assert result["decision_status"] == "APPROVED_INTENTIONAL_CHANGE"
+    assert captured["owner"] == "xxrin"
+    assert captured["repo"] == "navigator"
+    assert captured["page_title"] == "NAVIGATOR Dev Gap Decisions - PR #99"
+    assert captured["result_data"]["sa_output"]["decision_status"] == "APPROVED_INTENTIONAL_CHANGE"
+    assert result["request_meta"]["has_github_token"] is False
+    assert result["request_meta"]["attempts"] == 1
+    assert result["update_metadata"]["reviewed_by"] == "pm-1"
+    assert result["update_metadata"]["approval_reason"] == "요구사항 의도 반영"
+
+
+def test_doc_updater_skips_sync_docs_on_rejected_decision():
+    from pipeline.domain.dev_tracking.doc_updater import run_doc_updater_for_dev_gap_decision
+
+    result = run_doc_updater_for_dev_gap_decision(
+        {
+            "decision_status": "REJECTED_UNINTENTIONAL_CHANGE",
+            "pr_context": {"owner": "xxrin", "repo": "navigator"},
+        }
+    )
+
+    assert result["synced"] is False
+    assert result["action"] == "skipped"
+    assert result["updater"] == "doc_updater"
+    assert result["decision_status"] == "REJECTED_UNINTENTIONAL_CHANGE"
+
+
+def test_doc_updater_retries_when_sync_docs_raises(monkeypatch):
+    from pipeline.domain.dev_tracking.doc_updater import run_doc_updater_for_dev_gap_decision
+    import pipeline.domain.agile.nodes.doc_sync as doc_sync_mod
+
+    calls = {"count": 0}
+
+    def flaky_sync_docs(**kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("temporary failure")
+        return {"synced": True, "action": "updated"}
+
+    monkeypatch.setattr(doc_sync_mod, "sync_docs", flaky_sync_docs)
+
+    result = run_doc_updater_for_dev_gap_decision(
+        {
+            "decision_status": "APPROVED_INTENTIONAL_CHANGE",
+            "doc_update_max_attempts": 2,
+            "pr_context": {"owner": "xxrin", "repo": "navigator", "pr_number": 10},
+        }
+    )
+
+    assert result["synced"] is True
+    assert calls["count"] == 2
+    assert result["request_meta"]["attempts"] == 2
+
+
 def test_dev_gap_approval_endpoint_updates_success_status(monkeypatch):
     import pipeline.domain.agile.task_coordinator as agile_task_coordinator
     import pipeline.domain.dev_tracking.nodes as dev_nodes
@@ -1752,6 +1829,9 @@ def test_dev_gap_approval_endpoint_updates_success_status(monkeypatch):
     assert calls["followup_reviewed_by"] == "pm-1"
     assert stored_results[-1]["status_check"]["status_updated"] is True
     assert stored_results[-1]["followup"]["status"] == "PASS"
+    assert stored_results[-1]["followup"]["doc_sync"]["updater"] == "doc_updater"
+    assert stored_results[-1]["followup"]["doc_sync"]["decision_status"] == "APPROVED_INTENTIONAL_CHANGE"
+    assert "pr_comment" in stored_results[-1]["followup"]
     assert result["data"]["reviewed_by"] == "pm-1"
 
 
@@ -1818,6 +1898,8 @@ def test_dev_gap_rejection_endpoint_updates_failure_status(monkeypatch):
     assert stored_results[-1]["approval_status"] == "REJECTED_UNINTENTIONAL_CHANGE"
     assert stored_results[-1]["status_check"]["status_updated"] is True
     assert stored_results[-1]["followup"]["pr_comment"]["comment_created"] is True
+    assert stored_results[-1]["followup"]["doc_sync"]["updater"] == "doc_updater"
+    assert stored_results[-1]["followup"]["doc_sync"]["decision_status"] == "REJECTED_UNINTENTIONAL_CHANGE"
 
 
 def test_dev_gap_approval_requires_authenticated_pm(monkeypatch):
