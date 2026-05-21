@@ -6,7 +6,7 @@ LangGraph StateGraph에서 모든 노드가 읽고 쓰는 상태 스키마.
 PipelineState 는 이들의 합집합(union)으로 유지하여 하위 호환성 보장.
 """
 
-from typing import TypedDict, Annotated
+from typing import Any, TypedDict, Annotated
 from pipeline.core.utils import make_sget
 
 
@@ -18,7 +18,34 @@ def _merge_thinking_logs(existing_logs, new_logs):
         existing_logs = []
     if not isinstance(new_logs, list):
         new_logs = []
-    return existing_logs + new_logs
+    # Legacy nodes sometimes return the full prior log plus a new entry. The
+    # reducer already receives the prior value, so concatenating blindly can
+    # grow thinking_log exponentially during long-running flows.
+    if existing_logs and new_logs[: len(existing_logs)] == existing_logs:
+        merged = new_logs
+    else:
+        merged = existing_logs + new_logs
+    return merged[-200:]
+
+
+def _deep_merge_dict(a: dict, b: dict) -> dict:
+    """dict b를 a에 깊게 병합 (dict 값만 재귀, 나머지는 b 우선)."""
+    result = dict(a)
+    for k, v in b.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge_dict(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
+def _merge_sa_arch_bundle(existing: dict, new_val: dict) -> dict:
+    """병렬 SA 노드가 동시에 sa_arch_bundle을 수정할 때 data 섹션을 깊게 병합."""
+    if not existing:
+        return new_val or {}
+    if not new_val:
+        return existing
+    return _deep_merge_dict(existing, new_val)
 
 
 def _keep_last_step(existing_step, new_step):
@@ -40,6 +67,8 @@ def _merge_usage_history(existing, new):
 def _sum_cost(existing, new):
     """비용을 합산합니다."""
     return (existing or 0.0) + (new or 0.0)
+
+
 
 
 # ── 기본 상태 (모든 모드 공통) ───────────────────
@@ -78,6 +107,7 @@ class _AnalysisFields(TypedDict, total=False):
     session_id: str                  # source_dir 해시 기반 RAG 영속 키 (run_id와 별개)
     rag_index_status: dict           # {"has_index": bool, "chunk_count": int, "session_id": str}
     rag_warnings: list               # [{"code": "...", "message": "..."}] 사용자 알림 배너
+    system_scan: dict                  # 기존 코드 구조 분석 결과
     sa_phase2: dict                  # 영향도 분석 결과
     sa_phase3: dict                  # 기술 타당성 결과
     sa_phase4: dict                  # 의존성 샌드박스 검증 결과
@@ -86,7 +116,7 @@ class _AnalysisFields(TypedDict, total=False):
     sa_phase7: dict                  # 인터페이스/가드레일 설계 결과
     sa_phase8: dict                  # 위상 정렬 결과
     sa_output: dict                  # SA 최종 통합 산출물
-    sa_arch_bundle: dict             # SA 최종 임베딩 대상 번들
+    sa_arch_bundle: Annotated[dict, _merge_sa_arch_bundle]  # SA 최종 번들 (병렬 노드 병합 지원)
     sa_merge_project_output: dict    # merge_project 노드 전용 출력
     component_scheduler_output: dict # component_scheduler 노드 전용 출력
     api_data_modeler_output: dict    # [DEPRECATED] api_modeler_output, db_schema_architect_output 사용 권장
@@ -95,7 +125,8 @@ class _AnalysisFields(TypedDict, total=False):
     sa_analysis_output: dict         # sa_analysis 노드 전용 출력
     sa_advisor_output: dict          # sa_advisor 노드 수정 조언 출력
     sa_unified_modeler_output: dict  # sa_unified_modeler 노드 전용 출력
-    merged_project: dict             # merge_project가 생성한 단일 결합 입력
+    sa_project_structure_output: dict  # sa_project_structure 노드 전용 출력
+    merged_project: dict             # merge_project가 생성 단일 결합 입력
     merge_report: dict               # merge_project 판정/병합 리포트
 
     # ── 기술 스택 (PM Loop) 필드 ────────────────
@@ -128,7 +159,11 @@ class _ChatFields(TypedDict, total=False):
 class _IdeaFields(TypedDict, total=False):
     idea_ready: bool                 # 아이디어 준비 완료 여부
     idea_summary: str                # 분석용 아이디어 요약
-    suggested_mode: str              # create | update | reverse
+    suggested_mode: str               # create | update | reverse
+    notes_to_add: list                # 채팅에서 추출된 메모(노트) 항목 목록
+                                      # [{"text": "...", "section": "Idea Chat"}, ...]
+                                      # LangGraph가 노드 반환 키를 스키마와 매칭하므로,
+                                      # 이 필드를 명시해야 idea_chat_node의 출력이 보존된다.
 
 
 # ── RAG 파이프라인 필드 ──────────────────────────
@@ -140,9 +175,54 @@ class _RAGFields(TypedDict, total=False):
     rag_query_result: list           # RAGQueryResult dict 목록 (code_retriever 산출물)
 
 
-# ── 통합 상태 (하위 호환) ───────────────────────
+class _DevTrackingFields(TypedDict, total=False):
+    """PR 기반 개발 추적/검증 파이프라인 상태."""
 
-class PipelineState(_BaseState, _AnalysisFields, _ChatFields, _IdeaFields, _RAGFields, total=False):
+    trigger: str                     # GITHUB_PR_WEBHOOK 등 실행 트리거
+    repository: dict                 # {"owner": "...", "repo": "..."}
+    pull_request: dict               # PR 번호, 브랜치, base, head_sha, 설명
+    actor: dict                      # GitHub actor 및 역할 정보
+    pr_context: dict                 # dev_task_planner가 정규화한 PR 분석 컨텍스트
+    code_inventory: dict             # code_inventory_builder의 AST 기반 인벤토리
+    published_spec_snapshot: dict    # branch_created_at 이하의 published snapshot
+    spec_outdated: bool              # 최신 published snapshot이 더 최신인지 여부
+    latest_snapshot: dict            # 현재 최신 snapshot 메타데이터
+    implementation_profile: dict     # reverse/forensic 분석 결과
+    # author:xxrin
+    # LLM primary/fallback 판단 근거를 graph 최종 state와 PM Report까지 보존한다.
+    forensic_profiler_meta: dict
+    gap_report: list                 # 설계 대비 구현 GAP 목록
+    gap_analyzer_meta: dict
+    has_high_gap: bool               # HIGH GAP 존재 여부
+    intent_classification: list      # GAP별 의도/비의도/불확실 분류 결과
+    intent_classifier_meta: dict
+    llm_warnings: list
+    milestone_status: dict           # 완료율, blocked 항목, 예상 완료일
+    pm_report: dict                  # TaskApprovalPanel에 표시할 PM 판단 리포트
+    approval_status: str             # PENDING/APPROVED/REJECTED/NEEDS_SA_REVIEW
+    pr_comment: dict                 # PR 코멘트 생성 결과
+    pr_status_check: dict            # GitHub commit status 업데이트 결과
+    checkout: dict                   # branch_fetcher checkout 검증 결과
+    dev_knowledge: dict              # Dev Tracking 지식 조회 결과
+    dev_knowledge_context: str       # intent/SA/Agile 프롬프트에 주입할 지식 텍스트
+    approval_task: dict              # task_coordinator가 생성한 PM 승인 태스크
+    analysis_persistence: dict       # DevPrAnalysis/DevGapItem 저장 결과
+    embedding_result: dict           # DevKnowledgeArtifact 저장 결과
+    loop_decision: str               # NEXT_PR/COMPLETE/BLOCKED 등 루프 결정
+    timeline: list                   # Dev Tracking 노드 실행 이력
+    dev_tracking_next_action: str    # branch_fetcher/intent_classifier/complete 등
+    dev_tracking_loop_count: int     # PR batch/재시도 루프 횟수
+    # author:xxrin
+    # Dev Tracking LLM 호출 비용/디버깅 제어용 노드별 opt-out 플래그.
+    use_llm_forensic_profiler: bool
+    use_llm_gap_analyzer: bool
+    use_llm_intent_classifier: bool
+    _shared_db: Any                  # graph 내부 DB 세션 전달용. 응답에 노출하지 않는다.
+
+
+# ── 통합 상태 ────────────────────────────────────────────
+
+class PipelineState(_BaseState, _AnalysisFields, _ChatFields, _IdeaFields, _RAGFields, _DevTrackingFields, total=False):
     """LangGraph 파이프라인 공유 상태 — 모든 모드의 합집합.
 
     개별 모드가 사용하는 필드는 _AnalysisFields, _ChatFields, _IdeaFields를 참조.

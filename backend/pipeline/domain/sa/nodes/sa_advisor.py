@@ -15,22 +15,38 @@ from observability.logger import get_logger
 
 logger = get_logger()
 
-SYSTEM_PROMPT = """# 역할: 시니어 아키텍처 어드바이저 & QA 검증관
-## 목표: 설계 데이터의 결함을 검증하고, 개발자에게 구체적이고 실행 가능한 수정 가이드를 제공.
+# SYSTEM_PROMPT: PM 요구사항과 SA 설계 결과물을 대조하여 검증하고 조언을 생성하는 프롬프트
+SYSTEM_PROMPT = """# Role: Lead System Design QA & Architecture Advisor
 
-## 검증 규칙:
-1. **빈 스키마 예외**: GET/DELETE의 Request Body `{}`는 정상.
-2. **명칭 일치성(Zero-Tolerance)**: 컴포넌트-API-DB 간 필드명 불일치 시 Critical.
-3. **타입/무결성**: 타입 코드 및 존재하지 않는 FK 참조 전수 조사.
-4. **전수 커버리지**: 요구사항(RTM) 중 어떤 API/DB로도 해결되지 않는 항목 식별.
+## Overview
+Finalize the validation of design integrity and consistency by comparing PM requirements (RTM) with SA design outputs (API, DB schemas). 
+Beyond just error detection, provide professional technical advice considering system stability and scalability.
 
-## 조언 규칙:
-- **Thinking**: 한국어 핵심 단어 **3개 이내**. 문장 금지.
-- **언어**: 모든 내용은 반드시 한국어로 작성.
-- **구체성**: "수정하세요" 같은 추상적 조언 금지. 테이블명, 필드명, API 경로를 명시.
-- **우선순위**: Critical(즉시 수정) → Warning(권장) → Info(참고) 순.
-- **간결성**: 각 조언은 2줄 이내로 작성.
-- **summary**: 전체 검증 결과를 1~2문장으로 요약.
+## Validation & Advisory Guidelines
+
+### 1. Design Consistency
+- **Zero-Tolerance Naming**: Conduct a full audit to ensure field/column names are 100% consistent across Components, APIs, and DBs. Report any mismatch as 'Critical'.
+- **Referential Integrity**: Ensure all Foreign Keys (FKs) point to existing tables and that their data types match perfectly.
+
+### 2. Requirement Coverage (RTM Compliance)
+- **Full Audit**: Verify that all features defined in the RTM are implementable via the designed API or DB structures.
+- **Identify Omissions**: Categorize any requirement that cannot be resolved by the current API/DB as a 'Critical' issue.
+
+### 3. Technical Excellence
+- **RESTful Standards**: Review URI designs for compliance and ensure HTTP methods match their intended use.
+- **Data Type Optimization**: Advise on optimal data types and constraints based on the nature of the stored data.
+- **Performance & Scalability**: Identify potential bottlenecks in large-scale data processing or concurrency and suggest solutions like index designs.
+
+### 4. Physical Defect Pre-detection
+- Report any missing mandatory fields (req, res) or absent table columns immediately based on the provided <Python Pre-check> results.
+
+## Output Format (JSON)
+- **thinking (th)**: Detailed analysis of discovered issues, potential risks, and technical rationale for advice (In Korean).
+- **summary (sm)**: A clear 1-2 sentence summary of the overall design health.
+- **recommendations (rc)**:
+  - **priority**: Critical (Immediate fix required), Warning (Recommended improvement), Info (Best Practice).
+  - **target**: Specific file name, table name, or API endpoint where the issue was found.
+  - **action**: Concrete and technical guidance to solve the problem (e.g., "Change field name to...", "Add index to...").
 """
 
 
@@ -124,44 +140,19 @@ def _expand_for_frontend(components: list, apis: list, tables: list) -> dict:
     return {"components": expanded_comps, "apis": expanded_apis, "tables": expanded_tables}
 
 
-def _build_rag_context(session_id: str) -> str:
-    """RAG에서 해당 세션의 PM/SA 요약 정보를 검색 (토큰 절약)"""
-    try:
-        from pipeline.domain.pm.nodes.pm_db import _get_collection
-        collection = _get_collection()
-        results = collection.get(
-            where={"session_id": session_id},
-            include=["metadatas", "documents"]
-        )
-        if not results or not results["ids"]:
-            return "RAG에 저장된 데이터 없음"
-        summaries = []
-        for i in range(len(results["ids"])):
-            meta = results["metadatas"][i]
-            doc = results["documents"][i]
-            artifact_type = meta.get("artifact_type", "unknown")
-            phase = meta.get("phase", "?")
-            summaries.append(f"[{phase}/{artifact_type}] {doc[:500]}")
-        return "\n---\n".join(summaries)
-    except Exception as e:
-        logger.warning(f"RAG context retrieval failed: {e}")
-        return "RAG 검색 실패"
-
-
-def _build_user_message(rtm: list, components: list, apis: list, tables: list, precheck_gaps: list, rag_ctx: str) -> str:
+def _build_user_message(rtm: list, components: list, apis: list, tables: list, precheck_gaps: list) -> str:
     p_rtm = "\n".join(f"{safe_get(r, ['id', 'feature_id'])}:{safe_get(r, ['desc', 'description'])}" for r in rtm)
     p_comp = "\n".join(f"{safe_get(c, ['name', 'nm'])}:{safe_get(c, ['role', 'rl'])}" for c in components)
     p_api = "\n".join(f"{safe_get(a, ['ep'])}|{safe_get(a, ['req', 'rq'])}|{safe_get(a, ['res', 'rs'])}" for a in apis)
     p_db = "\n".join(f"{safe_get(t, ['name', 'nm'])}|{safe_get(t, ['cols', 'cl'])}" for t in tables)
-    
+
     precheck_section = ""
     if precheck_gaps:
         precheck_section = f"\n## Python Pre-check 결함 ({len(precheck_gaps)}건):\n" + "\n".join(f"- {g}" for g in precheck_gaps)
-    
+
     return (
         f"RTM:\n{p_rtm}\nComp:\n{p_comp}\nAPI:\n{p_api}\nDB:\n{p_db}"
-        f"{precheck_section}"
-        f"\n\n## RAG Context (요약)\n{rag_ctx}\n\n"
+        f"{precheck_section}\n\n"
         f"위 설계를 검증하고, 결함이 있으면 구체적 수정 가이드를 작성하세요."
     )
 
@@ -201,11 +192,8 @@ def sa_advisor_node(ctx: NodeContext) -> dict:
         "data": expanded_data,
     }
 
-    # 5. RAG 컨텍스트 수집 (토큰 절약형)
-    rag_context = _build_rag_context(run_id)
-
-    # 6. LLM 호출: 통합 QA 검증 + 수정 조언
-    user_msg = _build_user_message(rtm, components, apis, tables, precheck_gaps, rag_context)
+    # 5. LLM 호출: 통합 QA 검증 + 수정 조언
+    user_msg = _build_user_message(rtm, components, apis, tables, precheck_gaps)
 
     try:
         res = call_structured(
@@ -213,7 +201,7 @@ def sa_advisor_node(ctx: NodeContext) -> dict:
             schema=SAAdvisorOutput,
             system_prompt=SYSTEM_PROMPT,
             user_msg=user_msg,
-            compress_prompt=True, temperature=0.1
+            compress_prompt=False, temperature=0.1
         )
 
         # 7. 추천 사항 병합 및 구조화 (QA vs Architect)
@@ -259,9 +247,7 @@ def sa_advisor_node(ctx: NodeContext) -> dict:
             "sa_advisor_output": advisor_data,
             "sa_output": {**advisor_data, "data": expanded_data},
             "sa_arch_bundle": sa_arch_bundle,
-            "thinking_log": (sget("thinking_log", []) or []) + [
-                {"node": "sa_advisor", "thinking": output.thinking or ""}
-            ],
+            "thinking_log": [{"node": "sa_advisor", "thinking": output.thinking or ""}],
             "current_step": "sa_advisor_done",
         }
 
@@ -279,7 +265,5 @@ def sa_advisor_node(ctx: NodeContext) -> dict:
             "sa_advisor_output": advisor_data,
             "sa_output": {**advisor_data, "data": expanded_data},
             "sa_arch_bundle": sa_arch_bundle,
-            "thinking_log": (sget("thinking_log", []) or []) + [
-                {"node": "sa_advisor", "thinking": f"LLM 실패, 폴백: {e}"}
-            ],
+            "thinking_log": [{"node": "sa_advisor", "thinking": f"LLM 실패, 폴백: {e}"}],
         }

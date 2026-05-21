@@ -13,7 +13,7 @@ export default function RTMTab() {
   // feature_id 별로 기술 스택 그룹화
   const safeTechStacks = Array.isArray(tech_stacks) ? tech_stacks : [];
   const stackMap = safeTechStacks.reduce((acc, stack) => {
-    const fid = stack.feature_id;
+    const fid = stack.feature_id || stack.f_id;
     if (!acc[fid]) acc[fid] = [];
     acc[fid].push(stack);
     return acc;
@@ -48,6 +48,7 @@ export default function RTMTab() {
                 }`}
               >
                 <td className={`py-2 px-2 font-mono text-[13px] font-bold whitespace-nowrap ${isDarkMode ? "text-blue-400" : "text-blue-700"}`}>
+                  <ChangeStatusBadge status={req.change_status} isDarkMode={isDarkMode} />
                   {fid}
                   {label && (
                     <span className={`ml-1 font-sans font-normal ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
@@ -56,7 +57,7 @@ export default function RTMTab() {
                   )}
                 </td>
                 <td className={`py-2 px-2 max-w-xs leading-relaxed ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
-                  {req.description}
+                  {req.description || req.desc || req.label || "-"}
                 </td>
                 <td className="py-2 px-2">
                   <div className="flex flex-wrap gap-1">
@@ -67,7 +68,7 @@ export default function RTMTab() {
                             ? "bg-slate-800 text-blue-300 border-slate-700" 
                             : "bg-blue-50 text-blue-700 border-blue-200"
                         }`}>
-                          {s.package}
+                          {s.pkg || s.package}
                         </span>
                       ))
                     ) : (
@@ -83,15 +84,15 @@ export default function RTMTab() {
                   )}
                 </td>
                 <td className="py-2 px-2">
-                  <PriorityBadge priority={req.priority} />
+                  <PriorityBadge priority={req.priority || req.pri} />
                 </td>
                 <td className="py-2 px-2">
                   <span className={`px-1.5 py-0.5 rounded text-[12px] font-medium ${
-                    isDarkMode 
-                      ? "bg-slate-800 text-slate-400" 
+                    isDarkMode
+                      ? "bg-slate-800 text-slate-400"
                       : "bg-slate-100 text-slate-600 border border-slate-200"
                   }`}>
-                    {req.category}
+                    {req.category || req.cat || "-"}
                   </span>
                 </td>
               </tr>
@@ -100,6 +101,23 @@ export default function RTMTab() {
         </tbody>
       </table>
     </div>
+  );
+}
+
+function ChangeStatusBadge({ status, isDarkMode }) {
+  const normalized = (status || "").trim();
+  if (normalized !== "신규" && normalized !== "수정") return null;
+  const styles = normalized === "신규"
+    ? (isDarkMode
+        ? "bg-emerald-600/20 text-emerald-300 border-emerald-500/40"
+        : "bg-emerald-50 text-emerald-700 border-emerald-200")
+    : (isDarkMode
+        ? "bg-amber-600/20 text-amber-300 border-amber-500/40"
+        : "bg-amber-50 text-amber-700 border-amber-200");
+  return (
+    <span className={`mr-1.5 inline-block px-1.5 py-0.5 rounded text-[10px] font-bold border align-middle ${styles}`}>
+      {normalized}
+    </span>
   );
 }
 

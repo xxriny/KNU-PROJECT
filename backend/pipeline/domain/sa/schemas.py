@@ -1,6 +1,6 @@
 """
 SA Pipeline Schemas — DSL 기반 초압축 출력 스키마 정의
-활성 노드: merge_project → component_scheduler → sa_unified_modeler → sa_analysis
+활성 노드: merge_project → component_scheduler → sa_unified_modeler → sa_test_analysis → sa_project_structure
 """
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Any
@@ -36,19 +36,18 @@ class ComponentSchedulerOutput(BaseModel):
 
 class ApiDefinition(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
-    ep: str = Field(description="M /p")
-    req: str = Field(alias="rq", description="f:t,f:t")
-    res: str = Field(alias="rs", description="f:t|Ref(N)")
+    endpoint: str = Field(description="Method and Path (e.g., GET /api/user)")
+    request_schema: str = Field(alias="req", description="Detailed request parameters/types")
+    response_schema: str = Field(alias="res", description="Detailed response structure")
 
 class TableDefinition(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
-    name: str = Field(alias="nm")
-    cols: str = Field(alias="cl", description="n:t:pk,n:t:fk")
+    table_name: str = Field(alias="nm")
+    columns: str = Field(alias="cl", description="Detailed column definitions (name:type:constraints)")
 
 class SAUnifiedModelerOutput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
-    thinking: str = Field(alias="th", default="", description="단어 5개")
-    definitions: Dict[str, Any] = Field(alias="df", default_factory=dict)
+    thinking: str = Field(alias="th", default="", description="Technical rationale")
     apis: List[ApiDefinition] = Field(alias="ap")
     tables: List[TableDefinition] = Field(alias="tb")
 
@@ -78,3 +77,62 @@ class SAAdvisorOutput(BaseModel):
     thinking: str = Field(alias="th", default="", description="단어 3개")
     summary: str = Field(alias="sm", default="", description="전체 요약")
     recommendations: List[AdvisorRecommendation] = Field(alias="rc", default_factory=list)
+
+
+# ── SA Test Analysis ─────────────────────────────────────
+
+class RiskZone(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    component_name: str = Field(alias="cn")
+    risk_level: str = Field(alias="rl", description="critical|high|medium|low")
+    reason: str = Field(alias="rs")
+    mitigation: str = Field(alias="mt")
+
+class UnitTestSpec(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    component_name: str = Field(alias="cn")
+    key_invariants: List[str] = Field(alias="ki")
+    mock_targets: List[str] = Field(alias="mt")
+    edge_cases: List[str] = Field(alias="ec")
+
+class IntegrationTestSpec(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    endpoint: str = Field(alias="ep")
+    db_approach: str = Field(alias="db")
+    transaction_scenario: str = Field(alias="ts")
+    contract_pair: str = Field(alias="cp", default="")
+
+class SystemTestSpec(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    critical_path: str = Field(alias="cp")
+    sla_target: str = Field(alias="sl")
+    chaos_scenarios: List[str] = Field(alias="cs")
+
+class AcceptanceTestSpec(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    feat_id: str = Field(alias="fi")
+    given: str = Field(alias="gv")
+    when: str = Field(alias="wh")
+    then_: str = Field(alias="tn")
+    edge_case: str = Field(alias="ec", default="")
+
+class SATestAnalysisOutput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    thinking: str = Field(alias="th", default="")
+    test_philosophy: str = Field(alias="tp")
+    risk_zones: List[RiskZone] = Field(alias="rz")
+    unit_specs: List[UnitTestSpec] = Field(alias="us")
+    integration_specs: List[IntegrationTestSpec] = Field(alias="is_")
+    system_specs: List[SystemTestSpec] = Field(alias="ss")
+    acceptance_specs: List[AcceptanceTestSpec] = Field(alias="as_")
+    test_data_strategy: str = Field(alias="td")
+    automation_priority: List[str] = Field(alias="ap")
+
+
+class SAProjectStructureOutput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    thinking: str = Field(alias="th", default="")
+    directories: List[str] = Field(alias="dr", description="List of directory paths to create")
+    files: List[str] = Field(alias="fl", description="List of file paths to create")
+    component_mapping: Dict[str, List[str]] = Field(alias="cm", default_factory=dict)
+    conventions: List[str] = Field(alias="cv", default_factory=list)

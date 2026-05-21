@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
 import useAppStore from "../store/useAppStore";
-import CodeViewer from "./CodeViewer";
 import ResultViewer from "./ResultViewer";
 import HomeScreen from "./HomeScreen";
 import PipelineProgress from "./PipelineProgress";
@@ -53,8 +52,6 @@ export default function Workspace() {
   }, []);
 
   const renderViewport = () => {
-    if (activeViewportTab?.kind === "code") return <CodeViewer />;
-    
     switch (activeOutputId) {
       case "home": return <HomeScreen />;
       case "progress": return <PipelineProgress />;

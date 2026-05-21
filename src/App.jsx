@@ -1,26 +1,27 @@
 import React, { useEffect, useState } from "react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import useAppStore from "./store/useAppStore";
 import GlobalErrorBoundary from "./components/GlobalErrorBoundary";
-import Sidebar from "./components/Sidebar";
 import ChatPanel from "./components/ChatPanel";
-import CodeViewer from "./components/CodeViewer";
 import ResultViewer from "./components/ResultViewer";
 import HomeScreen from "./components/HomeScreen";
 import PipelineProgress from "./components/PipelineProgress";
 import StatusBar from "./components/StatusBar";
 import SessionPanel from "./components/SessionPanel";
 import SettingsPanel from "./components/SettingsPanel";
+import LoginScreen from "./components/auth/LoginScreen";
+import TeamCreateScreen from "./components/auth/TeamCreateScreen";
+import PricingScreen from "./components/billing/PricingScreen";
 
-// Extracted Components
 import TopBar from "./components/layout/TopBar";
 import StudioCard from "./components/layout/StudioCard";
+import StudioSidebar from "./components/layout/StudioSidebar";
 import PanelWrapper from "./components/layout/PanelWrapper";
+import WorkspaceSwitcher from "./components/layout/WorkspaceSwitcher";
 import ToastContainer from "./components/ui/ToastContainer";
 import { ICON_PANELS } from "./constants/uiConstants";
 
 import {
-  X, Code2, Bot, PanelRightClose, PanelRightOpen
+  X, Bot, PanelRightClose, PanelRightOpen
 } from "lucide-react";
 
 export default function App() {
@@ -30,23 +31,32 @@ export default function App() {
   const fetchConfig = useAppStore((state) => state.fetchConfig);
   const activeViewportTab = useAppStore((state) => state.activeViewportTab);
   const activateOutputTab = useAppStore((state) => state.activateOutputTab);
-  const activateCodeTab = useAppStore((state) => state.activateCodeTab);
-  const openFiles = useAppStore((state) => state.openFiles);
-  const closeFile = useAppStore((state) => state.closeFile);
   const pipelineStatus = useAppStore((state) => state.pipelineStatus);
   const pipelineType = useAppStore((state) => state.pipelineType);
   const thinkingLog = useAppStore((state) => state.thinkingLog);
   const resultData = useAppStore((state) => state.resultData);
   const sa_artifacts = useAppStore((state) => state.sa_artifacts);
 
-  const [activeIconPanel, setActiveIconPanel] = useState(null);
+  const authToken = useAppStore((state) => state.authToken);
+  const authChecked = useAppStore((state) => state.authChecked);
+  const hasUsers = useAppStore((state) => state.hasUsers);
+  const currentUser = useAppStore((state) => state.currentUser);
+  const userPlan = useAppStore((state) => state.userPlan);
+  const checkAuthStatus = useAppStore((state) => state.checkAuthStatus);
+  const activeIconPanel = useAppStore((state) => state.activeIconPanel);
+  const setActiveIconPanel = useAppStore((state) => state.setActiveIconPanel);
+
   const [showSessions, setShowSessions] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showGithubModal, setShowGithubModal] = useState(false);
+  const [showPricingModal, setShowPricingModal] = useState(false);
+  const [pricingDismissed, setPricingDismissed] = useState(
+    () => localStorage.getItem("pricing_dismissed") === "1"
+  );
   const [isStudioOpen, setIsStudioOpen] = useState(true);
   const [showSidebarChat, setShowSidebarChat] = useState(false);
+  const [showProgressOverlay, setShowProgressOverlay] = useState(false);
 
   const activeOutputId = activeViewportTab?.kind === "output" ? activeViewportTab.id : null;
-  const isCodeView = activeViewportTab?.kind === "code";
 
   const SA_PIPELINE_TYPES = ["analysis_create", "analysis_reverse", "analysis_update"];
   const hasSaData = Boolean(sa_artifacts || resultData?.sa_output) ||
@@ -59,8 +69,10 @@ export default function App() {
       if (window.electronAPI) port = await window.electronAPI.getBackendPort();
       if (!port) port = 8765;
       setBackendPort(port);
+      // WebSocket 연결, 설정 fetch, 인증 확인 모두 동시 시작
       connectWebSocket(port);
       fetchConfig(port);
+      checkAuthStatus();
     }
     initBackend();
   }, []);
@@ -72,10 +84,22 @@ export default function App() {
     }
   }, [isDarkMode]);
 
+  // 분석이 시작되면 메모/세션/설정 등 활성 패널을 강제로 닫고 메인 viewport(Progress)를 노출.
+  // store의 activateOutputTab만으로는 App의 로컬 state(activeIconPanel)를 끄지 못하므로
+  // 여기서 보강. (Memos 탭 → "지적사항 반영 업데이트" 클릭 시 progress로 자동 전환되도록.)
+  useEffect(() => {
+    if (pipelineStatus === "running") {
+      setActiveIconPanel(null);
+      setShowSessions(false);
+      setShowGithubModal(false);
+      setShowProgressOverlay(true);
+    }
+  }, [pipelineStatus]);
+
   const handleIconPanel = (id) => {
-    setActiveIconPanel((prev) => (prev === id ? null : id));
+    setActiveIconPanel(activeIconPanel === id ? null : id);
     setShowSessions(false);
-    setShowSettingsModal(false);
+    setShowGithubModal(false);
   };
 
   const renderCenter = () => {
@@ -86,43 +110,63 @@ export default function App() {
         </PanelWrapper>
       );
     }
-    if (showSettingsModal) {
-      return (
-        <PanelWrapper title="설정" onClose={() => setShowSettingsModal(false)}>
-          <SettingsPanel />
-        </PanelWrapper>
-      );
-    }
 
     if (activeIconPanel) {
-      if (activeIconPanel === "home") return <HomeScreen />;
-      if (activeIconPanel === "progress") return <PipelineProgress />;
-      
       const panel = ICON_PANELS.find(p => p.id === activeIconPanel);
       if (!panel) {
         setTimeout(() => setActiveIconPanel(null), 0);
         return <HomeScreen />;
       }
-
       return (
         <PanelWrapper title={panel.label || ""} onClose={() => setActiveIconPanel(null)}>
           <ResultViewer tabId={activeIconPanel} />
         </PanelWrapper>
       );
     }
-    if (isCodeView) return <CodeViewer />;
-    
-    switch (activeOutputId) {
-      case "progress": return <PipelineProgress />;
-      case "home":
-      default: return <HomeScreen />;
-    }
+
+    return <HomeScreen />;
   };
+
+  // authChecked=false → 로딩 스피너
+  if (!authChecked) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center"
+        style={{ background: "var(--bg-root)" }}>
+        <div className="flex flex-col items-center gap-3 opacity-40">
+          <div className="w-8 h-8 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+          <span className="text-sm font-medium">초기화 중...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // authToken=false → LoginScreen
+  if (!authToken) {
+    return <LoginScreen isFirstRun={hasUsers === false} />;
+  }
+
+  // isTeam=false → TeamCreateScreen
+  if (!currentUser?.team_id) {
+    return <TeamCreateScreen />;
+  }
+
+  // isPaid=true → PricingScreen (유료 플랜 첫 로그인 안내, 또는 스킵)
+  const isPaid = userPlan && userPlan !== "free";
+  if (isPaid && !pricingDismissed) {
+    return (
+      <PricingScreen
+        onContinue={() => {
+          localStorage.setItem("pricing_dismissed", "1");
+          setPricingDismissed(true);
+        }}
+      />
+    );
+  }
 
   return (
     <div className={`h-screen w-screen flex flex-col overflow-hidden ${!isDarkMode ? "light" : ""}`}
       style={{ background: "var(--bg-root)", color: "var(--text-primary)" }}>
-      
+
       <TopBar
         activeOutputId={activeOutputId}
         activateOutputTab={activateOutputTab}
@@ -130,57 +174,39 @@ export default function App() {
         hasSaData={hasSaData}
         resultData={resultData}
         showSessions={showSessions}
-        setShowSessions={(v) => { setShowSessions(v); setShowSettingsModal(false); }}
-        showSettings={showSettingsModal}
-        setShowSettings={(v) => { setShowSettingsModal(v); setShowSessions(false); }}
+        setShowSessions={(v) => { setShowSessions(v); }}
       />
 
       <div className="flex-1 min-h-0 overflow-hidden flex app-no-drag">
-        <PanelGroup direction="horizontal" className="h-full w-full min-h-0">
-          <Panel defaultSize={15} minSize={10} maxSize={25}
-            className="glass-panel border-r border-[var(--border)] border-t-0 border-b-0 border-l-0">
-            <Sidebar />
-          </Panel>
+        {/* Slack-style Workspace Switcher */}
+        <WorkspaceSwitcher
+          onOpenGithub={() => { setShowGithubModal(true); setShowSessions(false); }}
+          onOpenPricing={() => { setShowPricingModal(true); }}
+        />
 
-          <PanelResizeHandle />
-
-          <Panel defaultSize={85} minSize={40} className="flex flex-col bg-transparent min-h-0">
-            {openFiles.length > 0 && (
-              <div className="flex items-center border-b border-[var(--border)] min-h-10 px-2 bg-[rgba(255,255,255,0.02)] shrink-0">
-                <div className="flex items-center gap-0.5 overflow-x-auto w-full py-1">
-                  {openFiles.map((file) => {
-                    const isActive = activeViewportTab?.kind === "code" && activeViewportTab.id === file.id;
-                    return (
-                      <div
-                        key={file.id}
-                        className={`group flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-t cursor-pointer transition-colors shrink-0 ${isActive
-                          ? "bg-[var(--accent)]/15 text-[var(--accent)] border-b-2 border-[var(--accent)]"
-                          : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/5"
-                          }`}
-                        onClick={() => { activateCodeTab(file.id); setActiveIconPanel(null); }}
-                      >
-                        <Code2 size={11} />
-                        <span className="truncate max-w-[140px] text-xs">{file.name}</span>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); closeFile(file.id); }}
-                          className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity ml-1"
-                        >
-                          <X size={10} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
+        <div className="flex-1 flex flex-col bg-transparent min-h-0 overflow-hidden relative">
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <GlobalErrorBoundary>
+              {renderCenter()}
+            </GlobalErrorBoundary>
+          </div>
+          {/* Progress 전체화면 오버레이 */}
+          {hasProgress && showProgressOverlay && (
+            <div className={`absolute inset-0 z-30 flex flex-col ${
+              isDarkMode ? "bg-[#0a0d14]" : "bg-slate-50"
+            }`}>
+              <button
+                onClick={() => setShowProgressOverlay(false)}
+                className={`absolute top-3 right-4 z-10 p-1.5 rounded-lg transition-colors ${isDarkMode ? "hover:bg-white/10 text-slate-500 hover:text-slate-300" : "hover:bg-slate-200 text-slate-400"}`}
+              >
+                <X size={14} />
+              </button>
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <PipelineProgress />
               </div>
-            )}
-
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <GlobalErrorBoundary>
-                {renderCenter()}
-              </GlobalErrorBoundary>
             </div>
-          </Panel>
-        </PanelGroup>
+          )}
+        </div>
 
         <div
           className={`relative h-full flex flex-col border-l border-[var(--border)] overflow-hidden transition-all duration-250 ease-out ${isStudioOpen ? "w-[360px]" : "w-[72px]"
@@ -210,46 +236,32 @@ export default function App() {
 
           <div className="flex-1 flex flex-col overflow-hidden relative">
             {isStudioOpen ? (
-              <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar pb-24">
-                <div className="p-4 grid grid-cols-2 gap-3 shrink-0">
-                  {ICON_PANELS.map((panel) => {
-                    const isDisabled = false; // 항상 활성화
-                    const isActive = activeIconPanel === panel.id;
-                    return (
-                      <StudioCard
-                        key={panel.id}
-                        {...panel}
-                        isDarkMode={isDarkMode}
-                        isActive={isActive}
-                        isDisabled={isDisabled}
-                        onClick={() => !isDisabled && handleIconPanel(panel.id)}
-                      />
-                    );
-                  })}
-                </div>
+              <div className="flex-1 overflow-y-auto custom-scrollbar pb-24">
+                <StudioSidebar
+                  panels={ICON_PANELS}
+                  activeIconPanel={activeIconPanel}
+                  isDarkMode={isDarkMode}
+                  hasProgress={hasProgress}
+                  pipelineStatus={pipelineStatus}
+                  onPanel={handleIconPanel}
+                  onOpenProgress={() => setShowProgressOverlay(true)}
+                />
               </div>
             ) : (
-              <div className="flex-1 flex flex-col items-center py-4 gap-4 w-full overflow-y-auto custom-scrollbar pb-24">
-                <div className="w-10 border-t border-white/5 my-1" />
+              <div className="flex-1 flex flex-col items-center py-3 gap-2 w-full overflow-y-auto custom-scrollbar pb-24">
                 {ICON_PANELS.map((panel) => {
-                  const isDisabled = false; // 항상 활성화
                   const isActive = activeIconPanel === panel.id;
                   return (
-                    <div key={panel.id} className="w-full flex justify-center">
-                      <button
-                        onClick={() => !isDisabled && handleIconPanel(panel.id)}
-                        disabled={isDisabled}
-                        title={panel.label}
-                        className={`w-12 h-12 flex items-center justify-center rounded-xl transition-all ${isActive
-                          ? "bg-[var(--accent)]/20 text-[var(--accent)] shadow-glow"
-                          : isDisabled
-                            ? "text-slate-700 opacity-20 cursor-not-allowed"
-                            : "text-slate-500 hover:text-white hover:bg-white/10"
-                          }`}
-                      >
-                        <panel.Icon size={20} />
-                      </button>
-                    </div>
+                    <button
+                      key={panel.id}
+                      onClick={() => handleIconPanel(panel.id)}
+                      title={panel.label}
+                      className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${
+                        isActive ? "bg-[var(--accent)]/20 text-[var(--accent)]" : "text-slate-500 hover:text-white hover:bg-white/10"
+                      }`}
+                    >
+                      <panel.Icon size={17} />
+                    </button>
                   );
                 })}
               </div>
@@ -308,7 +320,68 @@ export default function App() {
         <StatusBar />
       </div>
 
+      {/* GitHub 연동 모달 */}
+      {showGithubModal && (
+        <div
+          className="fixed inset-0 z-[8000] flex items-center justify-center animate-fade-in"
+          style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(12px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowGithubModal(false); }}
+        >
+          <div className={`relative w-[500px] max-h-[80vh] rounded-2xl shadow-[0_32px_80px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden border ${
+            isDarkMode ? "bg-[#0f1219] border-white/[0.08]" : "bg-white border-slate-200"
+          }`}>
+            <div className={`flex items-center justify-between px-6 py-4 border-b shrink-0 ${isDarkMode ? "border-white/5" : "border-slate-100"}`}>
+              <div className="flex items-center gap-2.5">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" className={isDarkMode ? "text-slate-300" : "text-slate-700"}>
+                  <path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.2 11.38.6.11.82-.26.82-.58v-2.03c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.08-.73.08-.73 1.2.08 1.83 1.23 1.83 1.23 1.07 1.83 2.8 1.3 3.49 1 .11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 3-.4c1.02 0 2.04.14 3 .4 2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.83.58C20.57 21.8 24 17.3 24 12c0-6.63-5.37-12-12-12z"/>
+                </svg>
+                <h2 className={`text-[14px] font-black ${isDarkMode ? "text-white" : "text-slate-900"}`}>GitHub 연동</h2>
+              </div>
+              <button
+                onClick={() => setShowGithubModal(false)}
+                className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                  isDarkMode ? "hover:bg-white/10 text-slate-500 hover:text-slate-300" : "hover:bg-slate-100 text-slate-400"
+                }`}
+              ><X size={13} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+              <SettingsPanel onShowPricing={() => { setShowGithubModal(false); setShowPricingModal(true); }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 플랜 오버레이 모달 */}
+      {showPricingModal && (
+        <div
+          className="fixed inset-0 z-[8500] flex items-center justify-center animate-fade-in"
+          style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(12px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowPricingModal(false); }}
+        >
+          <div className={`relative w-[700px] max-h-[85vh] rounded-2xl shadow-[0_32px_80px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden border ${
+            isDarkMode ? "bg-[#0f1219] border-white/[0.08]" : "bg-white border-slate-200"
+          }`}>
+            <div className={`flex items-center justify-between px-6 py-4 border-b shrink-0 ${isDarkMode ? "border-white/5" : "border-slate-100"}`}>
+              <h2 className={`text-[15px] font-black ${isDarkMode ? "text-white" : "text-slate-900"}`}>플랜</h2>
+              <button
+                onClick={() => setShowPricingModal(false)}
+                className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                  isDarkMode ? "hover:bg-white/10 text-slate-500 hover:text-slate-300" : "hover:bg-slate-100 text-slate-400"
+                }`}
+              ><X size={13} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <PricingScreen
+                onContinue={() => setShowPricingModal(false)}
+                onClose={() => setShowPricingModal(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       <ToastContainer />
+
     </div>
   );
 }

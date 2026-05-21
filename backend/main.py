@@ -40,9 +40,12 @@ print(">>> [Python] Loading backend subsystems...", flush=True)
 
 # ── 계층 임포트 ──────────────────────────────────────────
 from transport.rest_handler import rest_router
+from transport.team_router import team_router
 from transport.ws_handler import websocket_pipeline
 from observability.metrics import make_metrics_app
 from observability.logger import get_logger
+from auth.router import auth_router
+from auth.database import init_db
 
 ALLOWED_ORIGIN_REGEX = r"^(null|https?://(127\.0\.0\.1|localhost)(:\d+)?)$"
 
@@ -50,6 +53,7 @@ ALLOWED_ORIGIN_REGEX = r"^(null|https?://(127\.0\.0\.1|localhost)(:\d+)?)$"
 # ── App Lifespan ─────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    init_db()
     get_logger().info("backend_starting", pid=os.getpid(), version=APP_VERSION)
     yield
     get_logger().info("backend_shutdown")
@@ -72,6 +76,8 @@ app.add_middleware(
 )
 
 # ── 라우터 등록 ──────────────────────────────────────────
+app.include_router(auth_router)
+app.include_router(team_router)
 app.include_router(rest_router)
 app.add_api_websocket_route("/ws/pipeline", websocket_pipeline)
 

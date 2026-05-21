@@ -1,88 +1,62 @@
 from __future__ import annotations
-from typing import Any, Dict, List
+import json
+from typing import List
 
 from pipeline.core.state import PipelineState, make_sget
 from pipeline.core.node_base import pipeline_node, NodeContext
 from pipeline.core.utils import call_structured
 from pipeline.core.action_type import normalize_action_type
-from pipeline.domain.rag.framework_detector import detect_framework_evidence
-from pipeline.domain.rag.nodes.project_db import query_project_code
+from pipeline.core.framework_detector import detect_framework_evidence
 from pipeline.domain.sa.schemas import MergeProjectOutput
+from observability.logger import get_logger
 
-SYSTEM_PROMPT = """
-당신은 NAVIGATOR 시스템의 '수석 통합 아키텍트(Senior Integration Architect)'입니다.
-전달받은 PM 요구사항 번들과 현재 프로젝트의 기존 코드/설계 상태를 분석하여 최적의 병합 전략을 수립하는 역할을 맡고 있습니다.
+logger = get_logger()
 
-핵심 설계 규칙:
-1. 모드 결정 (절대 규칙):
-   - 입력으로 전달되는 [Action Type] 값을 그대로 사용해야 하며, 임의로 다른 모드로 전환할 수 없습니다.
-   - [Action Type] = CREATE → 신규 프로젝트로 간주하고 PM 분석서를 100% 수용해 신규 설계를 작성합니다.
-   - [Action Type] = UPDATE → 기존 프로젝트에 변경사항을 통합하는 것을 전제로, 기존 구조와의 충돌·확장 전략을 작성합니다. 코드 컨텍스트(Code Context)가 비어 있더라도 모드를 CREATE로 변경하지 마십시오. 정보 부족 시에는 가정(assumption)을 명시하고 통합 전략을 수립합니다.
-   - [Action Type] = REVERSE_ENGINEER → 기존 코드 기반에서 역공학으로 추출된 컨텍스트를 정리/정합화합니다.
-   - 출력 JSON의 "mode" 필드는 반드시 입력된 [Action Type]과 동일한 값으로 작성하십시오.
-2. 충돌 해결 (UPDATE 모드):
-   - 기존 구조와 새로운 요구사항 간의 충돌을 식별하고 데이터 무결성을 위해 필요한 제약 조건(예: Composite Unique Key)을 명시합니다.
-   - **데이터 구조 최적화**: 소셜 로그인 연동 시 확장성을 위해 `User` 테이블에 직접 필드를 추가하기보다, **1:N 관계인 `OAuthAccount` 테이블로 분리 설계**하여 멀티 프로바이더(Google, Kakao 등) 지원이 가능하도록 합니다.
-3. 세부 아키텍처 가이드라인:
-   - 보안/인증 관련: OAuth 연동 시 토큰 검증은 필수이며, **기존 이메일 계정 존재 시 계정 탈취(Account Takeover) 방지를 위해 해당 이메일의 소유권 확인(Verified 상태 체크) 및 연동 승인 절차**를 전략에 포함합니다.
-   - **에러 핸들링 전략**: 외부 API 호출 실패, 네트워크 타임아웃, 유효하지 않은 토큰 수신 시의 구체적인 에러 처리 및 사용자 응답 로직을 기술합니다.
-   - 트랜잭션/안전성: 복합적인 엔티티 생성 시 원자성을 보장하기 위한 전략을 기술합니다.
-4. 다운스트림 전달: 수립된 전략은 후속 노드가 구체적인 구현체로 변환할 수 있도록 명확하고 구체적인 문장으로 작성합니다.
-5. 언어 규칙: 모든 사고 과정(thinking)과 병합 전략은 반드시 한국어로 상세히 작성하십시오. 영어를 사용하지 마십시오.
+# SYSTEM_PROMPT: 요구사항(RTM)과 기존 코드(RAG)를 대조하여 통합 설계 전략을 수립하는 프롬프트
+SYSTEM_PROMPT = """# Role: Senior Integration Architect
 
-출력 데이터 규격 (JSON):
-{
-  "thinking": "병합 전략 수립 근거 (1:N 테이블 분리 설계 및 보안 취약점 대응 전략 포함)",
-  "mode": "입력된 [Action Type] 값과 동일 (CREATE | UPDATE | REVERSE_ENGINEER)",
-  "base_context": { "설명": "기존 스택 및 주요 데이터 모델 정보" },
-  "merge_strategy": "구체적인 충돌 해결책 및 설계 가이드라인 (테이블 구조, 보안 정책, 에러 핸들링 포함)"
-}
+## Overview
+Analyze the gap between the PM-defined requirements (RTM) and the existing project assets (<project_inventory>, <Code Context>). 
+Establish a precise strategy to merge new features into the existing system harmoniously.
+
+## Key Guidelines
+
+### 1. Mode-Based Analysis Strategy (MANDATORY)
+- **Action Type = CREATE**: New project. Propose the optimal folder structure and initial architecture based on the RTM.
+- **Action Type = UPDATE**: Focus on **'Hybrid'** consistency. Define a strategy to inject new features efficiently without breaking existing code. Infer the stack (e.g., React, FastAPI) from the inventory if explicit info is missing.
+- **Action Type = REVERSE_ENGINEER**: Diagnose the current state of the code and summarize the gap between the RTM and actual implementation.
+
+### 2. High-Level Architectural Decisions
+- **Data Model Scalability**: When expanding features, consider normalization or 1:N relationship strategies rather than just adding fields.
+- **Security & Authentication**: Detail strategies for OAuth integration, token validation, and account merging.
+- **Error Handling**: Include global response strategies for external API integration or data processing failures.
+
+### 3. Downstream Guidelines
+- Your 'Merge Strategy' is the foundation for the Component Scheduler and Unified Modeler. Avoid vague expressions; provide technical, actionable guidance.
+
+## Output Format (JSON)
+- **thinking (th)**: Detailed analysis of potential conflicts, design priorities, and architectural trade-offs (In Korean).
+- **mode (md)**: Must maintain the same value as the input [Action Type].
+- **base_context (bc)**: Summary of current tech stack, core data models, and architectural traits.
+- **merge_strategy (ms)**: Conflict resolutions, design guidelines, security policies, and error handling strategies.
 """
 
 
-def _build_rag_context(action_type: str, input_idea: str, source_dir: str, session_id: str) -> str:
-    """ChromaDB에서 직접 검색한 청크 + manifest 기반 framework 단서를 합쳐 LLM 컨텍스트로 반환.
-
-    CREATE 모드는 빈 문자열을 반환한다(기존 코드가 없음).
-    """
-    if action_type == "CREATE" or not session_id:
+def _build_framework_context(source_dir: str) -> str:
+    """manifest 기반 framework 단서를 LLM 컨텍스트로 반환."""
+    if not source_dir:
         return ""
-
-    queries: List[str] = []
-    if input_idea:
-        queries.append(input_idea)
-    queries.append("엔티티 데이터 모델 ORM 테이블 스키마")
-    queries.append("API 라우터 엔드포인트 컨트롤러 핸들러")
-
-    chunks: List[Dict[str, Any]] = []
-    seen: set[str] = set()
-    for q in queries:
-        try:
-            results = query_project_code(q, session_id=session_id, n_results=3)
-        except Exception:
-            continue
-        for c in results:
-            cid = c.get("chunk_id")
-            if cid and cid not in seen:
-                seen.add(cid)
-                chunks.append(c)
-
-    snippet_lines = [
-        f"[{c.get('file_path', '')}::{c.get('func_name', '')}] {(c.get('content_text', '') or '')[:250]}"
-        for c in chunks[:9]
-    ]
-
-    detected, evidence, _ = detect_framework_evidence(source_dir)
-
-    sections: List[str] = []
-    if detected:
-        sections.append(f"frameworks={detected}")
-    if evidence:
-        sections.append(f"evidence={evidence[:6]}")
-    if snippet_lines:
-        sections.append("code_snippets:\n" + "\n".join(snippet_lines))
-
-    return "\n---\n".join(sections) if sections else ""
+    try:
+        detected, evidence, _ = detect_framework_evidence(source_dir)
+        sections: List[str] = []
+        if detected:
+            sections.append(f"frameworks={detected}")
+        if evidence:
+            sections.append(f"evidence={evidence[:10]}")
+        return "\n---\n".join(sections) if sections else ""
+    except Exception as e:
+        logger.warning(f"[merge_project] framework detection failed: {e}")
+        return ""
 
 
 def _build_user_message(
@@ -90,8 +64,10 @@ def _build_user_message(
     input_idea: str,
     rag_context: str,
     rtm: list,
+    project_context: str = "",
+    dev_knowledge_context: str = "",
 ) -> str:
-    """LLM 메시지 최적화 (토큰 절감)"""
+    """LLM 메시지 조립"""
     pruned_rtm = [
         {
             "id": r.get("feature_id", r.get("id")),
@@ -100,17 +76,25 @@ def _build_user_message(
         }
         for r in rtm
     ]
+
+    prev_design_section = ""
+    if project_context:
+        prev_design_section = f"[Previous Design Context]\n{project_context}\n\n"
+
+    knowledge_section = ""
+    # author: xxrin
+    # PM 승인 의도를 SA 병합 계획에 반영하기 위해 Dev Tracking 결정 컨텍스트를 주입합니다.
+    if dev_knowledge_context:
+        knowledge_section = f"[Dev Tracking Knowledge]\n{dev_knowledge_context}\n"
+
     return (
-        f"\n    [Action Type] {action_type}"
-        f"\n    [Input Idea] {input_idea}"
-        f"\n    [Code Context]\n{rag_context or '(none)'}"
-        f"\n    [PM Requirements] {pruned_rtm}\n    "
+        f"{prev_design_section}"
+        f"{knowledge_section}"
+        f"[Action Type] {action_type}\n"
+        f"[Input Idea] {input_idea}\n"
+        f"[Code Context]\n{rag_context or '(none)'}\n"
+        f"[PM Requirements] {pruned_rtm}\n"
     )
-
-
-from observability.logger import get_logger
-
-logger = get_logger()
 
 
 @pipeline_node("sa_merge_project")
@@ -121,23 +105,55 @@ def sa_merge_project_node(ctx: NodeContext) -> dict:
     input_idea = sget("input_idea", "")
     action_type = normalize_action_type(sget("action_type", "CREATE"))
     source_dir = sget("source_dir", "") or ""
-    rag_status = sget("rag_index_status", {}) or {}
-    rag_session_id = rag_status.get("session_id") or sget("session_id", "") or ""
 
-    # PM 번들에서 최종 정제된 RTM 가져오기
     pm_bundle = sget("pm_bundle", {})
     requirements_rtm = pm_bundle.get("data", {}).get("rtm", []) or sget("features", [])
 
     if not requirements_rtm:
         logger.warning("No RTM/Features found in state for SA merge.")
 
-    # 1. RAG 컨텍스트 + framework 단서 직접 조립
-    rag_context = ""
-    if rag_status.get("has_index"):
-        rag_context = _build_rag_context(action_type, input_idea, source_dir, rag_session_id)
+    # 1. 프레임워크 컨텍스트 수집 (소스 디렉토리가 있을 때만)
+    rag_context = _build_framework_context(source_dir) if action_type != "CREATE" else ""
+    inventory = {}
 
-    # 2. Prepare optimized user prompt
-    user_content = _build_user_message(action_type, input_idea, rag_context, requirements_rtm)
+    # UPDATE 모드: 이전 분석 결과(project_context) JSON 파싱 → 이전 설계 추출
+    project_context = ""
+    previous_components: list = []
+    previous_apis: list = []
+    previous_tables: list = []
+    previous_rtm: list = []
+
+    if action_type == "UPDATE":
+        project_context = sget("project_context", "") or ""
+        if project_context:
+            try:
+                json_start = project_context.find('{')
+                if json_start >= 0:
+                    prev = json.loads(project_context[json_start:])
+                    previous_components = prev.get("components", [])
+                    previous_apis       = prev.get("apis", [])
+                    previous_tables     = prev.get("tables", [])
+                    previous_rtm        = prev.get("requirements_rtm", [])
+            except Exception:
+                pass
+
+        # PM delta RTM에 이전 RTM 중 누락된 항목 병합 → SA에 full RTM 전달
+        if previous_rtm:
+            existing_ids = {r.get("feature_id") or r.get("id") for r in requirements_rtm}
+            for prev_req in previous_rtm:
+                prev_id = prev_req.get("feature_id") or prev_req.get("id")
+                if prev_id and prev_id not in existing_ids:
+                    requirements_rtm.append(prev_req)
+
+    # 2. 메시지 조립
+    user_content = _build_user_message(
+        action_type,
+        input_idea,
+        rag_context,
+        requirements_rtm,
+        project_context,
+        str(sget("dev_knowledge_context", "") or ""),
+    )
 
     # 3. Call LLM for merge strategy
     res = call_structured(
@@ -146,7 +162,7 @@ def sa_merge_project_node(ctx: NodeContext) -> dict:
         schema=MergeProjectOutput,
         system_prompt=SYSTEM_PROMPT,
         user_msg=user_content,
-        compress_prompt=True,  # Phase 3 enabled
+        compress_prompt=False,  # 정밀도를 위해 압축 비활성화 (Precision over cost)
     )
 
     output = res.parsed
@@ -168,6 +184,10 @@ def sa_merge_project_node(ctx: NodeContext) -> dict:
             "requirements_rtm": requirements_rtm,
             "context_spec": sget("context_spec", {}),
         },
+        "previous_components": previous_components,
+        "previous_apis": previous_apis,
+        "previous_tables": previous_tables,
+        "dev_knowledge_context": str(sget("dev_knowledge_context", "") or ""),
     }
 
     thinking_msg = output.thinking or "프로젝트 병합 전략 수립 완료"
@@ -176,6 +196,6 @@ def sa_merge_project_node(ctx: NodeContext) -> dict:
         "sa_merge_project_output": {**output.model_dump(), "mode": action_type},
         "merged_project": merged_project,
         "action_type": action_type,
-        "thinking_log": (sget("thinking_log", []) or []) + [{"node": "sa_merge_project", "thinking": thinking_msg}],
+        "thinking_log": [{"node": "sa_merge_project", "thinking": thinking_msg}],
         "current_step": "sa_merge_project_done",
     }

@@ -27,8 +27,8 @@ def _load_inventory_for_diagram(result: dict[str, Any]) -> tuple[list, list]:
     if not source_dir or not os.path.isdir(source_dir):
         return [], []
     try:
-        from pipeline.domain.rag.ast_scanner import extract_file_inventory
-        from pipeline.domain.rag.framework_detector import detect_framework_evidence
+        from pipeline.core.ast_scanner import extract_file_inventory
+        from pipeline.core.framework_detector import detect_framework_evidence
         inventory = extract_file_inventory(source_dir, max_files=600)
         detected, _evidence, _coverage = detect_framework_evidence(source_dir)
         return inventory, detected

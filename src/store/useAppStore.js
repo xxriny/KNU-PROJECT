@@ -7,6 +7,9 @@ import { createSessionSlice } from "./slices/sessionSlice";
 import { createWsSlice } from "./slices/wsSlice";
 import { createConfigSlice } from "./slices/configSlice";
 import { createNotificationSlice } from "./slices/notificationSlice";
+import { createAuthSlice } from "./slices/authSlice";
+import { createGithubSlice } from "./slices/githubSlice";
+import { createPublishSlice } from "./slices/publishSlice";
 
 /**
  * NAVIGATOR — Global Store (Zustand)
@@ -29,6 +32,9 @@ const useAppStore = create((set, get) => {
     ...createWsSlice(setWithSave, get),
     ...createConfigSlice(setWithSave, get),
     ...createNotificationSlice(setWithSave, get),
+    ...createAuthSlice(setWithSave, get),
+    ...createGithubSlice(setWithSave, get),
+    ...createPublishSlice(setWithSave, get),
 
     deleteSession: async (id) => {
       const { backendPort, sessions, currentSessionId } = get();

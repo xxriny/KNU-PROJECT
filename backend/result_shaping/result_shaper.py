@@ -6,6 +6,7 @@ Result Shaping 계층 (REQ-003)
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -188,6 +189,25 @@ def _build_project_overview(
         usage_summary=usage_summary,
     ).model_dump()
 
+def _extract_from_stack_planner(stack_planner_output: dict | None) -> list:
+    """pm_embedding 없이 stack_planner_output.m에서 직접 tech_stacks 추출."""
+    if not stack_planner_output:
+        return []
+    mappings = stack_planner_output.get("m") or stack_planner_output.get("stack_mapping") or []
+    return [
+        {
+            "feature_id": m.get("f_id") or m.get("feature_id"),
+            "domain": m.get("dom") or m.get("domain", ""),
+            "pkg": m.get("pkg") or m.get("package", ""),
+            "version": m.get("ver") or m.get("version", ""),
+            "status": m.get("status", "APPROVED"),
+            "source": m.get("source", "LLM"),
+        }
+        for m in mappings
+        if isinstance(m, dict)
+    ]
+
+
 def shape_result(raw_result: dict) -> dict:
     """LangGraph raw 결과 → JSON 직렬화 가능한 정형 결과.
 
@@ -217,13 +237,27 @@ def shape_result(raw_result: dict) -> dict:
     # ── Modular Data Aliasing (Prioritize pre-expanded sa_output) ──
     # 0. PM Stacks — pm_embedding._assemble_pm_bundle가 'tech_stacks' 키로 저장.
     # 'stacks'는 구버전 폴백.
-    sanitized["tech_stacks"] = (
+    # StackMapping schema uses abbreviated field names (f_id, dom, pkg, ver) with no aliases.
+    # Normalize all sources to consistent field names so RTMTab.jsx join works correctly.
+    raw_tech_stacks = (
         pm_data.get("tech_stacks")
         or pm_data.get("stacks")
         or sanitized.get("tech_stacks")
         or sanitized.get("stacks")
+        or _extract_from_stack_planner(sanitized.get("stack_planner_output"))
         or []
     )
+    sanitized["tech_stacks"] = [
+        {
+            "feature_id": t.get("feature_id") or t.get("f_id"),
+            "domain":     t.get("domain") or t.get("dom", ""),
+            "pkg":        t.get("pkg") or t.get("package", ""),
+            "version":    t.get("version") or t.get("ver", ""),
+            "status":     t.get("status", "APPROVED"),
+            "source":     t.get("source", "LLM"),
+        }
+        for t in raw_tech_stacks if isinstance(t, dict)
+    ]
     
     extracted_rtm = (
         merged_plan.get("requirements_rtm") or 
@@ -237,7 +271,15 @@ def shape_result(raw_result: dict) -> dict:
     context_spec: dict = sanitized.get("context_spec") or merged_plan.get("context_spec") or {}
 
     # 1. APIs (sa_output.data.apis > sa_unified.apis)
-    raw_apis = sa_data.get("apis") or sa_unified.get("apis") or []
+    raw_apis = []
+    if isinstance(sa_data, dict):
+        raw_apis = sa_data.get("apis") or []
+    
+    if not raw_apis and isinstance(sa_unified, dict):
+        raw_apis = sa_unified.get("apis") or []
+    
+    if not raw_apis:
+        raw_apis = []
     expanded_apis = []
     for a in raw_apis:
         # 이미 확장된 객체인지 확인 (sa_advisor가 처리한 경우)
@@ -250,10 +292,27 @@ def shape_result(raw_result: dict) -> dict:
                 "response_schema": a.get("rs") or a.get("res", {}),
                 "description": a.get("description", "")
             })
-    sanitized["apis"] = expanded_apis
+    # Dedup: :param → {param} 정규화 후 중복 엔드포인트 제거
+    def _norm_ep(ep: str) -> str:
+        return re.sub(r':(\w+)', r'{\1}', ep or "").strip().lower()
+
+    seen_eps: set[str] = set()
+    deduped_apis = []
+    for api in expanded_apis:
+        norm = _norm_ep(api.get("endpoint", ""))
+        if norm not in seen_eps:
+            seen_eps.add(norm)
+            deduped_apis.append(api)
+    sanitized["apis"] = deduped_apis
 
     # 2. Tables (sa_output.data.tables > sa_unified.tables)
-    raw_tables = sa_data.get("tables") or sa_unified.get("tables") or []
+    raw_tables = []
+    if isinstance(sa_data, dict):
+        raw_tables = sa_data.get("tables") or []
+    if not raw_tables and isinstance(sa_unified, dict):
+        raw_tables = sa_unified.get("tables") or []
+    if not raw_tables:
+        raw_tables = []
     expanded_tables = []
     for t in raw_tables:
         if "table_name" in t:
@@ -276,7 +335,13 @@ def shape_result(raw_result: dict) -> dict:
     sanitized["tables"] = expanded_tables
 
     # 3. Components
-    raw_components = sa_data.get("components") or sa_sched.get("components") or []
+    raw_components = []
+    if isinstance(sa_data, dict):
+        raw_components = sa_data.get("components") or []
+    if not raw_components and isinstance(sa_sched, dict):
+        raw_components = sa_sched.get("components") or []
+    if not raw_components:
+        raw_components = []
     expanded_components = []
     for c in raw_components:
         if "component_name" in c:
@@ -294,6 +359,29 @@ def shape_result(raw_result: dict) -> dict:
     sanitized["components"] = expanded_components
     sanitized["gaps"] = sa_advisor.get("gaps", [])
     sanitized["sa_output"] = sa_output_raw # UI 탭 활성화(hasSaData)를 위해 필수
+
+    # ── SA 확장 노드 산출물 패스스루 ──
+    # sa_output.data 우선, 없으면 sa_arch_bundle.data에서 추출
+    sa_arch_bundle = sanitized.get("sa_arch_bundle") or {}
+    sa_arch_data = sa_arch_bundle.get("data") if isinstance(sa_arch_bundle, dict) else {}
+    sa_arch_data = sa_arch_data or {}
+
+    for src in (sa_data, sa_arch_data):
+        if not isinstance(src, dict):
+            continue
+        if "test_strategy" in src and "sa_test_strategy" not in sanitized:
+            sanitized["sa_test_strategy"] = src["test_strategy"]
+        if "project_structure" in src and "sa_project_structure" not in sanitized:
+            sanitized["sa_project_structure"] = src["project_structure"]
+
+    # sa_project_structure_output 직접 주입 (새 flat 스키마 우선)
+    ps_out = sanitized.get("sa_project_structure_output")
+    if ps_out and isinstance(ps_out, dict):
+        # directories/files 키가 있는 새 스키마면 그대로 사용
+        if "directories" in ps_out or "files" in ps_out:
+            sanitized["sa_project_structure"] = ps_out
+        elif "tree" in ps_out and "sa_project_structure" not in sanitized:
+            sanitized["sa_project_structure"] = ps_out
 
     skipped_phases = _collect_skipped_phases(sanitized)
     rag_warnings = sanitized.get("rag_warnings") or []

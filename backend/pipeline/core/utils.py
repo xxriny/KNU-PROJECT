@@ -5,9 +5,10 @@ PM Agent Pipeline — 유틸리티 v6.3 (FastAPI 구조 적용)
 - api_key 빈 문자열 시 환경변수 GEMINI_API_KEY 자동 폴백
 - 모델 기본값 gemini-2.5-flash 통일
 - _get_effective_key() 헬퍼 추가
+- 재시도 로직에 지수 백오프 및 Jitter 추가 (Rate Limit 대응)
 """
 
-import json, re, os, threading
+import json, re, os, threading, time, random, urllib.request
 from pathlib import Path
 from contextvars import ContextVar
 from collections import OrderedDict
@@ -77,18 +78,37 @@ def _remember_cache_entry(cache: OrderedDict[str, Any], key: str, value: Any):
         cache.popitem(last=False)
 
 # ── API 키 해석 ────────────────────────────────
+def _fetch_key_from_server() -> str:
+    """서버(8001)의 /keys/active 엔드포인트에서 Gemini 키를 가져온다."""
+    server_url = os.environ.get("NAVIGATOR_SERVER_URL", "http://127.0.0.1:8001")
+    try:
+        req = urllib.request.Request(
+            f"{server_url}/keys/active",
+            headers={"X-Internal-Secret": os.environ.get("INTERNAL_SECRET", "navigator-internal")},
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read())
+            return data.get("api_key", "")
+    except Exception:
+        return ""
+
+
 def get_effective_key(api_key: str) -> str:
     """
-    전달받은 api_key가 비어있거나 프론트엔드 플레이스홀더('[.env]') 일 경우
-    환경변수 GEMINI_API_KEY를 사용하며, 영문/숫자 유효성 검사를 수행합니다.
+    키 우선순위:
+    1. 사용자가 직접 전달한 키
+    2. 서버(8001) /keys/active 에서 가져온 키
+    3. 백엔드 .env의 GEMINI_API_KEY 환경변수
     """
     key = (api_key or "").strip()
     if key in ("", "[.env]", "[env]"):
+        key = _fetch_key_from_server()
+    if not key:
         key = os.environ.get("GEMINI_API_KEY", "")
     if not key:
         raise ValueError(
             "Gemini API Key가 설정되지 않았습니다. "
-            "백엔드 .env 파일에 GEMINI_API_KEY=<키> 를 추가해 주세요."
+            "서버에 키를 등록하거나 백엔드 .env에 GEMINI_API_KEY를 추가해 주세요."
         )
     if not key.isascii():
         raise ValueError("API 키에 한글 등 비ASCII 문자가 포함되어 있습니다.")
@@ -101,31 +121,40 @@ def get_llm(api_key: str, model: str = DEFAULT_MODEL, temperature: float = DEFAU
 
 
 def _retry_loop(structured_llm, messages: list, max_retries: int, label: str):
-    """공통 Self-Correction 재시도 루프. 성공 시 raw invoke 결과 반환."""
+    """공통 Self-Correction 및 Rate-Limit 대응 재시도 루프."""
     messages = list(messages)
     last_error = None
+    
     for attempt in range(max_retries):
         result = None
         try:
             result = structured_llm.invoke(messages)
             return result, attempt # 결과와 시도 횟수(0-based) 반환
-        except ValidationError as e:
-            last_error = e
-            error_msg = str(e)
         except Exception as e:
             last_error = e
             error_msg = str(e)
+            
+            if attempt < max_retries - 1:
+                # Rate Limit 대응 지수 백오프
+                if "429" in error_msg:
+                    wait_time = (10 * (attempt + 1)) + random.uniform(2, 5)
+                else:
+                    wait_time = (2 ** (attempt + 1)) + random.uniform(0, 1)
+                
+                logger.warning(f"[{label}] Attempt {attempt+1} failed: {error_msg[:100]}. Retrying in {wait_time:.2f}s...")
+                time.sleep(wait_time)
 
-        bad_output = str(result) if result is not None else "Unknown output format or invocation error"
-        messages.append(AIMessage(content=bad_output))
-        messages.append(HumanMessage(content=(
-            f"Your previous response caused a validation error:\n"
-            f"```\n{error_msg}\n```\n\n"
-            f"Please fix the output to strictly match the required JSON schema. "
-            f"All required fields must be present and no extra fields are allowed.\n\n"
-            f"Retry attempt {attempt + 2}/{max_retries}. "
-            f"Return ONLY the corrected JSON output."
-        )))
+                bad_output = str(result) if result is not None else "Unknown output format or invocation error"
+                messages.append(AIMessage(content=bad_output))
+                messages.append(HumanMessage(content=(
+                    f"Your previous response caused an error:\n"
+                    f"```\n{error_msg}\n```\n\n"
+                    f"Please fix the output to strictly match the required JSON schema. "
+                    f"All required fields must be present and no extra fields are allowed.\n\n"
+                    f"Retry attempt {attempt + 2}/{max_retries}. "
+                    f"Return ONLY the corrected JSON output."
+                )))
+                continue
 
     raise RuntimeError(
         f"{label} failed after {max_retries} attempts. Last error: {last_error}"
@@ -371,26 +400,6 @@ def make_sget(state: Any):
     def _sget(key: str, default: Any = None):
         return sget(state, key, default)
     return _sget
-def format_chroma_results(results: dict[str, Any]) -> list[dict[str, Any]]:
-    """ChromaDB 원시 결과를 표준 리스트 형식으로 변환."""
-    formatted = []
-    if not results or not results.get("ids") or not results["ids"]:
-        return formatted
-        
-    # results["ids"]는 [[]] 형태일 수도 있고 [] 형태일 수도 있음
-    ids_list = results["ids"][0] if isinstance(results["ids"][0], list) else results["ids"]
-    docs_list = results["documents"][0] if isinstance(results["documents"][0], list) else results["documents"]
-    metas_list = results["metadatas"][0] if isinstance(results["metadatas"][0], list) else results["metadatas"]
-    dists_list = results.get("distances", [[]])[0] if results.get("distances") and isinstance(results["distances"][0], list) else results.get("distances", [])
-
-    for i in range(len(ids_list)):
-        formatted.append({
-            "id": ids_list[i],
-            "content": docs_list[i],
-            "metadata": metas_list[i],
-            "distance": dists_list[i] if i < len(dists_list) else 0
-        })
-    return formatted
 
 
 # ── DB 및 저장소 유틸 ────────────────────────────
@@ -400,36 +409,38 @@ def get_backend_root() -> Path:
     return Path(__file__).parent.parent.parent
 
 
-def get_storage_path(sub_dir: str = "pm_sa_vector_db") -> str:
+def get_storage_path(sub_dir: str) -> str:
     """백엔드 storage 하위 경로를 안전하게 생성하고 반환."""
     path = get_backend_root() / "storage" / sub_dir
     path.mkdir(parents=True, exist_ok=True)
     return str(path)
 
 
-_DB_CLIENTS: dict[str, Any] = {}
-
-def get_vector_db_client(db_name: str = "pm_sa_vector_db") -> Any:
-    """ChromaDB 싱글톤 클라이언트 반환."""
-    import chromadb
-    if db_name not in _DB_CLIENTS:
-        path = get_storage_path(db_name)
-        _DB_CLIENTS[db_name] = chromadb.PersistentClient(path=path)
-    return _DB_CLIENTS[db_name]
-
-
 # ── 직렬화 유틸 ──────────────────────────────────
 
-def to_serializable(obj: Any) -> Any:
-    """Pydantic 모델, dict, list를 재귀적으로 JSON 직렬화 가능하게 변환."""
+def to_serializable(obj: Any, seen=None) -> Any:
+    """Pydantic 모델, dict, list를 재귀적으로 JSON 직렬화 가능하게 변환 (순환 참조 방지)."""
+    if seen is None:
+        seen = set()
+
     if obj is None or isinstance(obj, (str, int, float, bool)):
         return obj
+
+    # 순환 참조 방지: 현재 탐색 경로(Path)에 동일 객체가 있는지 확인
+    obj_id = id(obj)
+    if obj_id in seen:
+        return f"<Circular Reference: {type(obj).__name__}>"
+    
+    # 새로운 경로 세트 생성 (자식들에게만 전달하여 형제 노드 간 공유 허용)
+    new_seen = seen | {obj_id}
+
     if hasattr(obj, "model_dump"):
-        return obj.model_dump()
+        return to_serializable(obj.model_dump(), new_seen)
     if hasattr(obj, "dict"):
-        return obj.dict()
+        return to_serializable(obj.dict(), new_seen)
     if isinstance(obj, dict):
-        return {k: to_serializable(v) for k, v in obj.items()}
+        return {k: to_serializable(v, new_seen) for k, v in obj.items()}
     if isinstance(obj, list):
-        return [to_serializable(item) for item in obj]
+        return [to_serializable(item, new_seen) for item in obj]
+    
     return str(obj)

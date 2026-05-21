@@ -34,3 +34,9 @@ def get_nomic_embeddings(text: str) -> List[float]:
     """텍스트를 벡터로 변환 (768차원)"""
     model = get_nomic_embedding_model()
     return model.encode(text).tolist()
+
+
+def get_nomic_embeddings_batch(texts: List[str], batch_size: int = 32) -> List[List[float]]:
+    """여러 텍스트를 배치로 변환 (768차원)"""
+    model = get_nomic_embedding_model()
+    return model.encode(texts, batch_size=batch_size).tolist()

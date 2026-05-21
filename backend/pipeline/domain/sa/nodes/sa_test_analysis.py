@@ -1,0 +1,166 @@
+"""
+SA Test Analysis Node
+SA 설계 산출물(컴포넌트/API/DB)을 입력으로 받아 SE 관점의 테스트 전략을 분석합니다.
+테스트 코드를 생성하지 않으며, "어떻게 검증할 것인가"에 대한 전략 문서를 생성합니다.
+"""
+from __future__ import annotations
+
+import json
+
+from pipeline.core.node_base import pipeline_node, NodeContext
+from pipeline.core.utils import call_structured
+from pipeline.domain.sa.schemas import SATestAnalysisOutput
+from observability.logger import get_logger
+
+logger = get_logger()
+
+CREATE_SYSTEM_PROMPT = """# Role: Software Engineering Test Strategist
+
+## Goal
+Analyze the given software architecture (components, APIs, DB tables) and produce a comprehensive
+test strategy from a Software Engineering perspective. You do NOT generate test code — only strategy.
+
+## Analysis Layers
+
+### 1. Risk Zone Classification
+For each component, assess risk level (critical/high/medium/low) based on:
+- External integrations (payment, auth, 3rd-party APIs) → critical
+- Core business logic with complex state → high
+- CRUD services with DB → medium
+- Utility/config → low
+
+### 2. Unit Test Strategy
+Per component: identify key behavioral invariants, what to mock/stub, and boundary/edge cases.
+Focus on isolation — what must be decoupled from infrastructure.
+
+### 3. Integration Test Strategy
+Per API endpoint: specify DB approach (TestContainers vs in-memory), transaction scenarios,
+and contract pairs for inter-service communication.
+
+### 4. System Test Strategy
+Based on component dependency graph: identify critical execution paths, SLA targets, and
+chaos/failure injection scenarios (circuit breaker, DB disconnect, pod kill).
+
+### 5. Acceptance Test (BDD)
+Convert each RTM FEAT_ID into Given-When-Then format. Include at least one edge case per feature.
+
+## Output Rules
+- thinking (th): Reasoning about architecture risk profile and test philosophy (Korean)
+- test_philosophy (tp): 1-2 sentence overall test philosophy for this architecture
+- risk_zones (rz): Risk classification per component
+- unit_specs (us): Unit test strategy per component
+- integration_specs (is_): Integration test strategy per API endpoint
+- system_specs (ss): System-level critical path + chaos scenarios
+- acceptance_specs (as_): BDD specs per RTM FEAT_ID
+- test_data_strategy (td): How to manage test data (Faker, fixtures, DB rollback, etc.)
+- automation_priority (ap): Ordered list of what to automate first and why
+"""
+
+UPDATE_SYSTEM_PROMPT = """# Role: Software Engineering Test Strategist (Update Mode)
+
+## Goal
+You are given the PREVIOUS test strategy in <previous_test_strategy>.
+Your task is incremental update — preserve existing strategy, only modify/add for changed RTM features.
+
+## Rules
+1. **PRESERVE** all existing risk_zones, unit_specs, integration_specs, system_specs, acceptance_specs that are unaffected
+2. **MODIFY** only the entries corresponding to RTM features marked as 수정(modified)
+3. **ADD** new entries only for RTM features marked as 신규(new)
+4. **Do NOT** change test_philosophy or automation_priority unless explicitly required
+
+## Output Rules
+- thinking (th): List which test entries were preserved / modified / added (Korean)
+- All other fields: same schema as CREATE mode
+"""
+
+
+def _build_user_msg(
+    sa_bundle: dict,
+    rtm: list,
+    action_type: str,
+    previous_test_cases: dict = None,
+    dev_knowledge_context: str = "",
+) -> str:
+    data = sa_bundle.get("data", {})
+    components = data.get("components", [])
+    apis = data.get("apis", [])
+    tables = data.get("tables", [])
+
+    components_text = json.dumps(components, ensure_ascii=False, indent=2)[:3000]
+    apis_text = json.dumps(apis, ensure_ascii=False, indent=2)[:2000]
+    tables_text = json.dumps(tables, ensure_ascii=False, indent=2)[:1500]
+    rtm_text = json.dumps(rtm[:20], ensure_ascii=False, indent=2)[:2000]
+
+    prev_section = ""
+    if action_type == "UPDATE" and previous_test_cases:
+        prev_json = json.dumps(previous_test_cases, ensure_ascii=False)[:3000]
+        prev_section = f"<previous_test_strategy>\n{prev_json}\n</previous_test_strategy>\n\n"
+
+    knowledge_section = ""
+    # author: xxrin
+    # 테스트 전략이 의도/비의도 GAP 판단을 반영하도록 Dev Tracking 컨텍스트를 포함합니다.
+    if dev_knowledge_context:
+        knowledge_section = f"## Dev Tracking Knowledge\n{dev_knowledge_context}\n\n"
+
+    return (
+        f"{prev_section}"
+        f"{knowledge_section}"
+        f"## Action Type: {action_type}\n\n"
+        f"## Components ({len(components)}개)\n```json\n{components_text}\n```\n\n"
+        f"## APIs ({len(apis)}개)\n```json\n{apis_text}\n```\n\n"
+        f"## DB Tables ({len(tables)}개)\n```json\n{tables_text}\n```\n\n"
+        f"## Requirements RTM ({len(rtm)}개)\n```json\n{rtm_text}\n```\n\n"
+        "위 아키텍처를 기반으로 소프트웨어 공학 관점의 테스트 전략을 분석하세요."
+    )
+
+
+@pipeline_node("sa_test_analysis")
+def sa_test_analysis_node(ctx: NodeContext) -> dict:
+    sget = ctx.sget
+    logger.info("=== [Node Entry] sa_test_analysis_node ===")
+
+    sa_bundle = sget("sa_arch_bundle", {}) or {}
+    merged_project = sget("merged_project", {}) or {}
+    rtm = (merged_project.get("plan", {}) or {}).get("requirements_rtm", []) or []
+    action_type = sget("action_type", "CREATE")
+
+    if not sa_bundle:
+        logger.warning("[sa_test_analysis] sa_arch_bundle이 비어 있어 스킵합니다.")
+        return {"current_step": "sa_test_analysis_done"}
+
+    previous_test_cases = sget("previous_test_cases", None)
+    user_msg = _build_user_msg(
+        sa_bundle,
+        rtm,
+        action_type,
+        previous_test_cases,
+        str(sget("dev_knowledge_context", "") or ""),
+    )
+
+    system_prompt = UPDATE_SYSTEM_PROMPT if action_type == "UPDATE" else CREATE_SYSTEM_PROMPT
+
+    res = call_structured(
+        api_key=ctx.api_key, model=ctx.model,
+        schema=SATestAnalysisOutput,
+        system_prompt=system_prompt,
+        user_msg=user_msg,
+        compress_prompt=False,
+        temperature=0.0,
+    )
+
+    if not res.parsed:
+        logger.warning("[sa_test_analysis] LLM 파싱 실패, 빈 결과 반환")
+        return {"current_step": "sa_test_analysis_done"}
+
+    output_dict = res.parsed.model_dump()
+
+    # sa_arch_bundle에 test_strategy 병합
+    sa_bundle.setdefault("data", {})["test_strategy"] = output_dict
+    logger.info(f"[sa_test_analysis] 완료: risk_zones={len(res.parsed.risk_zones)}, unit={len(res.parsed.unit_specs)}")
+
+    return {
+        "sa_test_analysis_output": output_dict,
+        "sa_arch_bundle": sa_bundle,
+        "current_step": "sa_test_analysis_done",
+        "thinking_log": [{"node": "sa_test_analysis", "thinking": res.parsed.thinking or "테스트 전략 분석 완료"}],
+    }

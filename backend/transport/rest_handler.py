@@ -7,26 +7,50 @@ main.py에서 app.include_router(rest_router) 호출.
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
+import hmac
+import json
 import os
 import re
 from typing import Optional
 
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Request
+from fastapi.security import OAuth2PasswordBearer
+from auth.deps import get_current_user, get_current_user_optional
+from auth.database import get_db, get_shared_db
+from sqlalchemy.orm import Session
+from auth.models import User
+from pydantic import BaseModel, Field
 from version import APP_VERSION, DEFAULT_MODEL
 from observability.logger import get_logger
-from pipeline.core.action_type import normalize_action_type
-from pipeline.orchestration.facade import (
-    get_analysis_pipeline,
-    get_idea_pipeline,
-    get_rag_ingest_pipeline,
-)
-from orchestration.executor import execute_pipeline
-from orchestration.pipeline_runner import (
-    validate_analysis_inputs,
-    build_reverse_context,
-    analysis_pipeline_type,
-)
+# pipeline 관련 임포트는 첫 요청 시 지연 로드 (langgraph 콜드스타트 방지)
+_pipeline_loaded = False
+
+def _ensure_pipeline():
+    global _pipeline_loaded, normalize_action_type
+    global get_analysis_pipeline, get_idea_pipeline
+    global execute_pipeline, validate_analysis_inputs, build_reverse_context, analysis_pipeline_type
+    if _pipeline_loaded:
+        return
+    from pipeline.core.action_type import normalize_action_type as _nat
+    from pipeline.orchestration.facade import (
+        get_analysis_pipeline as _gap,
+        get_idea_pipeline as _gip,
+    )
+    from orchestration.executor import execute_pipeline as _ep
+    from orchestration.pipeline_runner import (
+        validate_analysis_inputs as _vai,
+        build_reverse_context as _brc,
+        analysis_pipeline_type as _apt,
+    )
+    normalize_action_type = _nat
+    get_analysis_pipeline = _gap
+    get_idea_pipeline = _gip
+    execute_pipeline = _ep
+    validate_analysis_inputs = _vai
+    build_reverse_context = _brc
+    analysis_pipeline_type = _apt
+    _pipeline_loaded = True
 
 # ── 상수 ─────────────────────────────────────────────────
 AVAILABLE_MODELS = [
@@ -68,6 +92,13 @@ class AnalysisRequest(BaseModel):
     model: str = DEFAULT_MODEL
     action_type: str = "CREATE"
     source_dir: str = ""
+    user_id: Optional[str] = None
+    team_id: Optional[str] = None
+    use_dev_knowledge: bool = True
+    owner: str = ""
+    repo: str = ""
+    branch_name: str = ""
+    dev_knowledge_query: str = ""
 
 
 class IdeaChatRequest(BaseModel):
@@ -96,18 +127,11 @@ class MemoRequest(BaseModel):
     text: str
     selected_text: str = ""
     section: str = "Global"
+    detail: str = ""
 
 
-class RAGIngestRequest(BaseModel):
-    source_dir: str
-    session_id: str
-    version: str = "v1.0"
-
-
-class RAGQueryRequest(BaseModel):
-    query: str
-    session_id: Optional[str] = None
-    n_results: int = 10
+class MemoApplyRequest(BaseModel):
+    memo_ids: list = []
 
 
 class HealthResponse(BaseModel):
@@ -126,7 +150,11 @@ async def health_check():
 
 @rest_router.get("/api/config")
 async def get_config():
-    has_key = bool(os.environ.get("GEMINI_API_KEY", "").strip())
+    from pipeline.core.utils import get_effective_key
+    try:
+        has_key = bool(get_effective_key(""))
+    except ValueError:
+        has_key = False
     return {
         "has_api_key": has_key,
         "default_model": DEFAULT_MODEL,
@@ -180,8 +208,50 @@ def _to_response(result) -> dict:
     return {"status": "error", "error": result.error}
 
 
+def _compact_result_value(value, *, depth: int = 0):
+    if depth > 4:
+        return "<truncated>"
+    if isinstance(value, str):
+        return value if len(value) <= 4000 else value[:4000] + "\n<truncated>"
+    if isinstance(value, list):
+        return [_compact_result_value(item, depth=depth + 1) for item in value[:25]]
+    if isinstance(value, dict):
+        compact = {}
+        for key, item in value.items():
+            if key in {
+                "content",
+                "source",
+                "raw",
+                "stdout",
+                "stderr",
+                "stdout_tail",
+                "stderr_tail",
+                "prompt",
+                "user_msg",
+                "system_msg",
+                "messages",
+                "semantic_slices",
+            }:
+                compact[key] = _compact_result_value(item, depth=depth + 1)
+            elif key in {"files", "generated_files"} and isinstance(item, list):
+                compact[key] = [
+                    {
+                        sub_key: _compact_result_value(sub_value, depth=depth + 1)
+                        for sub_key, sub_value in file_item.items()
+                        if sub_key not in {"content", "source"}
+                    }
+                    for file_item in item[:50]
+                    if isinstance(file_item, dict)
+                ]
+            else:
+                compact[key] = _compact_result_value(item, depth=depth + 1)
+        return compact
+    return value
+
+
 @rest_router.post("/api/analyze")
-async def analyze(req: AnalysisRequest):
+async def analyze(req: AnalysisRequest, shared_db: Session = Depends(get_shared_db)):
+    _ensure_pipeline()
     try:
         api_key = req.api_key
         action_type = normalize_action_type(req.action_type)
@@ -190,13 +260,34 @@ async def analyze(req: AnalysisRequest):
             return {"status": "error", "error": validation_error}
 
         context = req.context
+        extra_state: dict = {}
         if action_type == "REVERSE_ENGINEER" and not (context or "").strip():
-            context = build_reverse_context(req.source_dir)
+            context, code_inventory = build_reverse_context(req.source_dir)
             if not context:
                 return {
                     "status": "error",
                     "error": "선택한 폴더에서 분석 가능한 함수/메서드를 찾지 못했습니다.",
                 }
+            if code_inventory:
+                extra_state["code_inventory"] = code_inventory
+
+        dev_knowledge_context = ""
+        if req.use_dev_knowledge and action_type in {"UPDATE", "REVERSE_ENGINEER"}:
+            try:
+                from pipeline.domain.dev_tracking.knowledge import query_dev_knowledge_artifacts
+
+                knowledge = query_dev_knowledge_artifacts(
+                    shared_db,
+                    team_id=req.team_id or "",
+                    owner=req.owner,
+                    repo=req.repo,
+                    branch_name=req.branch_name,
+                    query=req.dev_knowledge_query or req.idea,
+                    limit=5,
+                )
+                dev_knowledge_context = knowledge.get("context_text", "")
+            except Exception as knowledge_error:
+                get_logger().warning(f"Dev Tracking knowledge lookup skipped for SA analysis: {knowledge_error}")
 
         return _to_response(execute_pipeline(
             get_analysis_pipeline(action_type),
@@ -207,7 +298,9 @@ async def analyze(req: AnalysisRequest):
                 "project_context": context,
                 "source_dir": req.source_dir,
                 "action_type": action_type,
+                "dev_knowledge_context": dev_knowledge_context,
                 "run_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
+                **extra_state,
             },
             analysis_pipeline_type(action_type),
         ))
@@ -218,6 +311,7 @@ async def analyze(req: AnalysisRequest):
 
 @rest_router.post("/api/idea-chat")
 async def idea_chat(req: IdeaChatRequest):
+    _ensure_pipeline()
     try:
         api_key = req.api_key
         return _to_response(execute_pipeline(
@@ -237,143 +331,58 @@ async def idea_chat(req: IdeaChatRequest):
         return {"status": "error", "error": str(e)}
 
 
-@rest_router.post("/api/rag/ingest")
-async def rag_ingest(req: RAGIngestRequest):
-    """소스 디렉터리를 청킹·임베딩하여 project_code_knowledge에 저장합니다."""
-    if not req.source_dir or not os.path.isdir(req.source_dir):
-        return {"status": "error", "error": f"유효하지 않은 source_dir: {req.source_dir}"}
-    try:
-        result = execute_pipeline(
-            get_rag_ingest_pipeline(),
-            {
-                "source_dir": req.source_dir,
-                "run_id": req.session_id,
-                "api_key": "",
-                "model": "",
-            },
-            "rag_ingest",
-        )
-        if not result.success:
-            return {"status": "error", "error": result.error}
-        ingest_output = result.data.get("rag_ingest_output", {})
-        return {"status": "ok", **ingest_output}
-    except Exception as e:
-        get_logger().exception("rag_ingest endpoint failed")
-        return {"status": "error", "error": str(e)}
-
-
-@rest_router.post("/api/rag/query")
-async def rag_query(req: RAGQueryRequest):
-    """project_code_knowledge에서 유사 코드 청크를 검색합니다."""
-    if not req.query.strip():
-        return {"status": "error", "error": "query가 비어있습니다."}
-    try:
-        from pipeline.domain.rag.nodes.code_retriever import retrieve_project_code
-        results = retrieve_project_code(req.query, session_id=req.session_id, n_results=req.n_results)
-        return {"status": "ok", "results": results}
-    except Exception as e:
-        get_logger().exception("rag_query endpoint failed")
-        return {"status": "error", "error": str(e)}
-
-
 @rest_router.delete("/api/session/{run_id}")
 async def delete_session(run_id: str, req: Optional[DeleteSessionRequest] = None):
     if not re.match(r"^\d{8}_\d{6}$", run_id):
         return {"status": "error", "error": "Invalid run_id format. Expected YYYYMMDD_HHMMSS"}
-
-    try:
-        # DB 지식 삭제
-        from pipeline.domain.pm.nodes.pm_db import delete_pm_knowledge
-        from pipeline.domain.sa.nodes.sa_db import delete_sa_knowledge
-        from pipeline.domain.pm.nodes.stack_db import delete_session_knowledge
-        from pipeline.domain.rag.nodes.project_db import delete_project_knowledge
-
-        pm_deleted = delete_pm_knowledge(run_id)
-        sa_deleted = delete_sa_knowledge(run_id)
-        stack_deleted = delete_session_knowledge(run_id)
-        project_deleted = delete_project_knowledge(run_id)
-
-        return {
-            "status": "ok",
-            "message": f"Session {run_id} deleted from RAG",
-            "pm_docs_deleted": pm_deleted,
-            "sa_docs_deleted": sa_deleted,
-            "stack_docs_deleted": stack_deleted,
-            "project_docs_deleted": project_deleted,
-        }
-    except Exception as e:
-        get_logger().exception(f"delete_session failed for run_id={run_id}")
-        return {
-            "status": "error",
-            "error": str(e),
-            "message": f"Partial deletion for {run_id}",
-        }
+    return {"status": "ok", "message": f"Session {run_id} deleted"}
 
 
 @rest_router.get("/api/session/{run_id}/restore")
 async def restore_session(run_id: str):
-    """RAG DB에서 특정 세션의 모든 아티팩트를 수집하여 복원합니다."""
+    """로컬 DB(AnalysisResult)에서 이전 분석 결과를 복원."""
+    import json
+    from auth.database import SessionLocal
+    from auth.models import AnalysisResult
+    db = SessionLocal()
     try:
-        from pipeline.domain.pm.nodes.pm_db import _get_collection
-        coll = _get_collection()
-        
-        # 해당 세션의 모든 데이터 조회
-        results = coll.get(where={"session_id": run_id})
-        
-        if not results["ids"]:
-            return {"status": "error", "error": "해당 세션의 데이터를 찾을 수 없습니다."}
-            
-        # 데이터를 LangGraph Raw State처럼 조립
-        raw_state = {
-            "run_id": run_id,
-            "metadata": {"session_id": run_id, "project_name": "Restored Project", "status": "Completed"}
-        }
-        
-        for i in range(len(results["ids"])):
-            artifact_type = results["metadatas"][i].get("artifact_type")
-            doc_str = results["documents"][i]
-            
-            try:
-                import json
-                parsed_content = json.loads(doc_str)
-            except:
-                try:
-                    import ast
-                    parsed_content = ast.literal_eval(doc_str)
-                except:
-                    parsed_content = doc_str
-                
-            if artifact_type == "PM_BUNDLE":
-                raw_state["pm_bundle"] = parsed_content
-            elif artifact_type == "SA_ARCH_BUNDLE":
-                raw_state["sa_advisor_output"] = parsed_content
-                # Legacy 호환을 위해 sa_output으로도 저장
-                raw_state["sa_output"] = parsed_content
-            elif "API" in artifact_type.upper():
-                raw_state["sa_unified_modeler_output"] = parsed_content
-            elif "TABLE" in artifact_type.upper() or "DB" in artifact_type.upper():
-                # 이미 SA_ARCH_BUNDLE이나 Unified에 포함되어 있을 확률이 높음
-                if "sa_unified_modeler_output" not in raw_state:
-                    raw_state["sa_unified_modeler_output"] = parsed_content
-            elif artifact_type == "RTM_STACK_BUNDLE":
-                raw_state["requirements_rtm"] = parsed_content
-
-        # ── 핵심: 새로운 Shaper를 적용하여 UI용 데이터로 변환 ──
-        from result_shaping.result_shaper import shape_result
-        final_data = shape_result(raw_state)
-        
-        return {"status": "ok", "data": final_data}
-        
+        record = db.query(AnalysisResult).filter(AnalysisResult.run_id == run_id).first()
+        if not record:
+            return {"status": "error", "error": f"No saved result for run_id '{run_id}'"}
+        data = json.loads(record.shaped_result)
+        return {"status": "ok", "data": data}
     except Exception as e:
-        get_logger().error(f"Restore failed: {e}")
+        get_logger().exception(f"restore_session failed for {run_id}")
         return {"status": "error", "error": str(e)}
+    finally:
+        db.close()
 
 
 @rest_router.get("/api/memos")
 async def get_memos_endpoint(session_id: Optional[str] = None):
-    from pipeline.domain.pm.nodes.memo_db import get_memos
+    from auth.database import get_db as _get_db
+    from auth.models import MemoItem
     try:
-        memos = get_memos(session_id)
+        db = next(_get_db())
+        q = db.query(MemoItem)
+        if session_id:
+            q = q.filter(MemoItem.session_id == session_id)
+        items = q.order_by(MemoItem.created_at.asc()).all()
+        memos = [
+            {
+                "id": m.id,
+                "session_id": m.session_id,
+                "text": m.text,
+                "metadata": {
+                    "selected_text": m.selected_text,
+                    "section": m.section,
+                    "detail": m.detail,
+                    "applied": m.applied,
+                    "applied_at": m.applied_at,
+                },
+            }
+            for m in items
+        ]
         return {"status": "ok", "memos": memos}
     except Exception as e:
         return {"status": "error", "error": str(e)}
@@ -381,19 +390,1102 @@ async def get_memos_endpoint(session_id: Optional[str] = None):
 
 @rest_router.post("/api/memos")
 async def add_memo_endpoint(req: MemoRequest):
-    from pipeline.domain.pm.nodes.memo_db import add_memo
+    from auth.database import get_db as _get_db
+    from auth.models import MemoItem
     try:
-        memo_id = add_memo(req.session_id, req.text, req.selected_text, req.section)
-        return {"status": "ok", "memo_id": memo_id}
+        db = next(_get_db())
+        memo = MemoItem(
+            session_id=req.session_id,
+            text=req.text,
+            selected_text=req.selected_text,
+            section=req.section,
+            detail=req.detail,
+        )
+        db.add(memo)
+        db.commit()
+        db.refresh(memo)
+        return {"status": "ok", "memo_id": memo.id}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
 
 @rest_router.delete("/api/memos/{memo_id}")
 async def delete_memo_endpoint(memo_id: str):
-    from pipeline.domain.pm.nodes.memo_db import delete_memo
+    from auth.database import get_db as _get_db
+    from auth.models import MemoItem
     try:
-        delete_memo(memo_id)
+        db = next(_get_db())
+        memo = db.query(MemoItem).filter(MemoItem.id == memo_id).first()
+        if memo:
+            db.delete(memo)
+            db.commit()
         return {"status": "ok"}
     except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/memos/apply")
+async def apply_memos_endpoint(req: MemoApplyRequest):
+    from auth.database import get_db as _get_db
+    from auth.models import MemoItem
+    from datetime import datetime as _dt
+    try:
+        db = next(_get_db())
+        ts = _dt.utcnow().isoformat()
+        updated = (
+            db.query(MemoItem)
+            .filter(MemoItem.id.in_(req.memo_ids))
+            .all()
+        )
+        for m in updated:
+            m.applied = True
+            m.applied_at = ts
+        db.commit()
+        return {"status": "ok", "updated": len(updated)}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+# ── Agile Layer ───────────────────────────────────────────
+
+class AgileVerifyRequest(BaseModel):
+    sa_data: dict
+    api_key: str = ""
+    model: str = DEFAULT_MODEL
+    use_llm: bool = True
+    use_deep_llm: bool = False  # V-007~V-009 추가 LLM 검증
+
+
+class AgileImpactRequest(BaseModel):
+    change_description: str
+    sa_data: dict
+    api_key: str = ""
+    model: str = DEFAULT_MODEL
+    session_id: Optional[str] = None
+    use_llm: bool = True
+    use_dev_knowledge: bool = True
+    team_id: str = ""
+    owner: str = ""
+    repo: str = ""
+    branch_name: str = ""
+    dev_knowledge_query: str = ""
+
+
+@rest_router.post("/api/agile/verify")
+async def agile_verify(req: AgileVerifyRequest):
+    """SA 결과물 일관성 검증 (V-001~V-009, 하이브리드)."""
+    try:
+        from pipeline.domain.agile.nodes.verifier import run_verifier
+        result = run_verifier(
+            sa_data=req.sa_data,
+            api_key=req.api_key,
+            model=req.model,
+            use_llm=req.use_llm,
+            use_deep_llm=req.use_deep_llm,
+        )
+        return {"status": "ok", "data": result.model_dump()}
+    except Exception as e:
+        get_logger().exception("agile_verify endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/agile/impact")
+async def agile_impact(req: AgileImpactRequest, shared_db: Session = Depends(get_shared_db)):
+    """변경 영향 분석 (RAG + LLM 2-stage)."""
+    if not req.change_description.strip():
+        return {"status": "error", "error": "change_description이 비어있습니다."}
+    try:
+        from pipeline.domain.agile.nodes.impact import run_impact_analyzer
+        dev_knowledge_context = ""
+        if req.use_dev_knowledge:
+            try:
+                from pipeline.domain.dev_tracking.knowledge import query_dev_knowledge_artifacts
+
+                knowledge = query_dev_knowledge_artifacts(
+                    shared_db,
+                    team_id=req.team_id,
+                    owner=req.owner,
+                    repo=req.repo,
+                    branch_name=req.branch_name,
+                    query=req.dev_knowledge_query or req.change_description,
+                    limit=5,
+                )
+                dev_knowledge_context = knowledge.get("context_text", "")
+            except Exception as knowledge_error:
+                get_logger().warning(f"Dev Tracking knowledge lookup skipped: {knowledge_error}")
+        result = run_impact_analyzer(
+            change_description=req.change_description,
+            sa_data=req.sa_data,
+            api_key=req.api_key,
+            model=req.model,
+            session_id=req.session_id,
+            use_llm=req.use_llm,
+            dev_knowledge_context=dev_knowledge_context,
+        )
+        return {"status": "ok", "data": result.model_dump()}
+    except Exception as e:
+        get_logger().exception("agile_impact endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+# ── GitHub Integration ────────────────────────────────────
+
+class GitHubVerifyRequest(BaseModel):
+    token: str
+    owner: str
+    repo: str
+
+
+class GitHubPublishRequest(BaseModel):
+    token: Optional[str] = None  # 호환성 유지 (deprecated, JWT 우선)
+    owner: str
+    repo: str
+    result_data: dict
+    page_title: str = "SA 설계 문서"
+    project_name: str = "Project"
+    publish_mode: str = "wiki"  # "wiki" | "issue"
+    api_key: str = ""
+    model: str = "gemini-2.0-flash-lite"
+
+
+class GitHubAnalyticsRequest(BaseModel):
+    token: Optional[str] = None  # deprecated
+    owner: str
+    repo: str
+    branch: str = "main"
+    limit: int = 30
+
+
+class GitHubIssuesRequest(BaseModel):
+    token: Optional[str] = None  # deprecated
+    owner: str
+    repo: str
+    state: str = "open"
+
+
+@rest_router.post("/api/github/verify")
+async def github_verify(req: GitHubVerifyRequest):
+    """GitHub 토큰 + 레포지토리 접근 확인."""
+    try:
+        from connectors.github_connector import verify_token, GitHubConnector
+        token_info = verify_token(req.token)
+        if not token_info["valid"]:
+            return {"status": "error", "error": token_info.get("error", "Invalid token")}
+        connector = GitHubConnector(req.token)
+        repo_obj = connector.get_repo(req.owner, req.repo)
+        return {
+            "status": "ok",
+            "user": token_info["login"],
+            "repo": repo_obj.full_name,
+            "private": repo_obj.private,
+            "default_branch": repo_obj.default_branch,
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/github/publish")
+async def github_publish(
+    req: GitHubPublishRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """SA 설계 문서를 GitHub Issues(design-doc)에 퍼블리시."""
+    # JWT로 인증한 사용자의 DB OAuth 토큰 우선, 없으면 body.token 폴백
+    token = (current_user.github_oauth_token if current_user else None) or req.token
+    if not token:
+        return {"status": "error", "error": "GitHub OAuth 토큰이 없습니다. GitHub 연결 후 다시 시도하세요."}
+    try:
+        from pipeline.domain.agile.wiki_publisher import publish_to_github
+        result = publish_to_github(
+            result_data=req.result_data,
+            owner=req.owner,
+            repo=req.repo,
+            token=token,
+            page_title=req.page_title,
+            project_name=req.project_name,
+            mode=req.publish_mode,
+            api_key=req.api_key,
+            model=req.model,
+        )
+        return {"status": "ok", **result}
+    except Exception as e:
+        get_logger().exception("github_publish endpoint failed")
+        err_str = str(e)
+        wiki_disabled = "wiki_disabled=true" in err_str
+        return {
+            "status": "error",
+            "error": err_str.replace(" | wiki_disabled=true", ""),
+            "wiki_disabled": wiki_disabled,
+        }
+
+
+@rest_router.post("/api/github/analytics")
+async def github_analytics(
+    req: GitHubAnalyticsRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """커밋 히스토리 분석."""
+    token = (current_user.github_oauth_token if current_user else None) or req.token
+    if not token:
+        return {"status": "error", "error": "GitHub OAuth 토큰이 필요합니다."}
+    try:
+        from connectors.github_connector import GitHubConnector
+        from pipeline.domain.agile.commit_analyzer import analyze_commits
+        connector = GitHubConnector(token)
+        commits = connector.get_commits(req.owner, req.repo, req.branch, req.limit)
+        analytics = analyze_commits(commits)
+        return {
+            "status": "ok",
+            "data": {
+                "total_commits": analytics.total_commits,
+                "by_author": analytics.by_author,
+                "by_date": analytics.by_date,
+                "top_keywords": analytics.top_keywords,
+                "recent_commits": analytics.recent_commits,
+                "activity_trend": analytics.activity_trend,
+                "contributors": [
+                    c.__dict__ for c in connector.get_contributors(req.owner, req.repo)
+                ],
+            },
+        }
+    except Exception as e:
+        get_logger().exception("github_analytics endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/github/branches")
+async def github_branches(
+    req: GitHubAnalyticsRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """GitHub 브랜치 목록 조회."""
+    token = (current_user.github_oauth_token if current_user else None) or req.token
+    if not token:
+        return {"status": "error", "error": "GitHub OAuth 토큰이 필요합니다."}
+    try:
+        from connectors.github_connector import GitHubConnector
+        connector = GitHubConnector(token)
+        branches = connector.list_branches(req.owner, req.repo)
+        return {"status": "ok", "data": branches}
+    except Exception as e:
+        get_logger().exception("github_branches endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/github/issues")
+async def github_issues(
+    req: GitHubIssuesRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """GitHub Issues 목록 조회."""
+    token = (current_user.github_oauth_token if current_user else None) or req.token
+    if not token:
+        return {"status": "error", "error": "GitHub OAuth 토큰이 필요합니다."}
+    try:
+        from connectors.github_connector import GitHubConnector
+        connector = GitHubConnector(token)
+        issues = connector.get_issues(req.owner, req.repo, req.state)
+        return {"status": "ok", "data": [i.__dict__ for i in issues]}
+    except Exception as e:
+        get_logger().exception("github_issues endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+# ── Phase 5: Task Coordinator + Doc Sync ────────────────────
+
+class TaskCreateRequest(BaseModel):
+    task_type: str
+    title: str
+    description: str = ""
+    area: str = ""       # backend | frontend | fullstack | devops
+    assignee: str = ""
+    payload: dict = {}
+    created_by: str = ""
+    team_id: str = ""
+
+
+class TaskUpdateRequest(BaseModel):
+    status: str
+    reviewed_by: str = ""
+    result: str = ""
+
+
+def _normalize_status_check(result: dict | None) -> dict:
+    normalized = {
+        "status": "WARN",
+        "status_updated": False,
+        "state": "",
+        "context": "NAVIGATOR Dev Tracking",
+        "description": "",
+        "error": "",
+    }
+    if isinstance(result, dict):
+        normalized.update(result)
+    return normalized
+
+
+def _normalize_followup(result: dict | None, *, decision_status: str) -> dict:
+    normalized = {
+        "status": "WARN",
+        "artifact": {},
+        "rag_metadata": {"stored": False, "write_enabled": False},
+        "doc_sync": {},
+        "pr_comment": {},
+    }
+    if isinstance(result, dict):
+        normalized.update(result)
+    if not isinstance(normalized.get("rag_metadata"), dict):
+        normalized["rag_metadata"] = {"stored": False, "write_enabled": False}
+    normalized["doc_sync"] = {
+        "synced": False,
+        "action": "unknown",
+        "message": "",
+        "updater": "doc_updater",
+        "decision_status": decision_status,
+        **(normalized.get("doc_sync") if isinstance(normalized.get("doc_sync"), dict) else {}),
+    }
+    normalized["pr_comment"] = {
+        "status": "WARN",
+        "comment_created": False,
+        "error": "",
+        **(normalized.get("pr_comment") if isinstance(normalized.get("pr_comment"), dict) else {}),
+    }
+    return normalized
+
+
+class DocSyncRequest(BaseModel):
+    result_data: dict
+    github_token: str
+    owner: str
+    repo: str
+    previous_hash: str = ""
+    page_title: str = "SA 설계 문서"
+    project_name: str = "Project"
+
+
+class GitHubIssuesImportRequest(BaseModel):
+    token: str
+    owner: str
+    repo: str
+    api_key: str = ""
+    model: str = DEFAULT_MODEL
+
+
+class DevTrackingRequest(BaseModel):
+    # author:xxrin
+    # navi_v3 PR 기반 Dev Tracking MVP endpoint의 요청 형식.
+    trigger: str = "GITHUB_PR_WEBHOOK"
+    repository: dict
+    pull_request: dict
+    actor: dict = Field(default_factory=dict)
+    source_dir: Optional[str] = None
+    github_token: Optional[str] = None
+    api_key: str = ""
+    model: str = DEFAULT_MODEL
+    # author:xxrin
+    # None은 api_key 기반 기본 동작을 유지하고, false는 해당 노드 LLM 호출을 명시적으로 끈다.
+    use_llm_forensic_profiler: Optional[bool] = None
+    use_llm_gap_analyzer: Optional[bool] = None
+    use_llm_intent_classifier: Optional[bool] = None
+    compress_prompt: bool = True
+    notify_pr: bool = False
+    team_id: Optional[str] = None
+    created_by: str = ""
+
+
+class DevKnowledgeQueryRequest(BaseModel):
+    team_id: str = ""
+    owner: str = ""
+    repo: str = ""
+    branch_name: str = ""
+    artifact_type: str = ""
+    query: str = ""
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+def _verify_github_webhook_signature(
+    raw_body: bytes,
+    signature_header: str,
+    secret: str,
+) -> tuple[bool, str]:
+    if not secret:
+        return True, "webhook secret is not configured; signature verification skipped"
+    if not signature_header:
+        return False, "missing X-Hub-Signature-256"
+    if not signature_header.startswith("sha256="):
+        return False, "invalid X-Hub-Signature-256 format"
+
+    expected = "sha256=" + hmac.new(
+        secret.encode("utf-8"),
+        raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, signature_header):
+        return False, "invalid X-Hub-Signature-256"
+    return True, ""
+
+
+def _normalize_github_pr_webhook(payload: dict) -> dict:
+    repository = payload.get("repository") if isinstance(payload.get("repository"), dict) else {}
+    pull_request = payload.get("pull_request") if isinstance(payload.get("pull_request"), dict) else {}
+    sender = payload.get("sender") if isinstance(payload.get("sender"), dict) else {}
+    owner_obj = repository.get("owner") if isinstance(repository.get("owner"), dict) else {}
+    head = pull_request.get("head") if isinstance(pull_request.get("head"), dict) else {}
+    base = pull_request.get("base") if isinstance(pull_request.get("base"), dict) else {}
+
+    return {
+        "trigger": "GITHUB_PR_WEBHOOK",
+        "repository": {
+            "owner": owner_obj.get("login") or repository.get("owner") or "",
+            "repo": repository.get("name") or "",
+        },
+        "pull_request": {
+            "pr_number": pull_request.get("number") or payload.get("number"),
+            "branch_name": head.get("ref") or "",
+            "base_branch": base.get("ref") or "",
+            "head_sha": head.get("sha") or "",
+            "created_at": pull_request.get("created_at") or "",
+            "title": pull_request.get("title") or "",
+            "description": pull_request.get("body") or "",
+        },
+        "actor": {
+            "github_id": sender.get("login") or "",
+            "role": "developer",
+        },
+    }
+
+
+@rest_router.post("/api/tasks")
+async def create_task_endpoint(req: TaskCreateRequest):
+    """새 태스크 생성 (PM 승인 대기)."""
+    try:
+        from pipeline.domain.agile.task_coordinator import create_task, init_tasks_db
+        init_tasks_db()
+        task = create_task(
+            task_type=req.task_type,
+            title=req.title,
+            description=req.description,
+            area=req.area,
+            assignee=req.assignee,
+            payload=req.payload,
+            created_by=req.created_by,
+            team_id=req.team_id,
+        )
+        return {"status": "ok", "data": task}
+    except Exception as e:
+        get_logger().exception("create_task endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/webhook/github")
+async def github_webhook_endpoint(
+    request: Request,
+    shared_db: Session = Depends(get_shared_db),
+):
+    """GitHub PR webhook adapter for Dev Tracking."""
+    try:
+        from pipeline.domain.dev_tracking import run_dev_tracking_analysis
+
+        raw_body = await request.body()
+        event = request.headers.get("X-GitHub-Event", "")
+        signature = request.headers.get("X-Hub-Signature-256", "")
+        secret = os.environ.get("NAVIGATOR_GITHUB_WEBHOOK_SECRET", "")
+
+        verified, verification_error = _verify_github_webhook_signature(raw_body, signature, secret)
+        if not verified:
+            return {
+                "status": "error",
+                "error": verification_error,
+                "handled": False,
+                "signature_verified": False,
+            }
+
+        try:
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            return {"status": "error", "error": "Invalid JSON payload", "handled": False}
+
+        if event != "pull_request":
+            return {
+                "status": "ok",
+                "handled": False,
+                "reason": f"ignored event: {event or 'unknown'}",
+                "signature_verified": bool(secret),
+                "signature_warning": verification_error if not secret else "",
+            }
+
+        action = str(payload.get("action") or "")
+        if action not in {"opened", "synchronize", "reopened"}:
+            return {
+                "status": "ok",
+                "handled": False,
+                "reason": f"ignored pull_request action: {action or 'unknown'}",
+                "signature_verified": bool(secret),
+                "signature_warning": verification_error if not secret else "",
+            }
+
+        normalized = _normalize_github_pr_webhook(payload)
+        # author: xxrin
+        # 무엇: 동일 PR head_sha가 이미 분석된 경우 webhook 재진입을 차단한다.
+        # 왜: 중복 분석으로 동일 승인 태스크/코멘트가 반복 생성되는 것을 방지하기 위해서다.
+        try:
+            from auth.shared_models import DevPrAnalysis
+
+            pr_ctx = normalized.get("pull_request", {}) if isinstance(normalized, dict) else {}
+            repo_ctx = normalized.get("repository", {}) if isinstance(normalized, dict) else {}
+            head_sha = str(pr_ctx.get("head_sha") or "").strip()
+            owner = str(repo_ctx.get("owner") or "").strip()
+            repo = str(repo_ctx.get("repo") or "").strip()
+            pr_number = int(pr_ctx.get("pr_number") or 0)
+            duplicate = None
+            if head_sha and owner and repo and pr_number > 0:
+                duplicate = (
+                    shared_db.query(DevPrAnalysis)
+                    .filter(DevPrAnalysis.owner == owner)
+                    .filter(DevPrAnalysis.repo == repo)
+                    .filter(DevPrAnalysis.pr_number == pr_number)
+                    .filter(DevPrAnalysis.head_sha == head_sha)
+                    .order_by(DevPrAnalysis.created_at.desc())
+                    .first()
+                )
+            if duplicate is not None:
+                return {
+                    "status": "ok",
+                    "handled": False,
+                    "reason": "duplicate head_sha already analyzed",
+                    "signature_verified": bool(secret),
+                    "signature_warning": verification_error if not secret else "",
+                }
+        except Exception:
+            # duplicate check 실패는 webhook 처리 자체를 막지 않는다.
+            pass
+
+        normalized.update(
+            {
+                "source_dir": "",
+                "github_oauth_token": os.environ.get("NAVIGATOR_GITHUB_TOKEN")
+                or os.environ.get("GITHUB_TOKEN")
+                or "",
+                "notify_pr": True,
+                "team_id": os.environ.get("NAVIGATOR_DEFAULT_TEAM_ID", ""),
+                "created_by": normalized.get("actor", {}).get("github_id", ""),
+            }
+        )
+        result = run_dev_tracking_analysis(normalized, shared_db=shared_db)
+        return {
+            "status": "ok",
+            "handled": True,
+            "signature_verified": bool(secret),
+            "signature_warning": verification_error if not secret else "",
+            "data": result,
+        }
+    except Exception as e:
+        get_logger().exception("github_webhook_endpoint failed")
+        return {"status": "error", "error": str(e), "handled": False}
+
+
+@rest_router.post("/api/dev-tracking/pr")
+async def dev_tracking_pr_endpoint(
+    req: DevTrackingRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    shared_db: Session = Depends(get_shared_db),
+):
+    """PR 기반 Dev Tracking MVP 실행"""
+    try:
+        # author:xxrin
+        # 이 endpoint는 분리된 dev_tracking service를 호출하는 어댑터 역할만 함
+        from pipeline.domain.dev_tracking import run_dev_tracking_analysis
+
+        github_token = req.github_token
+        if not github_token and current_user:
+            github_token = current_user.github_oauth_token
+        #payload
+        payload = {
+            "trigger": req.trigger,
+            "repository": req.repository,
+            "pull_request": req.pull_request,
+            "actor": req.actor,
+            "source_dir": req.source_dir or "",
+            "github_oauth_token": github_token or "",
+            "api_key": req.api_key,
+            "model": req.model or DEFAULT_MODEL,
+            "use_llm_forensic_profiler": req.use_llm_forensic_profiler,
+            "use_llm_gap_analyzer": req.use_llm_gap_analyzer,
+            "use_llm_intent_classifier": req.use_llm_intent_classifier,
+            "compress_prompt": req.compress_prompt,
+            "notify_pr": req.notify_pr,
+            "team_id": req.team_id or (current_user.team_id if current_user else ""),
+            "created_by": req.created_by or (current_user.id if current_user else ""),
+        }
+        result = run_dev_tracking_analysis(payload, shared_db=shared_db)
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        get_logger().exception("dev_tracking_pr_endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/dev-tracking/knowledge/query")
+async def dev_tracking_knowledge_query_endpoint(
+    req: DevKnowledgeQueryRequest,
+    shared_db: Session = Depends(get_shared_db),
+):
+    """Dev Tracking 지식 아티팩트를 조회해 PM/SA 프롬프트 컨텍스트로 반환한다."""
+    try:
+        from pipeline.domain.dev_tracking.knowledge import query_dev_knowledge_artifacts
+
+        result = query_dev_knowledge_artifacts(
+            shared_db,
+            team_id=req.team_id,
+            owner=req.owner,
+            repo=req.repo,
+            branch_name=req.branch_name,
+            artifact_type=req.artifact_type,
+            query=req.query,
+            limit=req.limit,
+        )
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        get_logger().exception("dev_tracking_knowledge_query_endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.get("/api/tasks")
+async def list_tasks_endpoint(status: Optional[str] = None, team_id: Optional[str] = None):
+    """태스크 목록 조회."""
+    try:
+        from pipeline.domain.agile.task_coordinator import list_tasks, init_tasks_db
+        init_tasks_db()
+        tasks = list_tasks(status=status, team_id=team_id or None)
+        return {"status": "ok", "data": tasks}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.patch("/api/tasks/{task_id}")
+async def update_task_endpoint(
+    task_id: str,
+    req: TaskUpdateRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """태스크 상태 업데이트 (승인/거절/완료)."""
+    allowed_statuses = {"unassigned", "pending_approval", "in_progress", "pr_pending", "completed", "rejected"}
+    if req.status not in allowed_statuses:
+        return {"status": "error", "error": f"Invalid status. Allowed: {allowed_statuses}"}
+    try:
+        import json
+        from pipeline.domain.agile.task_coordinator import get_task, update_task_status, execute_approved_task, init_tasks_db
+        init_tasks_db()
+        existing_task = get_task(task_id)
+        if not existing_task:
+            return {"status": "error", "error": "Task not found"}
+
+        # Dev GAP 승인/거절은 PM 의사결정이므로 인증 사용자와 역할 검사를 강제한다.
+        is_dev_gap_decision = (
+            existing_task.get("task_type") == "dev_gap_approval"
+            and req.status in {"in_progress", "rejected"}
+        )
+        if is_dev_gap_decision:
+            if not current_user:
+                return {"status": "error", "error": "Authentication required for Dev GAP approval"}
+            if getattr(current_user, "role", "") not in {"pm", "admin"}:
+                return {"status": "error", "error": "PM or admin role required for Dev GAP approval"}
+
+        reviewed_by = (
+            str(getattr(current_user, "id", "") or "")
+            if is_dev_gap_decision and current_user
+            else req.reviewed_by
+        )
+
+        task = update_task_status(task_id, req.status, reviewed_by, req.result)
+        if not task:
+            return {"status": "error", "error": "Task not found"}
+
+        if task.get("task_type") == "dev_gap_approval" and req.status == "in_progress":
+            exec_result = execute_approved_task(task)
+            # PM 승인 결과를 GitHub commit status에 반영한다.
+            # GitHub status 업데이트 실패는 승인 완료 처리를 막지 않고 result에 경고로 남긴다.
+            try:
+                exec_payload = json.loads(exec_result)
+            except Exception:
+                exec_payload = {"raw_result": exec_result}
+            try:
+                from pipeline.domain.dev_tracking.nodes import update_pr_status_check
+
+                status_check = update_pr_status_check(
+                    {"pr_context": task.get("payload", {}).get("pr_context", {})},
+                    "success",
+                    "PM approved the intentional implementation change.",
+                )
+            except Exception as status_error:
+                status_check = {
+                    "status": "WARN",
+                    "status_updated": False,
+                    "error": str(status_error) or type(status_error).__name__,
+                }
+            status_check = _normalize_status_check(status_check)
+            try:
+                from pipeline.domain.dev_tracking.nodes import run_dev_gap_decision_followup
+
+                followup = run_dev_gap_decision_followup(
+                    task,
+                    "APPROVED_INTENTIONAL_CHANGE",
+                    reviewed_by,
+                    exec_payload,
+                )
+            except Exception as followup_error:
+                followup = {
+                    "status": "WARN",
+                    "error": str(followup_error) or type(followup_error).__name__,
+                }
+            followup = _normalize_followup(
+                followup,
+                decision_status="APPROVED_INTENTIONAL_CHANGE",
+            )
+            exec_payload["status_check"] = status_check
+            exec_payload["followup"] = followup
+            exec_result = json.dumps(exec_payload, ensure_ascii=False)
+            updated = update_task_status(task_id, "completed", reviewed_by=reviewed_by, result=exec_result)
+            if updated:
+                task = updated
+        elif task.get("task_type") == "dev_gap_approval" and req.status == "rejected":
+            payload = task.get("payload", {}) if isinstance(task.get("payload"), dict) else {}
+            reject_payload = {
+                "message": "Dev Tracking GAP report rejected by PM.",
+                "approval_status": "REJECTED_UNINTENTIONAL_CHANGE",
+                "pr_context": payload.get("pr_context", {}),
+                "recommended_actions": ["REQUEST_FIX"],
+            }
+            if req.result:
+                try:
+                    reject_payload.update(json.loads(req.result))
+                except Exception:
+                    reject_payload["raw_result"] = req.result
+            # PM 거절 결과를 GitHub commit status에 반영한다.
+            # 실패하더라도 task 상태는 rejected로 유지하고 result에 경고를 저장한다.
+            try:
+                from pipeline.domain.dev_tracking.nodes import update_pr_status_check
+
+                status_check = update_pr_status_check(
+                    {"pr_context": payload.get("pr_context", {})},
+                    "failure",
+                    "PM rejected the implementation change.",
+                )
+            except Exception as status_error:
+                status_check = {
+                    "status": "WARN",
+                    "status_updated": False,
+                    "error": str(status_error) or type(status_error).__name__,
+                }
+            status_check = _normalize_status_check(status_check)
+            try:
+                from pipeline.domain.dev_tracking.nodes import run_dev_gap_decision_followup
+
+                followup = run_dev_gap_decision_followup(
+                    task,
+                    "REJECTED_UNINTENTIONAL_CHANGE",
+                    reviewed_by,
+                    reject_payload,
+                )
+            except Exception as followup_error:
+                followup = {
+                    "status": "WARN",
+                    "error": str(followup_error) or type(followup_error).__name__,
+                }
+            followup = _normalize_followup(
+                followup,
+                decision_status="REJECTED_UNINTENTIONAL_CHANGE",
+            )
+            reject_payload["status_check"] = status_check
+            reject_payload["followup"] = followup
+            reject_result = json.dumps(reject_payload, ensure_ascii=False)
+            updated = update_task_status(task_id, "rejected", reviewed_by=reviewed_by, result=reject_result)
+            if updated:
+                task = updated
+
+        return {"status": "ok", "data": task}
+    except Exception as e:
+        get_logger().exception(f"update_task endpoint failed for {task_id}")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.delete("/api/tasks/{task_id}")
+async def delete_task_endpoint(task_id: str):
+    """완료/거절된 태스크 삭제."""
+    try:
+        from pipeline.domain.agile.task_coordinator import delete_task, init_tasks_db
+        init_tasks_db()
+        deleted = delete_task(task_id)
+        if not deleted:
+            return {"status": "error", "error": "Task not found"}
+        return {"status": "ok"}
+    except Exception as e:
+        get_logger().exception(f"delete_task endpoint failed for {task_id}")
+        return {"status": "error", "error": str(e)}
+
+
+class GenerateTasksRequest(BaseModel):
+    run_id: str
+    team_id: str
+    api_key: str = ""
+    model: str = ""
+    created_by: str = ""
+
+
+class DistributeTasksRequest(BaseModel):
+    team_id: str
+    api_key: str = ""
+    model: str = ""
+    distributed_by: str = ""
+
+
+@rest_router.post("/api/agile/generate-tasks")
+async def generate_tasks_endpoint(req: GenerateTasksRequest):
+    """SA/PM 산출물 → unassigned 태스크 자동 생성 (파이프라인 완료 후 호출)."""
+    try:
+        from auth.database import SessionLocal
+        from auth.models import AnalysisResult
+        from pipeline.domain.agile.nodes.task_generator import run_task_generator
+        from version import DEFAULT_MODEL
+        import json
+
+        db = SessionLocal()
+        try:
+            record = db.query(AnalysisResult).filter(AnalysisResult.run_id == req.run_id).first()
+            if not record:
+                return {"status": "error", "error": f"run_id '{req.run_id}' 결과 없음"}
+            shaped = json.loads(record.shaped_result)
+        finally:
+            db.close()
+
+        sa_bundle = shaped.get("sa_arch_bundle") or {}
+        pm_bundle = shaped.get("pm_bundle") or {}
+
+        result = run_task_generator(
+            sa_bundle=sa_bundle,
+            pm_bundle=pm_bundle,
+            team_id=req.team_id,
+            api_key=req.api_key,
+            model=req.model or DEFAULT_MODEL,
+            created_by=req.created_by,
+        )
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        get_logger().exception("generate_tasks endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/agile/distribute-tasks")
+async def distribute_tasks_endpoint(req: DistributeTasksRequest):
+    """unassigned 태스크를 팀 멤버에게 배분 (PM이 '배분' 버튼 클릭 시 호출)."""
+    try:
+        from pipeline.domain.agile.nodes.task_distributor import run_task_distributor
+        from version import DEFAULT_MODEL
+
+        result = run_task_distributor(
+            team_id=req.team_id,
+            api_key=req.api_key,
+            model=req.model or DEFAULT_MODEL,
+            distributed_by=req.distributed_by,
+        )
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        get_logger().exception("distribute_tasks endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/doc-sync")
+async def doc_sync_endpoint(req: DocSyncRequest):
+    """SA 결과물을 GitHub에 자동 동기화."""
+    try:
+        from pipeline.domain.agile.nodes.doc_sync import sync_docs
+        result = sync_docs(
+            result_data=req.result_data,
+            github_token=req.github_token,
+            owner=req.owner,
+            repo=req.repo,
+            previous_hash=req.previous_hash,
+            page_title=req.page_title,
+            project_name=req.project_name,
+        )
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        get_logger().exception("doc_sync endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+# ── Publish / Shared Snapshots ────────────────────────────────
+
+class PublishRequest(BaseModel):
+    run_id: str
+    title: str
+    description: str = ""
+    team_id: Optional[str] = None
+
+
+@rest_router.get("/api/local-results")
+async def list_local_results_endpoint(
+    limit: int = 50,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+    shared_db: Session = Depends(get_shared_db),
+):
+    """Publish 대상 선택을 위한 로컬 분석 결과 목록."""
+    try:
+        from storage.publish_service import list_local_results
+        return {"status": "ok", "data": list_local_results(db, shared_db, limit=limit)}
+    except Exception as e:
+        get_logger().exception("list_local_results failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/publish")
+async def publish_snapshot_endpoint(
+    req: PublishRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+    shared_db: Session = Depends(get_shared_db),
+):
+    """로컬 분석 결과를 공유 DB에 Publish."""
+    try:
+        from storage.publish_service import publish_snapshot
+        team_id = req.team_id or (current_user.team_id if current_user else None)
+        user_id = current_user.id if current_user else None
+        snap = publish_snapshot(
+            db, shared_db,
+            run_id=req.run_id,
+            title=req.title,
+            description=req.description,
+            team_id=team_id,
+            user_id=user_id,
+        )
+        return {"status": "ok", "data": snap}
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+    except Exception as e:
+        get_logger().exception("publish_snapshot failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.get("/api/snapshots")
+async def list_snapshots_endpoint(
+    team_id: Optional[str] = None,
+    limit: int = 30,
+    offset: int = 0,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    shared_db: Session = Depends(get_shared_db),
+):
+    """팀 공유 스냅샷 목록."""
+    try:
+        from storage.publish_service import list_snapshots
+        resolved_team = team_id or (current_user.team_id if current_user else None)
+        snaps = list_snapshots(shared_db, team_id=resolved_team, limit=limit, offset=offset)
+        return {"status": "ok", "data": snaps}
+    except Exception as e:
+        get_logger().exception("list_snapshots failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.get("/api/snapshots/{snapshot_id}")
+async def get_snapshot_endpoint(
+    snapshot_id: str,
+    shared_db: Session = Depends(get_shared_db),
+):
+    """스냅샷 상세 조회 (데이터 포함)."""
+    try:
+        from storage.publish_service import get_snapshot
+        snap = get_snapshot(shared_db, snapshot_id)
+        if not snap:
+            return {"status": "error", "error": "스냅샷을 찾을 수 없습니다."}
+        return {"status": "ok", "data": snap}
+    except Exception as e:
+        get_logger().exception("get_snapshot failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.delete("/api/snapshots/{snapshot_id}")
+async def delete_snapshot_endpoint(
+    snapshot_id: str,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    shared_db: Session = Depends(get_shared_db),
+):
+    """스냅샷 삭제 (게시자 본인 또는 PM만)."""
+    try:
+        from storage.publish_service import get_snapshot, delete_snapshot
+        snap = get_snapshot(shared_db, snapshot_id)
+        if not snap:
+            return {"status": "error", "error": "스냅샷을 찾을 수 없습니다."}
+        if current_user:
+            is_owner = snap["published_by"] == current_user.id
+            is_pm = current_user.role == "pm"
+            if not (is_owner or is_pm):
+                return {"status": "error", "error": "삭제 권한이 없습니다."}
+        delete_snapshot(shared_db, snapshot_id)
+        return {"status": "ok"}
+    except Exception as e:
+        get_logger().exception("delete_snapshot failed")
+        return {"status": "error", "error": str(e)}
+
+
+class PullRequest(BaseModel):
+    run_id: str
+
+
+@rest_router.post("/api/snapshots/{snapshot_id}/pull")
+async def pull_snapshot_endpoint(
+    snapshot_id: str,
+    req: PullRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    shared_db: Session = Depends(get_shared_db),
+):
+    """공유 스냅샷 데이터를 지정된 로컬 run_id 세션에 덮어써 저장(Pull)."""
+    try:
+        from storage.publish_service import pull_snapshot
+        from auth.shared_models import PublishedSnapshot
+        snap = shared_db.query(PublishedSnapshot).filter(PublishedSnapshot.id == snapshot_id).first()
+        if not snap:
+            return {"status": "error", "error": "스냅샷을 찾을 수 없습니다."}
+        if snap.team_id and snap.team_id != current_user.team_id:
+            return {"status": "error", "error": "현재 팀의 스냅샷이 아닙니다."}
+        result = pull_snapshot(shared_db, db, snapshot_id=snapshot_id, run_id=req.run_id)
+        return {"status": "ok", "data": result}
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+    except Exception as e:
+        get_logger().exception("pull_snapshot failed")
+        return {"status": "error", "error": str(e)}
+
+
+
+@rest_router.post("/api/github/issues/import")
+async def github_issues_import(req: GitHubIssuesImportRequest):
+    """GitHub Issues를 requirements로 변환하는 태스크 생성."""
+    try:
+        from connectors.github_connector import GitHubConnector
+        from pipeline.domain.agile.task_coordinator import create_task, init_tasks_db
+        init_tasks_db()
+        connector = GitHubConnector(req.token)
+        issues = connector.get_issues(req.owner, req.repo, state="open")
+        issue_list = [i.__dict__ for i in issues]
+
+        task = create_task(
+            task_type="import_issues",
+            title=f"GitHub Issues Import ({req.owner}/{req.repo})",
+            description=f"{len(issue_list)}개 이슈를 요구사항으로 변환",
+            payload={
+                "issues": issue_list,
+                "owner": req.owner,
+                "repo": req.repo,
+                "api_key": req.api_key,
+            },
+        )
+        return {
+            "status": "ok",
+            "task_id": task["id"],
+            "issue_count": len(issue_list),
+            "message": "태스크가 생성되었습니다. PM 승인 후 실행됩니다.",
+        }
+    except Exception as e:
+        get_logger().exception("github_issues_import endpoint failed")
         return {"status": "error", "error": str(e)}

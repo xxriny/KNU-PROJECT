@@ -6,8 +6,10 @@ import Badge from "../ui/Badge";
 import ReportLayout, { ReportSection } from "./layout/ReportLayout";
 
 export default function SAComponentsTab() {
-  const { isDarkMode, sa_output } = useStore(['isDarkMode', 'sa_output']);
-  const components = sa_output?.components || sa_output?.data?.components || [];
+  const { isDarkMode, sa_output, components: storeComponents } = useStore(['isDarkMode', 'sa_output', 'components']);
+  const components = storeComponents?.length > 0
+    ? storeComponents
+    : (sa_output?.components || sa_output?.data?.components || []);
 
   if (components.length === 0) return <div className="h-full flex items-center justify-center text-slate-500">컴포넌트 데이터 없음</div>;
 

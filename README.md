@@ -1,255 +1,663 @@
-# NAVIGATOR
+<div align="center">
 
-PM/SA 워크플로우를 지원하는 AI 데스크톱 분석 도구입니다.
+# 🧭 NAVIGATOR
 
-Electron + React(Vite) + FastAPI 사이드카 아키텍처로 동작하며, Google Gemini 기반 LangGraph 파이프라인으로 다음 산출물을 생성합니다.
+### AI-Powered PM · Agile · Code QA Co-Pilot
 
-- PM 산출물: 요구사항(RTM), 컨텍스트 요약
-- SA 산출물: 아키텍처/보안/위상 정렬, 시스템 다이어그램/플로우차트/UML/인터페이스/의사결정 테이블
+**Design. Ship. Verify. — All in one AI-native workflow.**
 
-## 1. 주요 기능
+[![Version](https://img.shields.io/badge/version-2.2.0-6366f1?style=for-the-badge)](./backend/version.py)
+[![Python](https://img.shields.io/badge/Python-3.11+-3776ab?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-18-61dafb?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
+[![Electron](https://img.shields.io/badge/Electron-41-47848f?style=for-the-badge&logo=electron&logoColor=white)](https://electronjs.org)
+[![LangGraph](https://img.shields.io/badge/LangGraph-0.2+-1c1c1c?style=for-the-badge&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph)
+[![License](https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge)](./LICENSE)
 
-- 멀티 모드 분석: `CREATE`, `UPDATE`, `REVERSE_ENGINEER` (REST/WebSocket의 `action_type` 정규화)
-- **Agentic Workflow 및 자가 치유(Self-Healing)**: 정보가 부족하거나 기술 스택 맵핑이 불완전하면, 스스로 크롤링하고 검증하는 조건부 루프(Conditional Edge) 동작
-- **도메인 주도 설계(DDD)**: PM, SA, RAG 도메인으로 파이프라인 노드와 스키마를 분리하여 응집도를 높임
-- **비용 최적화(Cost Management)**: 각 노드 실행 시 사용된 토큰 및 비용을 실시간으로 추적(`core/cost_manager.py`)하고, 통합 실패 시 불필요한 파이프라인 진행을 조기 차단
-- 실시간 파이프라인 스트리밍: WebSocket 상태/생각 로그/최종 결과
-- SA 시각화 아티팩트 자동 컴파일: 컨테이너 다이어그램(`result_shaping/container_config.py`로 레이어·매핑 조정 가능), Flowchart, UML 컴포넌트 뷰
-- **프론트 모듈화**: 결과 뷰를 `components/resultViewer/` 탭 단위로 분리, Zustand는 `store/slices/`(WebSocket·설정) + `useAppStore` 조합
-- 세션 저장/복원: 데이터베이스 기반의 영구 저장(로컬 SQLite / Vector 하이브리드) 및 상태 복원
-- 보안 기본 원칙: `.env` 분리, 결과 shaping 단계에서 민감 필드 제외
+<br/>
 
-## 2. 기술 스택
+> NAVIGATOR is a desktop AI agent built around **three core pipelines**:
+>
+> **① Design** — turns ideas or codebases into complete PM + SA documentation in minutes  
+> **② Agile** — auto-generates and distributes task tickets, links them to GitHub, and manages design change approvals  
+> **③ QA** *(coming soon)* — hooks into every PR, reverse-engineers the actual code, compares it against the published design spec, classifies gaps as intentional or not, and routes the result to the PM for sign-off
 
-| Layer | Stack |
-|---|---|
-| Desktop Shell | Electron |
-| Frontend | React 18, Tailwind CSS, Monaco Editor, React Flow, Zustand |
-| Build | Vite 5 |
-| Backend API | FastAPI, WebSocket |
-| Orchestration | LangGraph, LangChain |
-| LLM | Google Gemini (`langchain-google-genai`) |
-| Data/Vector | ChromaDB |
-| Observability | structlog, Prometheus |
+<br/>
 
-## 3. 사전 요구사항
+[**Quick Start**](#-quick-start) · [**Architecture**](#-architecture) · [**Design Pipeline**](#-design-pipeline) · [**Agile Pipeline**](#-agile-collaboration-pipeline) · [**QA Pipeline**](#-qa-pipeline-coming-soon) · [**API Reference**](#-api-reference) · [**Contributing**](#-contributing)
 
-- Node.js 18+
-- Python 3.11+
-- Google Gemini API Key
-	- 발급: https://aistudio.google.com/app/apikey
+<br/>
 
-## 4. 설치
+**English** | [한국어](./README.ko.md)
 
-프로젝트 루트(현재 `navigator/`) 기준입니다.
+</div>
+
+---
+
+## ✨ Three Pillars
+
+<table>
+<tr>
+<td width="33%">
+
+### 🏗️ Design
+Generate a full software architecture package from a single idea or existing codebase.
+
+- Requirements Traceability Matrix
+- Component architecture + dependency graph
+- REST API spec (OpenAPI style)
+- DB schema (DBML)
+- Test strategy & test cases
+- Project directory layout
+
+Three modes: `CREATE` · `UPDATE` · `REVERSE_ENGINEER`
+
+</td>
+<td width="33%">
+
+### 🏃 Agile Collaboration
+Close the gap between design documents and what actually gets built.
+
+- Auto-generate task tickets from SA artifacts
+- Distribute tasks by role + workload (PM · Engineer · Backend · Frontend · DevOps)
+- PM approval workflow for design change requests
+- Publish directly to GitHub Issues / Wiki
+- Track task status: `pending` → `approved` → `done`
+
+</td>
+<td width="33%">
+
+### 🔬 QA *(coming soon)*
+Every PR triggers an automated design conformance check.
+
+- AST-scan the branch → build `code_inventory`
+- Load the published design spec from `shared.db`
+- Identify gaps: missing APIs, missing components, design mismatches
+- Classify each gap: **INTENTIONAL** or **UNINTENTIONAL**
+- Route to PM for approval or auto-comment on the PR
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🗺️ Architecture
+
+```mermaid
+flowchart TB
+    classDef client   fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a,rx:6
+    classDef transport fill:#fef9c3,stroke:#eab308,color:#713f12
+    classDef design   fill:#dcfce7,stroke:#22c55e,color:#14532d
+    classDef agile    fill:#ede9fe,stroke:#8b5cf6,color:#2e1065
+    classDef qa       fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
+    classDef db       fill:#f8fafc,stroke:#94a3b8,color:#334155
+    classDef ext      fill:#fff7ed,stroke:#f97316,color:#431407
+
+    subgraph CLIENT["🖥️ Client"]
+        direction LR
+        EL["Electron\nmain.js · preload.js"]:::client
+        RF["React 18 · Vite\nZustand · ReactFlow · Monaco"]:::client
+        EL <--> RF
+    end
+
+    CLIENT <-->|"WebSocket /ws/pipeline\nREST /api/*"| BACKEND
+
+    subgraph BACKEND["⚙️ FastAPI Backend  (Sidecar)"]
+
+        subgraph TR["Transport · Auth"]
+            direction LR
+            WS["/ws/pipeline"]:::transport
+            RA_T["/api/*  REST"]:::transport
+            AU["JWT · GitHub OAuth\nRBAC  PM / Engineer / …"]:::transport
+        end
+
+        subgraph P1["① Design Pipeline"]
+            direction LR
+            GU["guardian"]:::design --> REQ["requirement\nanalyzer"]:::design --> SP["stack\nplanner"]:::design
+            SP <-->|"PENDING_CRAWL\nself-heal loop"| SC["stack\ncrawling"]:::design
+            SP --> MO["sa_unified\nmodeler"]:::design --> TE["sa_test\nanalysis"]:::design --> PS["sa_project\nstructure"]:::design --> RS["Result\nShaper"]:::design
+        end
+
+        subgraph P2["② Agile Collaboration Pipeline"]
+            direction LR
+            TG["task\ngenerator"]:::agile --> TD["task\ndistributor"]:::agile --> TC["task\ncoordinator"]:::agile
+            CA["commit\nanalyzer"]:::agile --> DS["doc_sync"]:::agile --> WP["wiki\npublisher"]:::agile
+            VR["verifier\nV-001~009"]:::agile --> IA["impact\nanalyzer"]:::agile
+            DCR(["Design Change\nRequest\nEngineer → PM"]):::agile -->|Approve| DU_A["doc\nupdater"]:::agile
+            DCR -->|Reject| PCN_A["pr_comment\nnotifier"]:::agile
+        end
+
+        subgraph P3["③ QA Pipeline  ·  coming soon"]
+            direction LR
+            WH(["GitHub\nWebhook"]):::qa --> DTP["dev_task\nplanner"]:::qa --> BF["branch\nfetcher"]:::qa --> RAN["reverse\nanalyzer\nAST scan"]:::qa
+            RAN --> FP["forensic\nprofiler\nfile role map"]:::qa --> SL["spec\nloader\nshared.db"]:::qa --> GA["gap\nanalyzer\nHIGH/MED/LOW"]:::qa
+            GA -->|"HIGH GAP"| IC["intent\nclassifier\nINTENTIONAL?"]:::qa
+            GA -->|"NO GAP"| MT["milestone\ntracker"]:::qa --> PRG["pm_report\ngenerator"]:::qa
+            IC -->|"Approve  (PM)"| DU_Q["doc\nupdater\n+ Wiki sync"]:::qa
+            IC -->|"Reject  (PM)"| PCN_Q["pr_comment\nnotifier"]:::qa
+        end
+
+        TR --> P1 & P2 & P3
+    end
+
+    subgraph DB["💾 Data Layer"]
+        direction LR
+        LDB[("local.db\nteams · users\nsessions · memos")]:::db
+        SDB[("shared.db\npublished\nsnapshots")]:::db
+        TDB[("tasks.db\nAgile\ntask board")]:::db
+    end
+
+    subgraph EXT["☁️ External Services"]
+        direction LR
+        GEM["Google\nGemini API"]:::ext
+        GHA["GitHub API\nIssues · Wiki · Repos"]:::ext
+    end
+
+    RS --> LDB
+    TC --> LDB & TDB
+    DU_Q -.->|"pin version"| SDB
+    SL -.->|"version match"| SDB
+    PRG --> TC
+
+    P1 & P2 & P3 -.->|"LLM calls"| GEM
+    P2 & P3 -.->|"API calls"| GHA
+```
+
+---
+
+## 🔬 Design Pipeline
+
+### Three Analysis Modes
+
+| Mode | Input | Output |
+|------|-------|--------|
+| `CREATE` | Product idea (text) | RTM · Tech stack · Component arch · API spec · DB schema · Test strategy · Directory layout |
+| `UPDATE` | Previous analysis JSON + new feature description | Merged design preserving existing feature IDs / positions |
+| `REVERSE_ENGINEER` | Path to existing codebase | AST-derived RTM · Component map · API surface reconstruction |
+
+### Self-Healing Agent Loop
+
+When the Stack Planner finds incomplete tech-stack data, it automatically queues a `PENDING_CRAWL` and re-enters the crawling loop (max 2 iterations) — no human intervention needed.
+
+### Real-time Streaming
+
+Every pipeline node streams its status and reasoning to the UI via WebSocket:
+
+```json
+{ "type": "status",   "node": "requirement_analyzer", "data": { "status": "running" } }
+{ "type": "thinking", "node": "stack_planner",         "data": { "text": "Comparing React vs Vue..." } }
+{ "type": "result",   "node": "complete",              "data": { /* full artifact payload */ } }
+```
+
+### Output Artifacts
+
+| Key | Contents |
+|-----|----------|
+| `requirements_rtm` | Atomic requirements with priority, category, traceability |
+| `context_spec` | Project context summary |
+| `sa_arch_bundle` | Component architecture, dependency graph |
+| `sa_api` | OpenAPI-style endpoint specifications |
+| `sa_db` | DBML database schema |
+| `sa_test_analysis_output` | Unit / Integration / E2E test strategy + test cases |
+| `sa_project_structure` | Recommended directory layout |
+| `pm_overview` · `sa_overview` | QA summary reports |
+
+---
+
+## 🏃 Agile Collaboration Pipeline
+
+### Task Generation & Distribution
+
+NAVIGATOR reads completed SA artifacts and automatically decomposes them into implementation tickets:
+
+| SA Artifact | Generated Task Type |
+|-------------|---------------------|
+| `sa_arch_bundle.components` | Component implementation (Frontend / Backend) |
+| `sa_arch_bundle.apis` | API endpoint implementation |
+| `sa_arch_bundle.tables` | DB table implementation |
+| `sa_project_structure` | Initial project scaffold setup |
+| `sa_test_analysis_output.risk_zones` | Test implementation |
+| `pm_bundle` (RTM) | Task title / description enrichment |
+
+Tasks are distributed by matching **role** and **current workload**:
+
+| Role | Assignment Rule |
+|------|----------------|
+| PM | Excluded from task assignment (reviewer / approver) |
+| Engineer | Fullstack — receives all task types |
+| Backend / Frontend / DevOps | Domain-matched tasks only |
+
+### Task Lifecycle
+
+```
+unassigned → PR_WAITING → approved → done (history)
+                       └→ rejected → unassigned
+```
+
+- **PR_WAITING**: triggered when a PR is opened against the task's branch
+- **approved**: PM signs off on the implementation
+- **rejected**: returned to unassigned queue for reassignment
+
+### Design Change Request Flow
+
+```
+Engineer                PM                    System
+   │                     │                       │
+   ├─ POST /api/change-requests ──────────────► │
+   │   (target section + description)            │
+   │                     │                       │
+   │            PATCH /api/change-requests/{id}  │
+   │                  approve ──────────────► doc_updater
+   │                  reject ───────────────► pr_comment_notifier
+```
+
+### GitHub Integration
+
+- Publish design documents to **GitHub Issues**
+- Sync architecture reports to **GitHub Wiki** via `doc_sync`
+- Analyze commit history via `commit_analyzer`
+- Design gap comments posted directly on PRs via `pr_comment_notifier`
+
+---
+
+## 🔬 QA Pipeline *(coming soon)*
+
+> The QA pipeline closes the loop between design and implementation. It triggers automatically on every GitHub PR/push event and produces a PM-ready conformance report.
+
+### Pipeline Flow
+
+```
+GitHub Webhook (PR opened / push to feature branch)
+       │
+       ▼
+dev_task_planner   — parse webhook payload (branch name, PR#, commit SHA, branch creation timestamp)
+       │
+branch_fetcher     — repo_cache.get_local_repo_path() → git checkout target branch
+       │
+reverse_analyzer   — single AST scan → (project_context str, code_inventory dict)
+       │              [wraps pipeline_runner.build_reverse_context()]
+       │
+forensic_profiler  — classify each file by role: DB · API · SERVICE · UI · STORE · CONFIG · UTIL
+       │              output: file_role_map {file_path: role}
+       │
+spec_loader        — load published design spec from shared.db at branch-creation timestamp
+       │              if a newer spec exists → set spec_outdated: true
+       │              output: spec {components, apis, tables} + spec_version + spec_outdated
+       │
+gap_analyzer       — diff spec vs file_role_map
+       │              → missing APIs, missing components, intent mismatches
+       │              → severity: HIGH · MED · LOW
+       │              → if spec_outdated: annotate gaps that may be version-drift artifacts
+       │
+       ├─── HIGH GAP found ──►
+       │         intent_classifier  — INTENTIONAL vs UNINTENTIONAL
+       │              (evidence: commit messages + PR description vs design intent)
+       │              spec_outdated gaps → INTENTIONAL candidates by default
+       │                    │
+       │         ┌──────────┴──────────┐
+       │      Approve (PM)         Reject (PM)
+       │      [TaskApprovalPanel]  [TaskApprovalPanel]
+       │           │                    │
+       │      doc_updater         pr_comment_notifier
+       │      (reflect approved   ("Design intent mismatch —
+       │       GAP in design doc   please revise")
+       │       + GitHub Wiki sync
+       │       + pin spec version
+       │       to this branch)
+       │
+       └─── NO GAP ──►
+                 milestone_tracker     — feature completion rate + estimated completion date
+                      │
+                 pm_report_generator   — unified PM report:
+                      │                   · Milestone achievement %
+                      │                   · GAP list (by severity)
+                      │                   · Intent classification results
+                      │                   · spec_outdated warning ("Dev working on v1, v2 exists")
+                      │
+                 task_coordinator      — update local.db · queue approved tasks to agile board
+                      │
+                 develop_embedding     — persist GAP analysis + PM report to local.db
+```
+
+### Node Reference
+
+| Node | Status | Based On |
+|------|--------|----------|
+| `dev_task_planner` | Modified | existing node — replaces RTM read with webhook payload parsing |
+| `branch_fetcher` | New | `repo_cache.get_local_repo_path()` + git checkout |
+| `reverse_analyzer` | New | wraps `build_reverse_context()` — single scan, dual output |
+| `forensic_profiler` | New | reads `code_inventory` from state → LLM role classification |
+| `spec_loader` | New | `publish_service.py` + shared.db query pattern |
+| `gap_analyzer` | New | LLM node — spec vs implementation diff |
+| `intent_classifier` | New | LLM node — commit message + PR description evidence |
+| `milestone_tracker` | Modified | replaces `feature_queue_controller` |
+| `pm_report_generator` | New | based on `feature_completion_qa_report()` structure |
+| `pr_comment_notifier` | Modified | replaces `branch_pr_orchestrator` — PR comment only, no PR creation |
+| `doc_updater` | New | extends `doc_sync` — applies PM-approved GAPs to design + Wiki |
+| `task_coordinator` | Modified | existing Agile node — adds QA result persistence |
+| `develop_embedding` | Modified | existing dev-pipeline — targets GAP analysis + PM report |
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+| Requirement | Version |
+|-------------|---------|
+| Node.js | 18+ |
+| Python | 3.11+ |
+| Google Gemini API Key | [Get one →](https://aistudio.google.com/app/apikey) |
+
+### 1. Clone & Install
 
 ```bash
-# 1) Node 의존성
+git clone https://github.com/your-org/navigator.git
+cd navigator
+
+# Node dependencies
 npm install
 
-# 2) Python 가상환경 + 백엔드 의존성
+# Python virtual environment + backend dependencies
 cd backend
 python -m venv .venv
-.venv\Scripts\activate      # Windows
-# source .venv/bin/activate   # macOS / Linux
+
+# Windows
+.venv\Scripts\activate
+# macOS / Linux
+# source .venv/bin/activate
+
 pip install -r requirements.txt
-
-# 3) 환경변수
-copy .env.example .env        # Windows
-# cp .env.example .env        # macOS / Linux
+cd ..
 ```
 
-`.env` 파일에 최소한 아래 값을 설정하세요.
-
-```env
-GEMINI_API_KEY=YOUR_API_KEY
-ENV=dev
-```
-
-## 5. 실행
-
-### 5.1 Windows 원클릭 실행 (권장)
-
-```bat
-run_v2.bat
-```
-
-동작 순서:
-
-1. 기존 `node/python/electron` 프로세스 정리
-2. Vite 개발 서버 기동 및 5173 포트 대기
-3. Electron 실행 (Electron이 FastAPI 사이드카를 함께 올림)
-
-### 5.2 스크립트 기반 실행
+### 2. Configure Environment
 
 ```bash
+# Windows
+copy backend\.env.example backend\.env
+
+# macOS / Linux
+cp backend/.env.example backend/.env
+```
+
+Edit `backend/.env`:
+
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+ENV=dev
+
+# Optional: GitHub OAuth (for team collaboration + QA pipeline features)
+GITHUB_CLIENT_ID=your_github_client_id
+GITHUB_CLIENT_SECRET=your_github_client_secret
+```
+
+### 3. Run
+
+```bash
+# Windows — recommended one-click launcher
+run_v2.bat
+
+# Cross-platform
 npm run dev
 ```
 
-기타 유용한 스크립트:
+The launcher:
+1. Cleans up stale node / python / electron processes
+2. Starts Vite dev server and waits for port 5173
+3. Launches Electron (which starts the FastAPI sidecar automatically)
 
-- `npm run dev:vite`: 프론트 개발 서버
-- `npm run dev:electron`: Electron 앱 실행
-- `npm run build`: 프론트 프로덕션 빌드
-- `npm run build:electron`: 빌드 + 패키징
-- `npm run backend`: 백엔드만 단독 기동(개발·디버그용, 기본 포트는 `package.json` 스크립트 참고)
+---
 
-## 6. 프로젝트 구조
+## 🔌 API Reference
 
-### 6.1 디렉터리 개요
+### WebSocket — `/ws/pipeline`
 
-```text
-navigator/
-├─ electron/
-│  ├─ main.js                 # Electron 메인 프로세스, 백엔드 사이드카 관리
-│  └─ preload.js              # 렌더러 IPC 브리지
-├─ src/
-│  ├─ App.jsx
-│  ├─ index.css
-│  ├─ components/
-│  │  ├─ Workspace, ChatPanel, SAArtifactGraph, …
-│  │  ├─ ResultViewer.jsx     # 결과 셸(탭 라우팅)
-│  │  ├─ resultViewer/        # 탭별 UI (Overview, RTM, Context, Topology, SA 전용 탭 등)
-│  │  ├─ graphLayout.js       # 그래프 레이아웃
-│  │  └─ graphUtils.js        # 그래프 유틸
-│  └─ store/
-│     ├─ useAppStore.js       # 통합 스토어(파이프라인·UI·세션 등)
-│     ├─ storeHelpers.js
-│     ├─ debounce.js
-│     └─ slices/
-│        ├─ wsSlice.js        # WebSocket 관련 액션/상태
-│        └─ configSlice.js    # 설정 관련
-├─ backend/
-│  ├─ main.py                 # FastAPI 엔트리
-│  ├─ version.py              # 기본 모델 등 공통 상수
-│  ├─ transport/              # WebSocket / REST 핸들러
-│  ├─ orchestration/
-│  │  ├─ pipeline_runner.py   # 파이프라인 선택·실행 진입
-│  │  └─ executor.py          # REST·WS 공통 실행·결과 shaping (PipelineExecutor)
-│  ├─ pipeline/
-│  │  ├─ core/                # 공통 상태(state), 비용 관리(cost_manager), 모델(gemini, embedding), 유틸리티
-│  │  ├─ domain/              # 도메인 주도 설계(DDD) 기반 로직 분리
-│  │  │  ├─ pm/               # 기획/요구사항 분석 (benchmark, nodes, schemas, test)
-│  │  │  ├─ sa/               # 소프트웨어 아키텍처 분석 (nodes, schemas)
-│  │  │  ├─ rag/              # 코드 스캔 및 시스템 컨텍스트
-│  │  │  └─ chat/             # 아이디어 발산 및 수정 대화
-│  │  └─ orchestration/       # LangGraph 파이프라인 조립 및 제어
-│  │     ├─ graph.py          # PM, SA, Scan 서브 그래프 조립 및 라우팅 (조건부 루프)
-│  │     └─ facade.py         # 통합 실행 인터페이스
-│  ├─ result_shaping/
-│  │  ├─ result_shaper.py
-│  │  ├─ sa_artifact_compiler.py
-│  │  └─ container_config.py  # 컨테이너 다이어그램 그룹·레이어 매핑(프로젝트 커스터마이즈)
-│  ├─ observability/
-│  ├─ connectors/
-│  ├─ Data/                   # 분석 결과 JSON, PROJECT_STATE
-│  ├─ test/
-│  ├─ requirements.txt
-│  └─ .env.example
-├─ index.html
-├─ package.json
-├─ run_v2.bat
-└─ vite.config.js
+```json
+{
+  "type": "analyze",
+  "payload": {
+    "action_type": "CREATE",
+    "idea": "Your product idea here",
+    "api_key": "GEMINI_API_KEY",
+    "auth_token": "JWT_TOKEN"
+  }
+}
 ```
 
-### 6.2 백엔드 개발 시 참고
+### REST Endpoints
 
-- **파이프라인 그래프**: `pipeline/orchestration/graph.py`에서 `pm_pipeline`, `sa_pipeline` 등의 서브 그래프를 조립합니다. `_route_stack_planning` 같은 조건부 라우팅을 통해 에이전트 루프와 조기 종료를 제어합니다.
-- **비용 모니터링**: 새로운 노드를 파이프라인에 추가할 때는 `_wrap_node_with_usage` 데코레이터를 적용하여 LLM 호출 시 발생하는 토큰 비용이 자동으로 `accumulated_cost`에 누적되도록 해야 합니다.
-- **새 노드 추가**: `pipeline/domain/` 내의 적절한 하위 도메인 폴더(`pm`, `sa` 등)에 작성하며, `(state: PipelineState) -> dict` 혹은 `(state: PipelineState) -> PipelineState` 형태의 시그니처를 유지합니다.
-- **LLM 구조화 스키마**: 각 도메인의 `schemas.py` (`domain/pm/schemas.py` 등)에서 Pydantic 모델로 각각 정의하여 사용합니다.
-- **API 키**: 단일 진입점에서 해석되도록 유지(`transport`, `pipeline_runner` 등과 정합).
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| `GET` | `/health` | Health check | — |
+| `POST` | `/auth/register` | Create account | — |
+| `POST` | `/auth/login` | Email / password login | — |
+| `GET` | `/auth/github/oauth-url` | GitHub OAuth Web Flow | — |
+| `POST` | `/auth/github/device-start` | GitHub Device Flow start | — |
+| `POST` | `/auth/github/device-poll` | GitHub Device Flow poll | — |
+| `GET` | `/auth/me` | Current user profile | ✓ |
+| `POST` | `/api/analyze` | Synchronous pipeline run | ✓ |
+| `POST` | `/api/idea-chat` | Multi-turn idea chat | ✓ |
+| `POST` | `/api/agile/verify` | Design consistency check (V-001~V-009) | ✓ |
+| `POST` | `/api/agile/impact` | Change impact analysis | ✓ |
+| `POST` | `/api/agile/generate-tasks` | Auto-generate tasks from SA artifacts | ✓ |
+| `POST` | `/api/agile/distribute-tasks` | Distribute tasks to team members | ✓ PM |
+| `GET/PATCH` | `/api/change-requests` | Design change request management | ✓ |
+| `POST` | `/api/github/publish` | Publish design to GitHub Issues | ✓ |
+| `POST` | `/api/doc-sync` | Sync report to GitHub Wiki | ✓ |
+| `GET/POST` | `/api/tasks` | Task CRUD | ✓ |
+| `GET/POST` | `/api/snapshots` | Publish / restore analysis snapshots | ✓ |
+| `GET/POST/DELETE` | `/api/memos` | Session memo management | ✓ |
+| `GET` | `/metrics` | Prometheus metrics | — |
 
-### 6.3 프론트엔드 개발 시 참고
+---
 
-- **상태**: 도메인별 로직은 `store/slices/`로 나누고 `useAppStore.js`에서 조합하는 패턴을 권장.
-- **결과 UI**: 새 탭은 `components/resultViewer/`에 컴포넌트 추가 후 `ResultViewer.jsx`에서 연결.
+## 🗄️ Database Schema
 
-## 7. 파이프라인 모드
+| Database | Contents |
+|----------|----------|
+| `local.db` | teams · users · analysis_sessions · analysis_results · memo_items · design_change_requests |
+| `shared.db` | published_snapshots (cross-team, used by `spec_loader` for version matching) |
+| `tasks.db` | tasks (Agile board: type · status · assignee · payload) |
 
-분석 요청의 `action_type`(및 정규화 결과)은 아래 셋 중 하나입니다. (`pipeline/action_type.py` 참고.)
+---
 
-| Mode | 설명 |
-|---|---|
-| `CREATE` | 아이디어 기반 신규 요구사항 정형화 + SA 산출물 생성 |
-| `UPDATE` | 기존 코드/요구 반영 변경 분석 |
-| `REVERSE_ENGINEER` | 코드베이스 역분석 중심 SA 산출물 생성 |
+## 🏗️ Project Structure
 
-SA 등 하위 단계에서는 `Needs_Clarification` 같은 **판정/상태**가 별도로 기록될 수 있으며, 이는 위 세 모드와 동일한 “최상위 모드”가 아닙니다.
+```
+navigator/
+├── electron/
+│   ├── main.js               # Electron main process, FastAPI sidecar launcher
+│   └── preload.js            # IPC bridge
+├── src/
+│   ├── components/
+│   │   ├── ResultViewer.jsx
+│   │   ├── resultViewer/
+│   │   │   ├── RTMTab.jsx · SAComponentsTab.jsx · SAApiTab.jsx
+│   │   │   ├── SADatabaseTab.jsx · SATestStrategyTab.jsx
+│   │   │   ├── ProjectStructureTab.jsx
+│   │   │   ├── AgileVerifierTab.jsx   # V-001~V-009 results
+│   │   │   ├── AgileImpactTab.jsx     # change impact analysis
+│   │   │   └── TaskApprovalPanel.jsx  # PM review UI (Agile + QA)
+│   │   └── github/GitHubDashboard.jsx
+│   └── store/slices/
+│       ├── authSlice.js · pipelineSlice.js · wsSlice.js
+│       ├── sessionSlice.js · githubSlice.js · publishSlice.js
+│       └── uiSlice.js · fileSlice.js · notificationSlice.js
+├── backend/
+│   ├── auth/                 # JWT + GitHub OAuth + RBAC
+│   ├── transport/            # rest_handler.py · ws_handler.py
+│   ├── orchestration/        # pipeline_runner.py · graph.py · aux_graphs.py
+│   ├── pipeline/domain/
+│   │   ├── pm/nodes/         # guardian · requirement_analyzer · stack_planner
+│   │   ├── sa/nodes/         # sa_unified_modeler · sa_test_analysis · sa_project_structure
+│   │   ├── agile/nodes/      # verifier · impact · task_generator · task_distributor · doc_sync
+│   │   └── chat/             # idea_chat
+│   ├── result_shaping/       # result_shaper.py · sa_artifact_compiler.py
+│   ├── connectors/           # github_connector.py · folder_connector.py · repo_cache.py
+│   ├── storage/              # publish_service.py
+│   └── observability/        # logger.py · metrics.py
+├── run_v2.bat
+└── package.json
+```
 
-## 8. 결과 산출물
+---
 
-주요 출력 키(요약):
+## 🧩 Extending the Pipeline
 
-- `requirements_rtm`
-- `context_spec`
-- `sa_phase1..sa_phase8`
-- `sa_reverse_context`
-- `sa_artifacts`
-	- `container_diagram_spec`
-	- `flowchart_spec`
-	- `uml_component_spec`
-	- `interface_definition_doc`
-	- `decision_table`
-- `pm_overview`, `sa_overview`, `project_overview`
+### Adding a New Node
 
-참고: PM Topology 탭은 제거되었고, Topology 시각화는 SA 경로(`sa_topology`, `sa_artifacts`) 중심으로 동작합니다.
+```python
+# backend/pipeline/domain/<domain>/nodes/your_node.py
+from pipeline.core.state import PipelineState
 
-## 9. 테스트
+async def your_node(state: PipelineState) -> dict:
+    data = state.get("some_key", [])
+    result = await your_llm_call(data)
+    return {"your_output_key": result}
+```
 
-### 9.1 권장 (pytest 사용 시)
+Wrap with cost tracking in `graph.py`:
+
+```python
+from orchestration.pipeline_runner import _wrap_node_with_usage
+graph.add_node("your_node", _wrap_node_with_usage("your_node", your_node))
+```
+
+Protected endpoints must use the appropriate dependency:
+
+```python
+# Any authenticated user
+async def endpoint(user = Depends(get_current_user)): ...
+
+# PM role only
+async def endpoint(user = Depends(require_pm)): ...
+```
+
+---
+
+## ⚙️ Configuration
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GEMINI_API_KEY` | ✅ | Google Gemini API key |
+| `ENV` | — | `dev` / `prod` (default: `dev`) |
+| `GITHUB_CLIENT_ID` | — | GitHub OAuth App client ID |
+| `GITHUB_CLIENT_SECRET` | — | GitHub OAuth App client secret |
+
+| npm Script | Description |
+|------------|-------------|
+| `npm run dev` | Full stack (Vite + Electron) |
+| `npm run backend` | Backend only (port 8765) |
+| `npm run build:electron` | Package Electron app |
+
+---
+
+## 🧪 Testing
 
 ```bash
 cd backend
 python -m pytest -q test/
 ```
 
-### 9.2 pytest 미설치 환경
+Smoke test checklist after major changes:
 
-개별 파일을 직접 실행할 수 있습니다.
+- [ ] `CREATE` mode — idea input → full artifact generation
+- [ ] `UPDATE` mode — load previous result → add feature → verify design preserved
+- [ ] `REVERSE_ENGINEER` mode — local folder → reverse analysis
+- [ ] WebSocket streaming — live progress visible in UI
+
+---
+
+## 🔒 Security
+
+- Never commit `.env` — only `.env.example` is version-controlled
+- CORS restricted to `localhost` / `127.0.0.1` only
+- RBAC enforced at dependency layer (`require_pm`, `require_engineer`)
 
 ```bash
-cd backend
-python test/test_sa_artifact_compiler.py
+# Scan for leaked secrets before pushing
+git diff --cached | grep -E "(sk-|ghp_|AIza|PRIVATE KEY)"
 ```
 
-## 10. 트러블슈팅
+---
 
-### 10.1 시스템 다이어그램 컴포넌트 수가 0으로 보이는 경우
+## 🛠️ Troubleshooting
 
-원인 후보:
+<details>
+<summary><strong>WebSocket connection fails on startup</strong></summary>
 
-- `sa_phase1.file_inventory`가 비었거나
-- `sa_phase5.mapped_requirements[].file_path`가 비어 있음
+Check Electron console for `[Python] Initializing PM Agent Backend subsystems...`  
+Restart via `run_v2.bat` to clean up stale processes.
 
-현재는 layer 기반 fallback이 있어 최소 컴포넌트가 복원됩니다. 과거 JSON은 소급 적용되지 않으므로 분석을 다시 실행해야 반영됩니다.
+</details>
 
-### 10.2 포트 5173 대기 실패
+<details>
+<summary><strong>Port 5173 wait timeout</strong></summary>
 
-- `run_v2.bat` 실행 후 `vite.log` 마지막 40줄 확인
-- 로컬 방화벽/포트 충돌 점검
+Check `vite.log` (last 40 lines) for errors. Verify no other process is binding port 5173.
 
-### 10.3 WebSocket 연결 실패
+</details>
 
-- 백엔드 프로세스 기동 여부 확인
-- Electron 콘솔/백엔드 로그에서 `/ws/pipeline` 에러 확인
+<details>
+<summary><strong>Architecture diagram shows 0 components</strong></summary>
 
-## 11. 보안 가이드
+`sa_phase1.file_inventory` is empty or `mapped_requirements[].file_path` is missing. Re-run the analysis — past JSON results are not retroactively updated.
 
-- `.env`는 절대 커밋하지 마세요.
-- `.env.example`만 버전 관리합니다.
-- API 키/토큰/개인정보를 `backend/Data/*.json`에 남기지 않도록 주의하세요.
-- PR/푸시 전 아래 패턴을 점검하세요.
-	- `sk-...`, `ghp_...`, `AIza...`, `BEGIN PRIVATE KEY`
+</details>
 
-## 12. 환경변수
+<details>
+<summary><strong>GitHub OAuth Device Flow stuck</strong></summary>
 
-| 변수 | 필수 | 기본값 | 설명 |
-|---|---|---|---|
-| `GEMINI_API_KEY` | 예 | - | Google Gemini API 키 |
-| `ENV` | 아니오 | `dev` | 실행 환경 (`dev` / `prod`) |
+1. Call `POST /auth/github/device-start` → open `verification_uri` in browser → enter `user_code`
+2. Poll `POST /auth/github/device-poll` every 5 seconds until `status: "authorized"`
+3. Verify `GITHUB_CLIENT_ID` is set in `.env`
 
-## 13. 라이선스/운영 메모
+</details>
 
-- 내부 운영/개발용 문서 기준입니다.
-- 대규모 변경 후에는 `backend/test` 회귀, `npm run build`, 주요 모드(CREATE/UPDATE/REVERSE) 수동 스모크를 권장합니다.
+---
+
+## 🗺️ Roadmap
+
+- [ ] QA Pipeline — GitHub Webhook integration (design → implementation conformance)
+- [ ] QA Pipeline — automated test code generation from `code_inventory` + `file_role_map`
+- [ ] Multi-model support: OpenAI / Anthropic Claude
+- [ ] MCP (Model Context Protocol) server mode
+- [ ] Export to Confluence / Notion
+- [ ] Real-time collaborative editing (multi-user sessions)
+- [ ] VS Code extension
+- [ ] Docker Compose one-command setup
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feat/your-feature`
+3. New pipeline nodes: place under `pipeline/domain/<domain>/nodes/`, use `_wrap_node_with_usage`
+4. Write tests in `backend/test/`
+5. Smoke test all three modes (CREATE / UPDATE / REVERSE_ENGINEER)
+6. Open a PR with a clear description
+
+### Code Style
+
+- **Backend**: PEP 8, full type hints, Pydantic v2 for all schemas
+- **Frontend**: functional components, Zustand for shared state, Tailwind for styling
+- **Auth**: protected endpoints must use `Depends(get_current_user)` or role-specific deps
+
+---
+
+## 📄 License
+
+MIT License — see [LICENSE](./LICENSE) for details.
+
+---
+
+<div align="center">
+
+Built with [LangGraph](https://langchain-ai.github.io/langgraph) · [FastAPI](https://fastapi.tiangolo.com) · [Electron](https://electronjs.org) · [React](https://react.dev) · [Google Gemini](https://ai.google.dev)
+
+**If NAVIGATOR saves you hours of architecture and QA work, consider giving it a ⭐**
+
+</div>

@@ -7,32 +7,33 @@ _ws_run_* 시리즈 + 스트리밍 로직을 단일 모듈에서 관리.
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 from datetime import datetime
 
 from fastapi import WebSocket
 
 from pipeline.orchestration.facade import (
-    get_analysis_pipeline,
     get_idea_pipeline,
     get_pm_pipeline,
     get_sa_pipeline,
-    get_rag_ingest_pipeline,
-    get_pipeline_routing_map,
     get_pm_routing_map,
     get_sa_routing_map,
-    get_rag_routing_map,
     get_idea_chat_routing_map,
 )
-from pipeline.core.action_type import ANALYSIS_ACTION_TYPES, normalize_action_type
-from pipeline.core.session import compute_project_session_id
-from pipeline.domain.rag.ast_scanner import extract_functions, summarize_for_llm
-from pipeline.domain.rag.nodes.project_db import count_session_chunks
+from pipeline.core.action_type import normalize_action_type
+from pipeline.core.ast_scanner import extract_functions, summarize_for_llm
 from result_shaping.result_shaper import shape_result
 from pipeline.core.utils import to_serializable
 from observability.logger import get_logger
 from observability.metrics import track_node
 from transport.connection_manager import manager
 from version import DEFAULT_MODEL
+
+# 인증 및 레포 캐시 추가
+from auth.database import SessionLocal
+from auth.service import decode_token, get_user_by_id
+from connectors.repo_cache import is_github_repo_format, get_local_repo_path
 
 
 # ─── 입력 검증 ────────────────────────────────────────────
@@ -50,25 +51,132 @@ def validate_analysis_inputs(action_type: str, idea: str, source_dir: str) -> st
     return None
 
 
-def build_reverse_context(source_dir: str) -> str:
-    """source_dir AST 스캔 결과를 REVERSE 분석용 project_context로 변환."""
+def _parse_package_json(content: str, _: str) -> str:
+    try:
+        pkg = json.loads(content)
+        deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+        top = list(deps.keys())[:30]
+        return f"[package.json] name={pkg.get('name', '?')}, deps={top}"
+    except Exception:
+        return ""
+
+
+def _parse_requirements_txt(content: str, _: str) -> str:
+    pkgs = [
+        ln.split("==")[0].split(">=")[0].split(">")[0].strip()
+        for ln in content.splitlines()
+        if ln.strip() and not ln.startswith("#")
+    ]
+    return f"[requirements.txt] {pkgs[:30]}" if pkgs else ""
+
+
+def _parse_pyproject_toml(content: str, _: str) -> str:
+    return f"[pyproject.toml]\n{content[:2000]}"
+
+
+def _parse_plain_text(content: str, filename: str) -> str:
+    return f"[{filename}]\n{content[:1000]}"
+
+
+def _read_dependency_files(source_path: str) -> str:
+    """package.json, requirements.txt 등 의존성 파일을 읽어 요약 반환."""
+    candidates = [
+        ("package.json",      _parse_package_json),
+        ("requirements.txt",  _parse_requirements_txt),
+        ("pyproject.toml",    _parse_pyproject_toml),
+        ("Pipfile",           _parse_plain_text),
+        ("go.mod",            _parse_plain_text),
+        ("pom.xml",           _parse_plain_text),
+        ("build.gradle",      _parse_plain_text),
+    ]
+    lines = []
+    for filename, parser in candidates:
+        full_path = os.path.join(source_path, filename)
+        if os.path.isfile(full_path):
+            try:
+                with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read(4000)
+                parsed = parser(content, filename)
+                if parsed:
+                    lines.append(parsed)
+            except Exception:
+                pass
+    return "\n".join(lines)
+
+
+def build_reverse_context(source_dir: str) -> tuple[str, dict]:
+    """source_dir AST 스캔 + 의존성 파일 → (project_context 문자열, code_inventory dict).
+
+    code_inventory: {file_path: [{name, summary}]} — SA 노드에서 직접 소비.
+    스캔을 한 번만 수행해서 context와 inventory를 동시에 생성한다.
+    """
     source_path = (source_dir or "").strip()
     if not source_path:
-        return ""
+        return "", {}
+
+    dep_summary = _read_dependency_files(source_path)
+
     functions = extract_functions(source_path, max_functions=250)
-    if not functions:
-        return ""
     unique_files = len({fn.get("file", "") for fn in functions if fn.get("file")})
-    summary = summarize_for_llm(functions, max_chars=7000)
-    return (
+    summary = summarize_for_llm(functions, max_chars=6000) if functions else "(함수 없음)"
+
+    code_inventory: dict = {}
+    for fn in functions:
+        fp = fn.get("file", "")
+        if fp:
+            code_inventory.setdefault(fp, []).append(
+                {"name": fn.get("name", ""), "summary": fn.get("summary", "")}
+            )
+
+    parts = [
         "아래는 로컬 프로젝트 정적 스캔 결과입니다. "
-        "이 정보를 기준으로 프로젝트 구조, 핵심 모듈, 유지보수 리스크를 분석하세요.\n\n"
-        f"- source_dir: {source_path}\n"
-        f"- scanned_files: {unique_files}\n"
-        f"- scanned_functions: {len(functions)}\n\n"
-        "[함수 요약]\n"
-        f"{summary}"
-    )
+        "이 정보를 기준으로 프로젝트 구조, 핵심 모듈, 기술 스택, 유지보수 리스크를 분석하세요.\n",
+        f"- source_dir: {source_path}",
+        f"- scanned_files: {unique_files}",
+        f"- scanned_functions: {len(functions)}",
+    ]
+    if dep_summary:
+        parts.append("\n[의존성 파일 요약]")
+        parts.append(dep_summary)
+    parts.append("\n[함수 요약]")
+    parts.append(summary)
+
+    return "\n".join(parts), code_inventory
+
+
+def _inject_previous_artifacts(state: dict, project_context: str) -> None:
+    """UPDATE 모드: project_context JSON에서 이전 artifact를 파싱하여 state에 주입."""
+    import json as _json
+    log = get_logger()
+    try:
+        start = project_context.find("{")
+        if start < 0:
+            log.warning("_inject_previous_artifacts: project_context에서 JSON을 찾지 못했습니다.")
+            return
+        prev = _json.loads(project_context[start:])
+
+        # stack_planner: global_stacks(gs) 원본 우선 → tech_stacks(feature별 매핑) 폴백
+        spo = prev.get("stack_planner_output") or {}
+        gs = spo.get("gs") or spo.get("global_stacks") or []
+        if not gs:
+            gs = prev.get("tech_stacks") or []
+        if gs:
+            state["previous_global_stacks"] = gs
+
+        # sa_test_analysis: 이전 테스트 전략
+        ta = prev.get("sa_test_analysis_output") or (
+            (prev.get("sa_arch_bundle") or {}).get("data", {}).get("test_strategy")
+        )
+        if ta:
+            state["previous_test_cases"] = ta
+
+        # sa_project_structure: 이전 디렉토리 구조
+        ps = prev.get("sa_project_structure") or prev.get("sa_project_structure_output")
+        if ps:
+            state["previous_project_structure"] = ps
+
+    except Exception as e:
+        log.warning(f"_inject_previous_artifacts 파싱 실패 (UPDATE 계속 진행): {e}")
 
 
 def analysis_pipeline_type(action_type: str) -> str:
@@ -109,6 +217,9 @@ async def _run_pipeline_base(
             if result_mutator is not None:
                 result_mutator(shaped)
 
+            # 최종 결과를 로컬 DB에 영속화
+            _persist_analysis_result(result.get("run_id", ""), shaped)
+
             await manager.send_json(ws, {"type": "result", "node": result_node, "data": shaped})
         
         return result
@@ -128,14 +239,64 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
     context = payload.get("context", "")
     action_type = normalize_action_type(payload.get("action_type", "CREATE"))
     source_dir = payload.get("source_dir", "")
+    auth_token = payload.get("auth_token", "")
+    # UPDATE 모드에서 이전 RTM/features를 그대로 받아 위치·ID 보존에 사용
+    previous_features = payload.get("previous_features") or []
+    
+    get_logger().info("run_analysis_payload", action_type=action_type, source_dir=source_dir, idea=idea[:50])
+
+    # ── 사용자 인증 및 GitHub 토큰 추출 ──
+    github_oauth_token = None
+    if auth_token:
+        db = SessionLocal()
+        try:
+            decoded = decode_token(auth_token)
+            if decoded:
+                user = get_user_by_id(db, decoded.get("sub", ""))
+                if user:
+                    github_oauth_token = user.github_oauth_token
+                    if user.role != "pm":
+                        await manager.send_json(ws, {
+                            "type": "error",
+                            "data": {"message": "LLM 분석은 PM 권한이 필요합니다."}
+                        })
+                        return
+        except Exception:
+            get_logger().warning("Failed to resolve user from auth_token in pipeline")
+        finally:
+            db.close()
+
+    # ── GitHub 레포지토리인 경우 캐싱 처리 ──
+    if is_github_repo_format(source_dir):
+        try:
+            await manager.send_json(ws, {
+                "type": "thinking",
+                "node": "repo_loader",
+                "data": {"text": f"GitHub 저장소({source_dir})를 준비 중입니다..."}
+            })
+            owner, repo = source_dir.split("/")
+            # 동기 함수이므로 asyncio.to_thread 사용 (git clone/pull은 블로킹 작업)
+            source_dir = await asyncio.to_thread(
+                get_local_repo_path, owner, repo, github_oauth_token
+            )
+            get_logger().info("github_repo_cached", path=source_dir)
+        except Exception as e:
+            await manager.send_json(ws, {
+                "type": "error",
+                "data": {"message": f"저장소 준비 실패: {str(e)}"}
+            })
+            return
 
     validation_error = validate_analysis_inputs(action_type, idea, source_dir)
     if validation_error:
         await manager.send_json(ws, {"type": "error", "data": {"message": validation_error}})
         return
 
-    if action_type == "REVERSE_ENGINEER" and not (context or "").strip():
-        context = build_reverse_context(source_dir)
+    # REVERSE_ENGINEER: AST 스캔으로 project_context + code_inventory 동시 빌드 (단일 스캔)
+    # UPDATE: 코드 스캔 불필요 — 이전 설계 artifact(context)가 진실 소스
+    code_inventory: dict = {}
+    if action_type == "REVERSE_ENGINEER" and source_dir:
+        context, code_inventory = build_reverse_context(source_dir)
         if not context:
             await manager.send_json(ws, {
                 "type": "error",
@@ -147,28 +308,6 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
     log = get_logger(run_id)
     log.info("analysis_start", action_type=action_type)
 
-    # ── RAG 인덱스 유무 검사 ──
-    # source_dir 해시를 영속 session_id로 사용해 ChromaDB 청크 적재량을 확인.
-    session_id = compute_project_session_id(source_dir)
-    chunk_count = count_session_chunks(session_id) if session_id else 0
-    has_index = chunk_count > 0
-
-    if action_type in ("UPDATE", "REVERSE_ENGINEER") and source_dir and not has_index:
-        # 이번 분석에서 RAG ingest가 곧 실행될 예정이므로 source_dir만 있으면 통과.
-        # 단, source_dir이 비어 있으면 위 조건이 False가 되어 검사 자체가 면제됨.
-        # source_dir이 있는데 인덱스가 없다는 것은 첫 실행이거나 직전 인덱싱이 실패한 경우.
-        log.info("rag_index_empty_will_ingest", session_id=session_id)
-
-    rag_warnings: list[dict] = []
-    if action_type == "CREATE" and has_index:
-        rag_warnings.append({
-            "code": "CREATE_WITH_EXISTING_INDEX",
-            "message": (
-                f"기존 RAG 인덱스(청크 {chunk_count}개)가 발견되었습니다. "
-                f"CREATE 모드로 신규 분석을 진행합니다 — 기존 인덱스는 건드리지 않습니다."
-            ),
-        })
-
     initial_state = {
         "api_key": api_key,
         "model": model,
@@ -177,60 +316,21 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
         "source_dir": source_dir,
         "action_type": action_type,
         "run_id": run_id,
-        "session_id": session_id,
-        "rag_index_status": {
-            "has_index": has_index,
-            "chunk_count": chunk_count,
-            "session_id": session_id,
-        },
-        "rag_warnings": rag_warnings,
+        "previous_features": previous_features,
     }
 
-    # 1. RAG Ingestion (Stage 1) - 코드 청킹 및 벡터 색인
-    #    CREATE 모드는 분석할 기존 코드베이스가 없으므로 RAG 인제스트를 통째로 스킵.
-    if action_type == "CREATE":
-        scan_result = dict(initial_state)
-    else:
-        scan_result = await _run_pipeline_base(
-            ws,
-            pipeline=get_rag_ingest_pipeline(),
-            routing=get_rag_routing_map(),
-            state_payload=initial_state,
-            pipeline_type="rag_ingest",
-            save=False,
-            log=log,
-        )
+    if action_type == "REVERSE_ENGINEER" and code_inventory:
+        initial_state["code_inventory"] = code_inventory
 
-        if scan_result.get("error"):
-            return
+    if action_type == "UPDATE" and (context or "").strip():
+        _inject_previous_artifacts(initial_state, context)
 
-        # RAG ingest 후 인덱스 상태 재평가. UPDATE/REVERSE인데 여전히 비어 있으면 분석 중단.
-        post_count = count_session_chunks(session_id) if session_id else 0
-        post_has_index = post_count > 0
-        scan_result["rag_index_status"] = {
-            "has_index": post_has_index,
-            "chunk_count": post_count,
-            "session_id": session_id,
-        }
-        if action_type in ("UPDATE", "REVERSE_ENGINEER") and not post_has_index:
-            await manager.send_json(ws, {
-                "type": "error",
-                "data": {
-                    "message": (
-                        f"{action_type} 모드인데 ChromaDB에 적재된 코드 청크가 없습니다. "
-                        f"source_dir({source_dir or '미지정'})에서 분석 가능한 코드를 찾지 못했거나 "
-                        f"인덱싱이 실패했습니다. 폴더 경로를 확인한 뒤 다시 시도하세요."
-                    )
-                },
-            })
-            return
-
-    # 2. PM Pipeline (Stage 2) - 요구사항 원자화 및 기획
+    # 1. PM Pipeline (Stage 1) - 요구사항 원자화 및 기획
     pm_result = await _run_pipeline_base(
         ws,
         pipeline=get_pm_pipeline(),
         routing=get_pm_routing_map(),
-        state_payload=scan_result,
+        state_payload=initial_state,
         pipeline_type="pm_only",
         save=False,
         log=log,
@@ -239,7 +339,7 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
     if pm_result.get("error"):
         return
 
-    # 3. SA Pipeline (Stage 3) - 아키텍처 설계
+    # 2. SA Pipeline (Stage 2) - 아키텍처 설계
     sa_result = await _run_pipeline_base(
         ws,
         pipeline=get_sa_pipeline(),
@@ -255,6 +355,10 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
 async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
     api_key = payload.get("api_key", "")
     model = payload.get("model", DEFAULT_MODEL)
+
+    # 채팅에서 만들어진 메모를 묶어두는 session_id.
+    # 프론트가 currentSessionId를 보내면 그걸 쓰고, 없으면 chat_global 폴백.
+    chat_session_id = (payload.get("session_id") or "chat_global").strip() or "chat_global"
 
     result = await _run_pipeline_base(
         ws,
@@ -275,6 +379,46 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
     if result.get("error"):
         return
 
+    # 진단: aggregated state에 어떤 키들이 도달했는지 확인
+    # (이전 회귀: notes_to_add가 PipelineState 스키마 누락으로 LangGraph가 drop)
+    get_logger().info(
+        f"[idea_chat] aggregated keys: {sorted(result.keys())}, "
+        f"notes_to_add type={type(result.get('notes_to_add')).__name__}"
+    )
+
+    # ── 채팅 의도로 만들어진 메모를 SQLite(local.db)에 직접 영속화 ──
+    raw_notes = result.get("notes_to_add") or []
+    persisted_notes: list = []
+    if raw_notes:
+        try:
+            from auth.models import MemoItem
+            db = SessionLocal()
+            try:
+                for note in raw_notes:
+                    if not isinstance(note, dict):
+                        continue
+                    text = str(note.get("text") or "").strip()
+                    if not text:
+                        continue
+                    item = MemoItem(
+                        session_id=chat_session_id,
+                        text=text,
+                        selected_text="",
+                        section=str(note.get("section") or "Idea Chat").strip() or "Idea Chat",
+                        detail=str(note.get("detail") or "").strip(),
+                    )
+                    db.add(item)
+                    persisted_notes.append({"id": item.id, "text": text})
+                db.commit()
+            finally:
+                db.close()
+            get_logger().info(
+                f"[idea_chat] 채팅 메모 {len(persisted_notes)}/{len(raw_notes)}건 영속화 "
+                f"(session_id={chat_session_id})"
+            )
+        except Exception as memo_err:
+            get_logger().warning(f"[idea_chat] memo 영속화 실패: {memo_err}")
+
     await manager.send_json(ws, {
         "type": "result",
         "node": "idea_chat",
@@ -284,6 +428,7 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
             "idea_ready": result.get("idea_ready", False),
             "idea_summary": result.get("idea_summary", ""),
             "suggested_mode": result.get("suggested_mode", "create"),
+            "notes_to_add": persisted_notes,  # 백엔드가 부여한 진짜 ID 포함
             "pipeline_type": "idea_chat",
         },
     })
@@ -318,7 +463,7 @@ async def stream_pipeline_updates(
         "data": {"status": "running", "message": start_message},
     })
 
-    async for update in pipeline.astream(payload, stream_mode="updates"):
+    async for update in pipeline.astream(payload, config={"recursion_limit": 150}, stream_mode="updates"):
         if not isinstance(update, dict):
             continue
 
@@ -378,6 +523,32 @@ async def _emit_thinking(
             "node": node_name,
             "data": {"text": text},
         })
+
+
+def _persist_analysis_result(run_id: str, shaped: dict) -> None:
+    """분석 결과를 AnalysisResult 테이블에 저장한다."""
+    if not run_id:
+        return
+    try:
+        import json as _json
+        from auth.models import AnalysisSession, AnalysisResult
+        db = SessionLocal()
+        try:
+            # AnalysisSession 레코드가 없으면 먼저 생성
+            if not db.query(AnalysisSession).filter(AnalysisSession.run_id == run_id).first():
+                db.add(AnalysisSession(run_id=run_id))
+
+            # 기존 결과가 있으면 덮어쓰기
+            existing = db.query(AnalysisResult).filter(AnalysisResult.run_id == run_id).first()
+            if existing:
+                existing.shaped_result = _json.dumps(shaped, ensure_ascii=False)
+            else:
+                db.add(AnalysisResult(run_id=run_id, shaped_result=_json.dumps(shaped, ensure_ascii=False)))
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        get_logger().warning(f"[persist_result] 결과 저장 실패 run_id={run_id}: {e}")
 
 
 def _merge_state(target: dict, source: dict) -> None:

@@ -14,7 +14,12 @@ export const createPipelineSlice = (set, get) => ({
   thinkingLog: [],
   pipelineType: "analysis",
   resultData: null,
+  agileVerifyResult: null,
+  agileImpactResult: null,
   ...EMPTY_RESULT_FIELDS,
+
+  setAgileVerifyResult: (result) => set({ agileVerifyResult: result }),
+  setAgileImpactResult: (result) => set({ agileImpactResult: result }),
 
   // 디버그 시스템
   debugLogs: [],
@@ -24,32 +29,89 @@ export const createPipelineSlice = (set, get) => ({
 
   _handleWsMessage: (msg) => {
     const { type, node, data } = msg;
+    const { analysisOwnerTeamId, currentUser } = get();
+    // 분석을 시작한 팀과 현재 활성 팀이 다르면 → 백그라운드 팀에 라우팅
+    const isBackground =
+      analysisOwnerTeamId && analysisOwnerTeamId !== currentUser?.team_id;
+
     switch (type) {
       case "status":
-        set((state) => ({ pipelineNodes: { ...state.pipelineNodes, [node]: data.status } }));
+        if (isBackground) {
+          get()._updateParkedWorkspace(analysisOwnerTeamId, {
+            pipelineNodes: {
+              ...(get().teamWorkspaces[analysisOwnerTeamId]?.pipelineNodes || {}),
+              [node]: data.status,
+            },
+          });
+        } else {
+          set((state) => ({ pipelineNodes: { ...state.pipelineNodes, [node]: data.status } }));
+        }
         break;
       case "thinking":
-        set((state) => ({
-          thinkingLog: [...state.thinkingLog, { node, text: data.text, timestamp: Date.now() }]
-        }));
+        if (isBackground) {
+          const prev = get().teamWorkspaces[analysisOwnerTeamId]?.thinkingLog || [];
+          get()._updateParkedWorkspace(analysisOwnerTeamId, {
+            thinkingLog: [...prev, { node, text: data.text, timestamp: Date.now() }],
+          });
+        } else {
+          set((state) => ({
+            thinkingLog: [...state.thinkingLog, { node, text: data.text, timestamp: Date.now() }]
+          }));
+        }
         break;
       case "result":
-        get()._processResult(data, node);
+        if (isBackground) {
+          // 백그라운드 팀 워크스페이스에 결과 저장
+          get()._updateParkedWorkspace(analysisOwnerTeamId, {
+            pipelineStatus: "done",
+            ...spreadResultData(data),
+          });
+          set({ analysisOwnerTeamId: null });
+          // 어느 팀 분석이 완료됐는지 알림
+          const ownerTeam = get().myTeams.find((t) => t.id === analysisOwnerTeamId);
+          const teamName = ownerTeam?.name || "다른 팀";
+          get().addNotification(
+            `"${teamName}" 분석 완료`,
+            "success",
+            { teamId: analysisOwnerTeamId, action: "switchTeam" },
+          );
+        } else {
+          get()._processResult(data, node);
+          set({ analysisOwnerTeamId: null });
+        }
         break;
       case "error":
-        set({ pipelineStatus: "error", pipelineError: data.message });
-        get().addDebugLog({
-          level: "error",
-          message: `Pipeline WS Error: ${data.message}`,
-          rawData: data
-        });
-        get().addNotification(`파이프라인 오류: ${data.message}`, "error");
+        if (isBackground) {
+          get()._updateParkedWorkspace(analysisOwnerTeamId, {
+            pipelineStatus: "error",
+            pipelineError: data.message,
+          });
+          set({ analysisOwnerTeamId: null });
+        } else {
+          set({ pipelineStatus: "error", pipelineError: data.message });
+          set({ analysisOwnerTeamId: null });
+          get().addDebugLog({
+            level: "error",
+            message: `Pipeline WS Error: ${data.message}`,
+            rawData: data
+          });
+          get().addNotification(`파이프라인 오류: ${data.message}`, "error");
+        }
         break;
       case "rag_retrieval":
       case "rag_status":
-        // RAG 관련 상태는 필요 시 추가 (현재는 생략 가능)
         break;
     }
+  },
+
+  /** parked workspace의 특정 필드만 업데이트 */
+  _updateParkedWorkspace: (teamId, patch) => {
+    set((s) => ({
+      teamWorkspaces: {
+        ...s.teamWorkspaces,
+        [teamId]: { ...(s.teamWorkspaces[teamId] || {}), ...patch },
+      },
+    }));
   },
 
   _processResult: (data, node = "complete") => {
@@ -81,6 +143,11 @@ export const createPipelineSlice = (set, get) => ({
       }
     }
 
+    // UPDATE 모드에서 components/apis/tables는 백엔드 결과를 그대로 사용.
+    // 백엔드 component_scheduler/sa_unified_modeler의 UPDATE_PROMPT가 이미
+    // 기존 항목 보존 + 신규 항목 추가를 처리하므로 프론트엔드 병합 불필요.
+    // (이전 스토어 데이터와 병합하면 stale 세션 데이터가 섞여 로컬과 공유 DB 표시가 달라지는 버그 발생)
+
     const nextResultData = {
       pipelineStatus: "done",
       pipelineType: inferPipelineTypeFromResult(data),
@@ -94,12 +161,21 @@ export const createPipelineSlice = (set, get) => ({
   },
 
   startAnalysis: (idea, context = "", apiKey = "", model = "gemini-3.1-flash-lite-preview", selectedMode = "create", initialTitle = null) => {
+    const { currentUser } = get();
+    if (!currentUser?.github_id) {
+      get().addNotification("GitHub 로그인이 필요합니다. 설정에서 연결하세요.", "error");
+      return;
+    }
+    if (currentUser.role !== "pm") {
+      get().addNotification("LLM 분석은 PM 권한이 필요합니다. PM에게 문의하세요.", "error");
+      return;
+    }
     const normalizedMode = normalizeMode(selectedMode);
     const sourceDir = get().projectFolder || "";
     get().createSession(initialTitle);
-    
-    // 분석 시작 시 기존 메모(userComments)는 유지하고, 
-    // 결과 필드는 running 상태에 맞춰 필요한 것만 초기화합니다.
+    // 분석 시작한 팀 등록 (팀 전환 시 백그라운드 라우팅에 사용)
+    set({ analysisOwnerTeamId: currentUser?.team_id || null });
+
     set({
       pipelineStatus: "running",
       pipelineError: null,
@@ -118,6 +194,76 @@ export const createPipelineSlice = (set, get) => ({
       idea, context, api_key: apiKey, model,
       action_type: MODE_TO_ACTION_TYPE[normalizedMode],
       source_dir: sourceDir,
+      auth_token: get().authToken,
+    });
+  },
+
+  startMemoDrivenUpdate: (memoIds) => {
+    const { currentUser } = get();
+    if (!currentUser?.github_id) {
+      get().addNotification("GitHub 로그인이 필요합니다. 설정에서 연결하세요.", "error");
+      return;
+    }
+    if (currentUser.role !== "pm") {
+      get().addNotification("LLM 분석은 PM 권한이 필요합니다. PM에게 문의하세요.", "error");
+      return;
+    }
+    const { userComments, apiKey, model, createSession, projectFolder } = get();
+    const memos = (userComments || []).filter((c) => memoIds.includes(c.id));
+    const memoText = memos
+      .map((m, i) => `${i + 1}. [${m.section || "일반"}] ${m.text}`)
+      .join('\n');
+
+    // 기존 미적용 메모를 아카이브(applied=true)로 마킹한 후 새 세션 시작
+    const prevMemos = get().userComments || [];
+    const archivedMemos = prevMemos.map((m) =>
+      m.applied ? m : { ...m, applied: true, appliedAt: new Date().toISOString() }
+    );
+    set({ userComments: archivedMemos });
+    createSession("지적사항 반영 업데이트");
+    set({
+      pipelineStatus: "running",
+      pipelineError: null,
+      pipelineNodes: {},
+      thinkingLog: [],
+      pipelineType: "analysis_update",
+      chatHistory: [],
+      chatInput: "",
+      agileImpactResult: null,
+      activeViewportTab: { kind: "output", id: "progress" },
+      lastOutputTab: "progress",
+    });
+    // 이전 분석 결과를 JSON으로 직렬화하여 SA 파이프라인이 기존 설계를 인식하도록 전달
+    const prevRtm = get().requirements_rtm || [];
+    const prevDesign = {
+      requirements_rtm: prevRtm,
+      components: get().components || [],
+      apis: get().apis || [],
+      tables: get().tables || [],
+      tech_stacks: get().tech_stacks || [],
+    };
+    const prevContext = `[이전 분석 결과 — 반드시 아래 설계를 기반으로 업데이트하세요]\n${JSON.stringify(prevDesign, null, 2)}`;
+
+    // requirement_analyzer가 ID·위치를 보존할 수 있도록 RTM row를 features 형태로 구조화 전달
+    const previousFeatures = prevRtm.map((r) => ({
+      id: r.feature_id || r.id || r.REQ_ID || "",
+      label: r.label || "",
+      desc: r.description || r.desc || "",
+      cat: r.category || r.cat || "",
+      pri: r.priority || r.pri || "",
+      deps: r.dependencies || r.deps || [],
+      tc: r.test_criteria || r.tc || "",
+    })).filter((f) => f.id);
+
+    get().sendWsMessage("analyze", {
+      idea: memoText,
+      context: prevContext,
+      api_key: apiKey || "",
+      model: model || "gemini-3.1-flash-lite-preview",
+      action_type: "UPDATE",
+      source_dir: projectFolder || "",
+      auth_token: get().authToken,
+      previous_features: previousFeatures,
     });
   },
 

@@ -28,5 +28,13 @@ export const sessionService = {
   /** 메모 삭제 */
   async removeMemo(port, memoId) {
     return request(port, `/api/memos/${memoId}`, { method: "DELETE" });
+  },
+
+  /** 메모 일괄 적용 표시 (UPDATE 분석 성공 후 호출) */
+  async applyMemos(port, memoIds) {
+    return request(port, "/api/memos/apply", {
+      method: "POST",
+      body: JSON.stringify({ memo_ids: memoIds || [] }),
+    });
   }
 };

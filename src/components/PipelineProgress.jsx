@@ -1,190 +1,458 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useState, useMemo } from "react";
 import useAppStore from "../store/useAppStore";
 import {
-  Loader2,
-  CheckCircle2,
-  Circle,
-  AlertCircle,
-  Brain,
-  Sparkles,
+  Loader2, CheckCircle2, AlertCircle, Brain,
+  Zap, GitBranch, Clock, Activity,
 } from "lucide-react";
 
-const SCAN_STEPS = [
-  { key: "code_chunker", label: "코드 청킹", desc: "소스 파일을 함수 단위 청크로 분할" },
-  { key: "code_embedding", label: "코드 임베딩", desc: "청크 임베딩 후 ChromaDB 적재" },
-];
-
-const PM_PIPELINE_STEPS = [
-  { key: "requirement_analyzer", label: "요구사항 분석", desc: "아이디어를 원자 단위 요구사항으로 정밀 분석" },
-  { key: "stack_planner", label: "기술 스택 전략", desc: "요구사항별 최적의 라이브러리 및 프레임워크 선정" },
-  { key: "stack_crawling", label: "지능형 지식 탐색", desc: "부족한 기술 지식을 외부 레지스트리에서 자율 검색" },
-  { key: "guardian", label: "기술 정합성 검증", desc: "선정된 스택의 호환성, 보안성 및 품질 최종 검토" },
-  { key: "pm_analysis", label: "통합 분석 및 번들링", desc: "분석 결과 통합 및 최종 PM_BUNDLE 스펙 확정" },
-];
-
-const SA_PIPELINE_STEPS = [
-  { key: "sa_merge_project",    label: "프로젝트 병합",      desc: "PM 산출물과 코드 분석 결과 통합" },
-  { key: "component_scheduler", label: "컴포넌트 설계",      desc: "시스템 컴포넌트 구조 및 역할 정의" },
-  { key: "api_data_modeler",    label: "API & 데이터 모델링", desc: "엔드포인트 및 DB 스키마 설계" },
-  { key: "sa_analysis",         label: "아키텍처 검증 (QA)",  desc: "설계 정합성 분석 및 Gap 탐지" },
-  { key: "sa_embedding",        label: "SA 결과 저장",        desc: "아키텍처 산출물 임베딩 및 영구 저장" },
-];
-
-const PIPELINE_STEPS_BY_TYPE = {
-  analysis: [...SCAN_STEPS, ...PM_PIPELINE_STEPS],
-  analysis_create: [...SCAN_STEPS, ...PM_PIPELINE_STEPS, ...SA_PIPELINE_STEPS],
-  analysis_reverse: [...SCAN_STEPS, ...SA_PIPELINE_STEPS],
-  analysis_update: [...SCAN_STEPS, ...PM_PIPELINE_STEPS, ...SA_PIPELINE_STEPS],
-  idea_chat: [
-    { key: "idea_chat", label: "아이디어 탐색", desc: "아이디어를 구체화하고 다음 분석 방향을 제안" },
-  ],
+// ── 스텝 메타 ───────────────────────────────────────────
+const STEP_META = {
+  code_chunker:          { label: "코드 청킹",     phase: "scan", color: "slate" },
+  code_embedding:        { label: "코드 임베딩",   phase: "scan", color: "slate" },
+  idea_chat:             { label: "아이디어 탐색", phase: "pm",   color: "purple" },
+  requirement_analyzer:  { label: "요구사항 분석", phase: "pm",   color: "cyan"   },
+  stack_planner:         { label: "기술 스택 전략",phase: "pm",   color: "cyan"   },
+  stack_crawling:        { label: "지식 탐색",     phase: "pm",   color: "amber"  },
+  guardian:              { label: "정합성 검증",   phase: "pm",   color: "green"  },
+  sa_merge_project:      { label: "프로젝트 병합", phase: "sa",   color: "teal"   },
+  component_scheduler:   { label: "컴포넌트 설계", phase: "sa",   color: "teal"   },
+  sa_unified_modeler:    { label: "통합 모델링",   phase: "sa",   color: "teal"   },
+  sa_test_analysis:      { label: "테스트 전략",   phase: "sa",   color: "blue",  parallel: true },
+  sa_project_structure:  { label: "프로젝트 구조", phase: "sa",   color: "violet",parallel: true },
 };
+
+const NODE_COLORS = {
+  purple: { bg: "bg-purple-500/15", text: "text-purple-400", border: "border-purple-500/30", dot: "bg-purple-400" },
+  cyan:   { bg: "bg-cyan-500/15",   text: "text-cyan-400",   border: "border-cyan-500/30",   dot: "bg-cyan-400"   },
+  amber:  { bg: "bg-amber-500/15",  text: "text-amber-400",  border: "border-amber-500/30",  dot: "bg-amber-400"  },
+  green:  { bg: "bg-emerald-500/15",text: "text-emerald-400",border: "border-emerald-500/30",dot: "bg-emerald-400"},
+  teal:   { bg: "bg-teal-500/15",   text: "text-teal-400",   border: "border-teal-500/30",   dot: "bg-teal-400"   },
+  blue:   { bg: "bg-blue-500/15",   text: "text-blue-400",   border: "border-blue-500/30",   dot: "bg-blue-400"   },
+  violet: { bg: "bg-violet-500/15", text: "text-violet-400", border: "border-violet-500/30", dot: "bg-violet-400" },
+  slate:  { bg: "bg-slate-500/10",  text: "text-slate-400",  border: "border-slate-500/20",  dot: "bg-slate-500"  },
+};
+
+const PHASE_META = {
+  scan: { label: "SCAN", color: "text-slate-400", bar: "bg-slate-500" },
+  pm:   { label: "PM 분석", color: "text-cyan-400", bar: "bg-cyan-500" },
+  sa:   { label: "SA 설계", color: "text-teal-400", bar: "bg-teal-500" },
+};
+
+// 파이프라인 타입별 스텝 목록 ── 병렬 그룹은 배열로 묶음
+const PIPELINE_STEPS_BY_TYPE = {
+  analysis:        ["code_chunker","code_embedding","requirement_analyzer","stack_planner","stack_crawling","guardian"],
+  analysis_create: ["code_chunker","code_embedding","requirement_analyzer","stack_planner","stack_crawling","guardian",
+                    "sa_merge_project","component_scheduler","sa_unified_modeler",
+                    ["sa_test_analysis","sa_project_structure"]],
+  analysis_reverse:["code_chunker","code_embedding",
+                    "sa_merge_project","component_scheduler","sa_unified_modeler",
+                    ["sa_test_analysis","sa_project_structure"]],
+  analysis_update: ["code_chunker","code_embedding","requirement_analyzer","stack_planner","stack_crawling","guardian",
+                    "sa_merge_project","component_scheduler","sa_unified_modeler",
+                    ["sa_test_analysis","sa_project_structure"]],
+  idea_chat:       ["idea_chat"],
+};
+
+function useElapsed(running) {
+  const [elapsed, setElapsed] = useState(0);
+  const start = useRef(Date.now());
+  useEffect(() => {
+    if (!running) { setElapsed(0); start.current = Date.now(); return; }
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - start.current) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [running]);
+  return elapsed;
+}
+
+function fmtElapsed(s) {
+  const m = Math.floor(s / 60);
+  return m > 0 ? `${m}분 ${s % 60}초` : `${s}초`;
+}
 
 export default function PipelineProgress() {
   const { pipelineNodes, thinkingLog, pipelineStatus, pipelineError, pipelineType, isDarkMode } = useAppStore();
   const logEndRef = useRef(null);
-  const steps = PIPELINE_STEPS_BY_TYPE[pipelineType] || PM_PIPELINE_STEPS;
+  const elapsed = useElapsed(pipelineStatus === "running");
+
+  const rawSteps = PIPELINE_STEPS_BY_TYPE[pipelineType] || PIPELINE_STEPS_BY_TYPE.analysis_create;
+
+  // 완료 스텝 수 계산 (병렬 그룹 포함)
+  const { totalCount, doneCount } = useMemo(() => {
+    let total = 0; let done = 0;
+    rawSteps.forEach(s => {
+      if (Array.isArray(s)) {
+        total += s.length;
+        s.forEach(k => { if (pipelineNodes[k] === "done") done++; });
+      } else {
+        total++;
+        if (pipelineNodes[s] === "done") done++;
+      }
+    });
+    return { totalCount: total, doneCount: done };
+  }, [rawSteps, pipelineNodes]);
+
+  const progressPct = totalCount ? Math.round((doneCount / totalCount) * 100) : 0;
+  const isDone = pipelineStatus === "done";
+  const isError = pipelineStatus === "error";
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [thinkingLog]);
 
   return (
-    <div className="h-full w-full flex bg-transparent text-sm overflow-hidden p-4 gap-4">
-      {/* ── 좌측: 파이프라인 스텝 ──────────── */}
-      <div className="w-80 shrink-0 glass-panel rounded-2xl flex flex-col min-h-0 shadow-premium overflow-hidden">
-        <div className="p-5 border-b border-white/5 bg-white/5">
-          <h3 className="text-[12px] font-bold text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2">
-            <Sparkles size={14} className="text-blue-400" />
-            Pipeline Engine
-          </h3>
+    <div className="h-full w-full flex flex-col overflow-hidden">
+      {/* ── 상단 헤더 ─────────────────────────────── */}
+      <div className={`shrink-0 pl-5 pr-12 py-3 flex items-center gap-4 border-b ${
+        isDarkMode ? "border-white/5 bg-white/[0.02]" : "border-slate-100 bg-white/60"
+      }`}>
+        {/* 상태 아이콘 */}
+        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+          isError ? "bg-red-500/15" : isDone ? "bg-emerald-500/15" : "bg-blue-500/15"
+        }`}>
+          {isError
+            ? <AlertCircle size={16} className="text-red-400" />
+            : isDone
+              ? <CheckCircle2 size={16} className="text-emerald-400" />
+              : <Loader2 size={16} className="text-blue-400 animate-spin" />}
         </div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2 min-h-0">
-          {steps.map((step) => {
-            const status = pipelineNodes[step.key] || "pending";
-            return (
-              <StepItem
-                key={step.key}
-                label={step.label}
-                desc={step.desc}
-                status={status}
-                isDarkMode={isDarkMode}
-              />
-            );
-          })}
 
-          {pipelineError && (
-            <div 
-              className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl"
-            >
-              <div className="flex items-center gap-2 text-[13px] text-red-400 font-bold mb-1">
-                <AlertCircle size={14} />
-                오류 발생
-              </div>
-              <p className="text-[12px] text-red-300/80 leading-relaxed">
-                {pipelineError}
-              </p>
+        {/* 진행바 + 퍼센트 */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className={`text-[11px] font-bold uppercase tracking-wider ${
+              isDarkMode ? "text-slate-400" : "text-slate-500"
+            }`}>
+              {isDone ? "분석 완료" : isError ? "오류 발생" : "분석 진행 중..."}
+            </span>
+            <div className="flex items-center gap-3">
+              {pipelineStatus === "running" && (
+                <span className={`flex items-center gap-1 text-[11px] font-mono ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+                  <Clock size={10} />
+                  {fmtElapsed(elapsed)}
+                </span>
+              )}
+              <span className={`text-[11px] font-bold font-mono ${
+                isDone ? "text-emerald-400" : isError ? "text-red-400" : "text-blue-400"
+              }`}>
+                {doneCount}/{totalCount}
+              </span>
             </div>
-          )}
+          </div>
+          <div className={`h-1.5 rounded-full overflow-hidden ${isDarkMode ? "bg-white/5" : "bg-slate-100"}`}>
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${
+                isError ? "bg-red-500" : isDone ? "bg-emerald-500" : "bg-gradient-to-r from-blue-500 to-indigo-500"
+              }`}
+              style={{ width: `${isDone ? 100 : progressPct}%` }}
+            />
+          </div>
         </div>
       </div>
 
-      {/* ── 우측: Thinking Log ─────────────── */}
-      <div className="flex-1 min-w-0 flex flex-col glass-panel rounded-2xl shadow-premium overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/5">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center">
-              <Brain size={18} className="text-purple-400" />
-            </div>
-            <div>
-              <span className={`text-[15px] font-bold ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>
-                Thinking Log
-              </span>
-              <div className="text-[11px] text-slate-500 uppercase tracking-widest font-medium">
-                Real-time Agent Reasoning Stream
-              </div>
-            </div>
+      {/* ── 본문 ─────────────────────────────────── */}
+      <div className="flex-1 min-h-0 flex overflow-hidden gap-3 p-3">
+        {/* 좌측: 스텝 타임라인 */}
+        <div className={`w-64 shrink-0 flex flex-col rounded-xl overflow-hidden border ${
+          isDarkMode ? "bg-white/[0.03] border-white/5" : "bg-white border-slate-100 shadow-sm"
+        }`}>
+          <div className={`px-4 py-2.5 border-b flex items-center gap-2 ${isDarkMode ? "border-white/5" : "border-slate-100"}`}>
+            <Zap size={12} className="text-blue-400" />
+            <span className={`text-[10px] font-black uppercase tracking-[0.2em] ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+              Pipeline Steps
+            </span>
           </div>
-          <span className="text-[13px] font-mono text-purple-400/80 bg-purple-500/10 px-2 py-0.5 rounded-lg border border-purple-500/20">
-            {thinkingLog.length} entries
-          </span>
+          <div className="flex-1 overflow-y-auto py-3 px-3 space-y-0.5">
+            <StepList steps={rawSteps} pipelineNodes={pipelineNodes} isDarkMode={isDarkMode} />
+            {pipelineError && (
+              <div className="mt-3 p-3 bg-red-500/10 border border-red-500/25 rounded-lg">
+                <p className="text-[11px] text-red-400 font-semibold mb-1 flex items-center gap-1.5">
+                  <AlertCircle size={11} /> 오류
+                </p>
+                <p className="text-[10px] text-red-300/70 leading-relaxed">{pipelineError}</p>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4 custom-scrollbar">
-          {thinkingLog.length === 0 ? (
-            <div 
-              className="flex flex-col items-center justify-center h-full space-y-4"
-            >
-              <div className="relative">
-                <Loader2 size={40} className="text-blue-500 animate-spin" />
-                <Brain size={20} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-purple-400" />
-              </div>
-              <div className="text-center">
-                <p className="text-lg font-bold text-slate-300">잠시만 기다려 주세요</p>
-                <p className="text-sm text-slate-500">AI 에이전트가 소스 코드를 읽고 설계를 구성하는 중입니다...</p>
-              </div>
+        {/* 우측: Thinking Log */}
+        <div className={`flex-1 min-w-0 flex flex-col rounded-xl overflow-hidden border ${
+          isDarkMode ? "bg-white/[0.03] border-white/5" : "bg-white border-slate-100 shadow-sm"
+        }`}>
+          <div className={`px-4 py-2.5 border-b flex items-center justify-between ${isDarkMode ? "border-white/5" : "border-slate-100"}`}>
+            <div className="flex items-center gap-2">
+              <Brain size={12} className="text-purple-400" />
+              <span className={`text-[10px] font-black uppercase tracking-[0.2em] ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+                Agent Reasoning
+              </span>
             </div>
-          ) : (
-            thinkingLog.map((log, idx) => (
-              <div
-                key={idx}
-                className={`group rounded-2xl p-4 border transition-all glass-card ${
-                  isDarkMode ? "bg-white/5 border-white/5" : "bg-slate-50 border-slate-200 shadow-sm"
-                }`}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2 py-0.5 rounded-lg text-[11px] font-bold uppercase tracking-wider ${
-                      isDarkMode ? "bg-purple-600/20 text-purple-300" : "bg-purple-100 text-purple-600 border border-purple-200"
-                    }`}>
-                      {log.node}
-                    </span>
-                    <div className="w-1 h-1 rounded-full bg-slate-700" />
-                    <span className="text-[11px] font-medium text-slate-500 font-mono">
-                      {new Date(log.timestamp).toLocaleTimeString()}
-                    </span>
-                  </div>
-                </div>
-                <p className={`text-[14px] leading-relaxed whitespace-pre-wrap ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
-                  {log.text}
-                </p>
-              </div>
-            ))
-          )}
-          <div ref={logEndRef} />
+            {thinkingLog.length > 0 && (
+              <span className={`text-[10px] font-bold font-mono px-1.5 py-0.5 rounded-md ${
+                isDarkMode ? "bg-purple-500/10 text-purple-400" : "bg-purple-50 text-purple-500"
+              }`}>
+                {thinkingLog.length}
+              </span>
+            )}
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1.5">
+            {thinkingLog.length === 0 ? (
+              <EmptyLog isDarkMode={isDarkMode} />
+            ) : (
+              thinkingLog.map((log, idx) => (
+                <ThinkingEntry key={idx} log={log} isLatest={idx === thinkingLog.length - 1} isDarkMode={isDarkMode} />
+              ))
+            )}
+            <div ref={logEndRef} />
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function StepItem({ label, desc, status, isDarkMode }) {
-  const icons = {
-    pending: <Circle size={16} className={isDarkMode ? "text-slate-700" : "text-slate-300"} />,
-    running: <Loader2 size={16} className="text-blue-500 animate-spin" />,
-    done: <CheckCircle2 size={16} className="text-green-500" />,
-    error: <AlertCircle size={16} className="text-red-500" />,
-  };
+// ── 스텝 타임라인 ────────────────────────────────────────
+function StepList({ steps, pipelineNodes, isDarkMode }) {
+  let prevPhase = null;
+  const elements = [];
 
-  const statusThemes = {
-    running: "bg-blue-500/10 border-blue-500/30 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.1)]",
-    done: "bg-green-500/10 border-green-500/20 text-green-500 opacity-90",
-    pending: "border-transparent opacity-40",
-    error: "bg-red-500/10 border-red-500/30 text-red-400"
-  };
+  steps.forEach((step, idx) => {
+    const isParallelGroup = Array.isArray(step);
+
+    if (isParallelGroup) {
+      // 병렬 그룹 헤더
+      const phase = STEP_META[step[0]]?.phase;
+      if (phase && phase !== prevPhase) {
+        elements.push(<PhaseLabel key={`phase-${phase}-${idx}`} phase={phase} />);
+        prevPhase = phase;
+      }
+      elements.push(
+        <ParallelGroup key={`pg-${idx}`} keys={step} pipelineNodes={pipelineNodes} isDarkMode={isDarkMode} />
+      );
+    } else {
+      const meta = STEP_META[step] || { label: step, phase: "pm", color: "slate" };
+      if (meta.phase !== prevPhase) {
+        elements.push(<PhaseLabel key={`phase-${meta.phase}-${idx}`} phase={meta.phase} />);
+        prevPhase = meta.phase;
+      }
+      const status = pipelineNodes[step] || "pending";
+      const isLast = idx === steps.length - 1;
+      elements.push(
+        <StepRow
+          key={step}
+          label={meta.label}
+          color={meta.color}
+          status={status}
+          showConnector={!isLast}
+          isDarkMode={isDarkMode}
+        />
+      );
+    }
+  });
+
+  return <>{elements}</>;
+}
+
+function PhaseLabel({ phase }) {
+  const meta = PHASE_META[phase] || PHASE_META.pm;
+  return (
+    <div className={`flex items-center gap-1.5 px-1 py-1.5 mt-1`}>
+      <span className={`w-1 h-1 rounded-full ${meta.bar}`} />
+      <span className={`text-[9px] font-black uppercase tracking-[0.18em] ${meta.color}`}>
+        {meta.label}
+      </span>
+    </div>
+  );
+}
+
+function StepRow({ label, color, status, showConnector, isDarkMode }) {
+  const c = NODE_COLORS[color] || NODE_COLORS.slate;
+  return (
+    <div className="flex items-stretch gap-2 pl-2">
+      {/* 타임라인 선 */}
+      <div className="flex flex-col items-center w-5 shrink-0">
+        <StatusDot status={status} color={color} />
+        {showConnector && (
+          <div className={`w-[1px] flex-1 mt-0.5 ${
+            status === "done" ? c.dot.replace("bg-", "bg-") + " opacity-40" : isDarkMode ? "bg-white/8" : "bg-slate-200"
+          }`} />
+        )}
+      </div>
+      {/* 라벨 */}
+      <div className={`flex-1 pb-2 flex items-start`}>
+        <span className={`text-[12px] font-semibold leading-tight pt-0.5 ${
+          status === "pending"
+            ? isDarkMode ? "text-slate-600" : "text-slate-300"
+            : status === "running"
+              ? c.text
+              : status === "done"
+                ? isDarkMode ? "text-slate-300" : "text-slate-600"
+                : "text-red-400"
+        }`}>
+          {label}
+        </span>
+        {status === "running" && (
+          <span className={`ml-auto shrink-0 text-[10px] font-bold ${c.text} animate-pulse`}>···</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ParallelGroup({ keys, pipelineNodes, isDarkMode }) {
+  const allDone = keys.every(k => pipelineNodes[k] === "done");
+  const anyRunning = keys.some(k => pipelineNodes[k] === "running");
+  return (
+    <div className="pl-2 pb-2">
+      {/* fork 인디케이터 */}
+      <div className="flex items-center gap-1.5 mb-1.5 pl-[18px]">
+        <GitBranch size={10} className={anyRunning ? "text-blue-400" : allDone ? "text-emerald-400 opacity-50" : "text-slate-600"} />
+        <span className={`text-[9px] font-bold uppercase tracking-wider ${
+          anyRunning ? "text-blue-400" : allDone ? "text-slate-500" : "text-slate-600"
+        }`}>parallel</span>
+      </div>
+      {/* 두 카드 나란히 */}
+      <div className="grid grid-cols-2 gap-1.5 pl-[18px]">
+        {keys.map(k => {
+          const meta = STEP_META[k] || { label: k, color: "blue" };
+          const c = NODE_COLORS[meta.color] || NODE_COLORS.blue;
+          const status = pipelineNodes[k] || "pending";
+          return (
+            <div key={k} className={`rounded-lg px-2.5 py-2 border transition-all ${
+              status === "running"
+                ? `${c.bg} ${c.border}`
+                : status === "done"
+                  ? isDarkMode ? "bg-white/[0.04] border-white/5 opacity-60" : "bg-slate-50 border-slate-100 opacity-70"
+                  : isDarkMode ? "bg-transparent border-white/5 opacity-35" : "bg-slate-50/50 border-slate-100 opacity-40"
+            }`}>
+              <div className="flex items-center gap-1.5 mb-1">
+                <StatusDot status={status} color={meta.color} small />
+              </div>
+              <p className={`text-[10px] font-bold leading-tight ${
+                status === "pending" ? isDarkMode ? "text-slate-600" : "text-slate-400"
+                : status === "running" ? c.text
+                : isDarkMode ? "text-slate-400" : "text-slate-500"
+              }`}>{meta.label}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function StatusDot({ status, color, small = false }) {
+  const c = NODE_COLORS[color] || NODE_COLORS.slate;
+  const sz = small ? "w-3 h-3" : "w-4 h-4";
+  if (status === "running") {
+    return (
+      <span className={`relative flex ${sz} shrink-0`}>
+        <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${c.dot} opacity-40`} />
+        <span className={`relative inline-flex rounded-full ${sz} ${c.dot}`} />
+      </span>
+    );
+  }
+  if (status === "done") {
+    return <CheckCircle2 size={small ? 12 : 14} className="text-emerald-400 shrink-0" />;
+  }
+  if (status === "error") {
+    return <AlertCircle size={small ? 12 : 14} className="text-red-400 shrink-0" />;
+  }
+  return (
+    <span className={`${sz} rounded-full border shrink-0 ${
+      color === "slate" ? "border-slate-700" : `border-${color}-800`
+    } opacity-30`} />
+  );
+}
+
+// ── Thinking Log 엔트리 ──────────────────────────────────
+const LOG_NODE_COLORS = {
+  requirement_analyzer: { bg: "bg-cyan-500/15",   text: "text-cyan-400",    short: "REQ" },
+  stack_planner:        { bg: "bg-indigo-500/15",  text: "text-indigo-400",  short: "STACK" },
+  stack_crawling:       { bg: "bg-amber-500/15",   text: "text-amber-400",   short: "CRAWL" },
+  guardian:             { bg: "bg-green-500/15",   text: "text-emerald-400", short: "GUARD" },
+  sa_merge_project:     { bg: "bg-teal-500/15",    text: "text-teal-400",    short: "MERGE" },
+  component_scheduler:  { bg: "bg-teal-500/15",    text: "text-teal-400",    short: "COMP" },
+  unified_modeler:      { bg: "bg-blue-500/15",    text: "text-blue-400",    short: "MODEL" },
+  sa_unified_modeler:   { bg: "bg-blue-500/15",    text: "text-blue-400",    short: "MODEL" },
+  sa_test_analysis:     { bg: "bg-blue-500/15",    text: "text-blue-400",    short: "TEST" },
+  sa_project_structure: { bg: "bg-violet-500/15",  text: "text-violet-400",  short: "STRUCT" },
+  idea_chat:            { bg: "bg-purple-500/15",  text: "text-purple-400",  short: "IDEA" },
+};
+
+const DEFAULT_LOG_COLOR = { bg: "bg-slate-500/10", text: "text-slate-400", short: "NODE" };
+
+function ThinkingEntry({ log, isLatest, isDarkMode }) {
+  const [expanded, setExpanded] = useState(false);
+  const c = LOG_NODE_COLORS[log.node] || DEFAULT_LOG_COLOR;
+  const text = log.text || log.thinking || "";
+  const isLong = text.length > 200;
 
   return (
-    <div
-      className={`flex items-start gap-4 p-4 rounded-2xl transition-all border ${statusThemes[status] || statusThemes.pending}`}
-    >
-      <div className="mt-1 shrink-0">{icons[status] || icons.pending}</div>
-      <div>
-        <div className={`text-[14px] font-bold leading-none mb-1.5 ${status === "pending" ? "text-slate-500" : ""}`}>
-          {label}
+    <div className={`rounded-lg border transition-all ${
+      isLatest && isDarkMode
+        ? "bg-white/[0.05] border-white/8"
+        : isDarkMode
+          ? "bg-white/[0.025] border-white/4"
+          : isLatest
+            ? "bg-slate-50 border-slate-200"
+            : "bg-white border-slate-100"
+    }`}>
+      {/* 헤더 */}
+      <div className={`flex items-center gap-2 px-3 py-2 border-b ${
+        isDarkMode ? "border-white/4" : "border-slate-100"
+      }`}>
+        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-wider ${c.bg} ${c.text}`}>
+          {c.short}
+        </span>
+        <span className={`text-[10px] font-mono ${isDarkMode ? "text-slate-600" : "text-slate-400"}`}>
+          {log.timestamp ? new Date(log.timestamp).toLocaleTimeString("ko", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""}
+        </span>
+        {isLatest && (
+          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
+        )}
+      </div>
+      {/* 본문 */}
+      <div
+        className={`px-3 py-2.5 cursor-pointer ${isLong && !expanded ? "max-h-[72px] overflow-hidden" : ""}`}
+        onClick={() => isLong && setExpanded(v => !v)}
+      >
+        <p className={`text-[12px] leading-relaxed whitespace-pre-wrap ${
+          isDarkMode ? "text-slate-300" : "text-slate-600"
+        }`}>
+          {text}
+        </p>
+      </div>
+      {isLong && (
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className={`w-full text-center text-[10px] font-bold pb-1.5 transition-colors ${
+            isDarkMode ? "text-slate-600 hover:text-slate-400" : "text-slate-300 hover:text-slate-500"
+          }`}
+        >
+          {expanded ? "▲ 접기" : "▼ 더 보기"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function EmptyLog({ isDarkMode }) {
+  return (
+    <div className="h-full flex flex-col items-center justify-center gap-3 py-8">
+      <div className="relative">
+        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${isDarkMode ? "bg-white/5" : "bg-slate-100"}`}>
+          <Activity size={22} className={isDarkMode ? "text-slate-600" : "text-slate-300"} />
         </div>
-        <div className={`text-[11px] leading-relaxed font-medium ${status === "pending" ? "text-slate-600" : "opacity-70"}`}>
-          {desc}
-        </div>
+        <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center">
+          <Loader2 size={11} className="text-blue-400 animate-spin" />
+        </span>
+      </div>
+      <div className="text-center">
+        <p className={`text-[12px] font-bold ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+          에이전트 추론 대기 중
+        </p>
+        <p className={`text-[11px] mt-0.5 ${isDarkMode ? "text-slate-600" : "text-slate-300"}`}>
+          첫 번째 노드가 시작되면 로그가 표시됩니다
+        </p>
       </div>
     </div>
   );

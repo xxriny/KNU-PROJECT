@@ -4,6 +4,11 @@ import { Clock3, X as XIcon, Edit3, RefreshCw } from "lucide-react";
 
 export default function SessionPanel() {
   const { sessions, currentSessionId, loadSession, deleteSession, updateSessionName, isDarkMode } = useAppStore();
+  const currentUser = useAppStore((s) => s.currentUser);
+  const teamId = currentUser?.team_id || null;
+  const visibleSessions = teamId
+    ? sessions.filter((s) => !s.team_id || s.team_id === teamId)
+    : sessions;
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState("");
 
@@ -25,16 +30,16 @@ export default function SessionPanel() {
       <div className={`flex items-center gap-2 px-3 py-3 border-b border-[var(--border)] bg-transparent`}>
         <Clock3 size={14} className="text-blue-400" />
         <span className={`text-sm font-medium ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>라이브러리</span>
-        <span className="ml-auto text-[12px] text-slate-500">{sessions.length}</span>
+        <span className="ml-auto text-[12px] text-slate-500">{visibleSessions.length}</span>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
-        {sessions.length === 0 ? (
+        {visibleSessions.length === 0 ? (
           <div className="px-2 py-8 text-center text-sm text-slate-600 italic">
             저장된 세션이 없습니다
           </div>
         ) : (
-          sessions.map((session) => {
+          visibleSessions.map((session) => {
             const isActive = currentSessionId === session.id;
             const isEditing = editingId === session.id;
 

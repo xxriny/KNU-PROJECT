@@ -33,4 +33,25 @@ contextBridge.exposeInMainWorld("electronAPI", {
    * @param {boolean} isDark - 다크 모드 여부
    */
   setTitleBarTheme: (isDark) => ipcRenderer.invoke("set-titlebar-theme", isDark),
+
+  /**
+   * GitHub OAuth 인증 URL을 시스템 기본 브라우저로 연다.
+   * @param {string} url - GitHub OAuth authorize URL
+   */
+  openGithubAuth: (url) => ipcRenderer.invoke("github-oauth-open", url),
+
+  /** 로그인 완료 후 메인 프로세스에서 창을 새로고침 */
+  reloadWindow: () => ipcRenderer.invoke("reload-window"),
+
+  /**
+   * GitHub OAuth 콜백 수신 리스너 등록.
+   * navigator://auth/callback?code=...&state=... 콜백이 오면 cb({ code, state }) 호출.
+   * @param {function} cb
+   */
+  onGithubAuthCallback: (cb) =>
+    ipcRenderer.on("github-auth-callback", (_, data) => cb(data)),
+
+  /** onGithubAuthCallback 리스너 해제 */
+  removeGithubAuthCallback: () =>
+    ipcRenderer.removeAllListeners("github-auth-callback"),
 });
