@@ -49,8 +49,6 @@ def _build_update_metadata(artifact: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_dev_gap_doc_update(artifact: dict[str, Any]) -> dict[str, Any]:
-    # author: xxrin
-    # 승인된 Dev GAP 결정을 doc_sync가 문서/Wiki에 반영할 수 있는 명시적 섹션 payload로 만든다.
     pr_context = _as_dict(artifact.get("pr_context"))
     result_payload = _as_dict(artifact.get("result"))
     approved_gaps = result_payload.get("approved_gaps")
@@ -74,6 +72,7 @@ def _build_dev_gap_doc_update(artifact: dict[str, Any]) -> dict[str, Any]:
         "reviewed_by": artifact.get("reviewed_by", ""),
         "pr_context": pr_context,
     }
+
 
 
 def run_doc_updater_for_dev_gap_decision(
