@@ -155,6 +155,7 @@ def update_task_status(
     status: str,
     reviewed_by: str = "",
     result: str = "",
+    editable_fields: dict | None = None,
 ) -> dict | None:
     init_tasks_db()
     with _Session() as session:
@@ -167,6 +168,10 @@ def update_task_status(
             task.reviewed_by = reviewed_by
         if result:
             task.result = result
+        if editable_fields:
+            for field in ("title", "description", "area", "effort", "task_type", "assignee"):
+                if field in editable_fields:
+                    setattr(task, field, editable_fields[field])
         session.commit()
         return _task_to_dict(task)
 
