@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import useAppStore from "../store/useAppStore";
-import { Sparkles, Layers, ScanSearch, Send, Paperclip, X, GitBranch, Loader2, Search } from "lucide-react";
+import { Sparkles, Layers, ScanSearch, Send, Paperclip, X, GitBranch, Loader2, Search, FileText, Trash2 } from "lucide-react";
 
 const MODES = [
   {
@@ -56,6 +56,9 @@ export default function HomeScreen() {
   const [inputText, setInputText] = useState("");
   const [contextText, setContextText] = useState("");
   const [showContext, setShowContext] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState([]); // [{ name, text }]
+  const [fileLoading, setFileLoading] = useState(false);
+  const fileInputRef = useRef(null);
   const [projectTitle, setProjectTitle] = useState("새 프로젝트");
   const textareaRef = useRef(null);
 
@@ -153,12 +156,56 @@ export default function HomeScreen() {
   const trimmedInput = inputText.trim();
   const canSubmit = isPm && (isReverseMode ? Boolean(projectFolder) : Boolean(trimmedInput));
 
+  const extractFileText = async (file) => {
+    const ext = file.name.split(".").pop().toLowerCase();
+    if (ext === "txt" || ext === "md") {
+      return await file.text();
+    }
+    if (ext === "pdf") {
+      const pdfjsLib = await import("pdfjs-dist");
+      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).href;
+      const buf = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      const pages = await Promise.all(
+        Array.from({ length: pdf.numPages }, (_, i) =>
+          pdf.getPage(i + 1).then((p) => p.getTextContent()).then((tc) => tc.items.map((it) => it.str).join(" "))
+        )
+      );
+      return pages.join("\n");
+    }
+    if (ext === "docx") {
+      const mammoth = await import("mammoth");
+      const buf = await file.arrayBuffer();
+      const result = await mammoth.extractRawText({ arrayBuffer: buf });
+      return result.value;
+    }
+    return "";
+  };
+
+  const handleFileAttach = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setFileLoading(true);
+    try {
+      const extracted = await Promise.all(
+        files.map(async (f) => ({ name: f.name, text: await extractFileText(f) }))
+      );
+      setAttachedFiles((prev) => [...prev, ...extracted.filter((f) => f.text)]);
+    } finally {
+      setFileLoading(false);
+      e.target.value = "";
+    }
+  };
+
   const handleSubmit = () => {
     if (!canSubmit) return;
     activateOutputTab("progress");
-    startAnalysis(trimmedInput, contextText.trim(), apiKey, model, selectedMode, projectTitle);
+    const fileContext = attachedFiles.map((f) => `[첨부: ${f.name}]\n${f.text}`).join("\n\n");
+    const fullContext = [contextText.trim(), fileContext].filter(Boolean).join("\n\n");
+    startAnalysis(trimmedInput, fullContext, apiKey, model, selectedMode, projectTitle);
     setInputText("");
     setContextText("");
+    setAttachedFiles([]);
   };
 
   const handleKeyDown = (e) => {
@@ -454,6 +501,41 @@ export default function HomeScreen() {
                   className="w-full bg-[#131317] border border-white/10 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[var(--accent)] transition-colors"
                   placeholder="제목을 입력하세요"
                 />
+              </div>
+
+              {/* File Attach */}
+              <div className="flex flex-col gap-2">
+                <label className="text-xs text-slate-400 font-medium px-1">참고 문서 첨부 (PDF · DOCX · TXT · MD)</label>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.docx,.txt,.md"
+                  onChange={handleFileAttach}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={fileLoading}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-[#131317] border border-white/10 rounded-xl text-sm text-slate-400 hover:text-slate-200 hover:border-white/20 transition-colors disabled:opacity-50"
+                >
+                  {fileLoading ? <Loader2 size={14} className="animate-spin" /> : <Paperclip size={14} />}
+                  {fileLoading ? "파일 읽는 중..." : "파일 선택"}
+                </button>
+                {attachedFiles.length > 0 && (
+                  <ul className="flex flex-col gap-1">
+                    {attachedFiles.map((f, i) => (
+                      <li key={i} className="flex items-center gap-2 px-3 py-2 bg-[#131317] border border-white/5 rounded-lg">
+                        <FileText size={13} className="text-slate-500 shrink-0" />
+                        <span className="text-xs text-slate-300 truncate flex-1">{f.name}</span>
+                        <span className="text-[11px] text-slate-600 shrink-0">{(f.text.length / 1000).toFixed(1)}k자</span>
+                        <button onClick={() => setAttachedFiles((prev) => prev.filter((_, j) => j !== i))} className="text-slate-600 hover:text-red-400 transition-colors">
+                          <Trash2 size={12} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
 
