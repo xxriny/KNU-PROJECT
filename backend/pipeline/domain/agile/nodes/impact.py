@@ -34,6 +34,7 @@ def run_impact_analyzer(
     model: str = "gemini-1.5-flash",
     session_id: str | None = None,
     use_llm: bool = True,
+    dev_knowledge_context: str = "",
 ) -> ImpactResult:
     """SA 데이터와 LLM을 사용한 변경 영향 분석."""
     # SA 데이터 요약

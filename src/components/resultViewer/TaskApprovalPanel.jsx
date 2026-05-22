@@ -4,7 +4,7 @@ import {
   ClipboardList, Check, X, Clock, Loader2, RefreshCw,
   ChevronDown, ChevronRight, AlertTriangle, CheckCircle,
   XCircle, Plus, Trash2, Sparkles, Users, GitPullRequest,
-  CircleDot, Inbox,
+  CircleDot, Inbox, Pencil, Save, UserCheck, RotateCcw,
 } from "lucide-react";
 
 const STATUS_CONFIG = {
@@ -88,6 +88,19 @@ export default function TaskApprovalPanel() {
   const [distLoading, setDistLoading] = useState(false);
   const [distMsg, setDistMsg]         = useState("");
 
+  // 인라인 편집
+  const [editingId, setEditingId]     = useState(null);
+  const [editForm, setEditForm]       = useState({});
+  const [editLoading, setEditLoading] = useState(false);
+
+  // 거절 사유 입력
+  const [rejectingId, setRejectingId]   = useState(null);
+  const [rejectReason, setRejectReason] = useState("");
+
+  // PM 재배분 (rejected → pending_approval + 새 담당자)
+  const [reassignId, setReassignId]       = useState(null);
+  const [reassignTarget, setReassignTarget] = useState("");
+
   const fetchTeamMembers = useCallback(async () => {
     if (!authToken) return;
     try {
@@ -129,6 +142,91 @@ export default function TaskApprovalPanel() {
       const json = await res.json();
       if (json.status === "ok") setTasks((prev) => prev.map((t) => t.id === taskId ? json.data : t));
       else setError(json.error || "업데이트 실패");
+    } catch (e) { setError("서버 연결 실패: " + e.message); }
+  };
+
+  const startEdit = (task) => {
+    setEditingId(task.id);
+    setEditForm({
+      title: task.title || "",
+      description: task.description || "",
+      area: task.area || "backend",
+      effort: task.effort || "M",
+      task_type: task.task_type || "feature",
+    });
+  };
+
+  // afterSave: { status, assignee?, clearResult? }
+  const handleSaveEdit = async (taskId, afterSave = {}) => {
+    setEditLoading(true);
+    const currentTask = tasks.find((t) => t.id === taskId);
+    const targetStatus = afterSave.status ?? (currentTask?.status === "rejected" ? "unassigned" : (currentTask?.status || "unassigned"));
+    const patch = { status: targetStatus, result: afterSave.clearResult ? "" : undefined, ...editForm };
+    if ("assignee" in afterSave) patch.assignee = afterSave.assignee;
+    else if (currentTask?.status === "rejected") patch.assignee = "";
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const json = await res.json();
+      if (json.status === "ok") {
+        setTasks((prev) => prev.map((t) => t.id === taskId ? json.data : t));
+        setEditingId(null);
+      } else {
+        setError(json.error || "수정 실패");
+      }
+    } catch (e) { setError("서버 연결 실패: " + e.message); }
+    finally { setEditLoading(false); }
+  };
+
+  // 거절 (사유 포함)
+  const handleRejectWithReason = async (taskId) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "rejected", result: rejectReason, reviewed_by: userId }),
+      });
+      const json = await res.json();
+      if (json.status === "ok") {
+        setTasks((prev) => prev.map((t) => t.id === taskId ? json.data : t));
+        setRejectingId(null);
+        setRejectReason("");
+      } else { setError(json.error || "거절 실패"); }
+    } catch (e) { setError("서버 연결 실패: " + e.message); }
+  };
+
+  // PM: rejected → unassigned (미할당으로 되돌리기)
+  const handleReturnToUnassigned = async (taskId) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "unassigned", assignee: "" }),
+      });
+      const json = await res.json();
+      if (json.status === "ok") setTasks((prev) => prev.map((t) => t.id === taskId ? json.data : t));
+      else setError(json.error || "실패");
+    } catch (e) { setError("서버 연결 실패: " + e.message); }
+  };
+
+  // PM: rejected → pending_approval + 새 담당자 배정
+  const handleReassign = async (taskId) => {
+    if (!reassignTarget) return;
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "pending_approval", assignee: reassignTarget, result: "" }),
+      });
+      const json = await res.json();
+      if (json.status === "ok") {
+        setTasks((prev) => prev.map((t) => t.id === taskId ? json.data : t));
+        setReassignId(null);
+        setReassignTarget("");
+      } else { setError(json.error || "재배분 실패"); }
     } catch (e) { setError("서버 연결 실패: " + e.message); }
   };
 
@@ -222,6 +320,8 @@ export default function TaskApprovalPanel() {
   const visibleTasks = tasks
     .filter((t) => filterStatus === "all" || t.status === filterStatus)
     .filter((t) => {
+      // 본인에게 할당된 태스크는 영역 필터와 무관하게 항상 표시
+      if (t.assignee && t.assignee === currentUser?.name) return true;
       if (!roleAreaFilter) return true;
       if (!t.area) return false;
       return roleAreaFilter.includes(t.area);
@@ -242,7 +342,7 @@ export default function TaskApprovalPanel() {
             <ClipboardList size={22} /> 태스크 관리
           </h2>
           <p className="text-sm opacity-60 mt-1">
-            {isPM ? "AI가 생성한 태스크를 배분하고 승인·거절하세요." : "담당 태스크를 확인하고 상태를 업데이트하세요."}
+            {isPM ? "AI가 생성한 태스크를 배분하고 관리하세요." : "배분된 태스크를 수락 또는 거절하고 진행 상태를 업데이트하세요."}
           </p>
         </div>
         <button
@@ -493,8 +593,104 @@ export default function TaskApprovalPanel() {
 
               {isExpanded && (
                 <div className={`px-4 pb-4 space-y-3 border-t ${isDarkMode ? "border-white/5" : "border-slate-100"}`}>
-                  {task.description && (
-                    <p className="text-sm opacity-70 pt-3 leading-relaxed">{task.description}</p>
+                  {/* 인라인 편집 폼 (unassigned 또는 rejected + PM) */}
+                  {isPM && (task.status === "unassigned" || task.status === "rejected") && editingId === task.id ? (
+                    <div className="pt-3 space-y-2">
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="block text-xs font-bold opacity-50 mb-1">유형</label>
+                          <select
+                            value={editForm.task_type}
+                            onChange={(e) => setEditForm((f) => ({ ...f, task_type: e.target.value }))}
+                            style={{ colorScheme: isDarkMode ? "dark" : "light" }}
+                            className={`w-full px-2 py-1.5 rounded-lg text-xs font-semibold border outline-none ${isDarkMode ? "bg-slate-800 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-800"}`}
+                          >
+                            {TASK_TYPES.map((t) => <option key={t} value={t}>{TASK_TYPE_LABEL[t] || t}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold opacity-50 mb-1">영역</label>
+                          <select
+                            value={editForm.area}
+                            onChange={(e) => setEditForm((f) => ({ ...f, area: e.target.value }))}
+                            style={{ colorScheme: isDarkMode ? "dark" : "light" }}
+                            className={`w-full px-2 py-1.5 rounded-lg text-xs font-semibold border outline-none ${isDarkMode ? "bg-slate-800 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-800"}`}
+                          >
+                            {AREAS.map((a) => <option key={a} value={a}>{AREA_LABEL[a] || a}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold opacity-50 mb-1">노력도</label>
+                          <select
+                            value={editForm.effort}
+                            onChange={(e) => setEditForm((f) => ({ ...f, effort: e.target.value }))}
+                            style={{ colorScheme: isDarkMode ? "dark" : "light" }}
+                            className={`w-full px-2 py-1.5 rounded-lg text-xs font-semibold border outline-none ${isDarkMode ? "bg-slate-800 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-800"}`}
+                          >
+                            {Object.keys(EFFORT_LABEL).map((e) => <option key={e} value={e}>{EFFORT_LABEL[e]}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold opacity-50 mb-1">제목</label>
+                        <input
+                          type="text"
+                          value={editForm.title}
+                          onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))}
+                          className={`w-full px-3 py-2 rounded-lg text-xs border outline-none ${isDarkMode ? "bg-white/5 border-white/10 text-white" : "bg-white border-slate-200 text-slate-800"}`}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold opacity-50 mb-1">설명</label>
+                        <textarea
+                          value={editForm.description}
+                          onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
+                          rows={3}
+                          className={`w-full px-3 py-2 rounded-lg text-xs border outline-none resize-none ${isDarkMode ? "bg-white/5 border-white/10 text-white" : "bg-white border-slate-200 text-slate-800"}`}
+                        />
+                      </div>
+                      <div className="flex gap-2 flex-wrap">
+                        {task.status === "rejected" && task.assignee ? (
+                          <>
+                            <button
+                              onClick={() => handleSaveEdit(task.id, { status: "pending_approval", assignee: task.assignee, clearResult: true })}
+                              disabled={editLoading}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-all"
+                            >
+                              {editLoading ? <Loader2 size={12} className="animate-spin" /> : <UserCheck size={12} />}
+                              수정 후 재할당
+                            </button>
+                            <button
+                              onClick={() => handleSaveEdit(task.id, { status: "unassigned", assignee: "", clearResult: true })}
+                              disabled={editLoading}
+                              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border transition-all ${base}`}
+                            >
+                              {editLoading ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                              수정 후 미할당
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => handleSaveEdit(task.id)}
+                            disabled={editLoading}
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-all"
+                          >
+                            {editLoading ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                            저장
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${base}`}
+                        >
+                          취소
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    task.description && (
+                      <p className="text-sm opacity-70 pt-3 leading-relaxed">{task.description}</p>
+                    )
                   )}
 
                   {/* PM 액션: pending_approval → 승인(in_progress) / 거절(rejected) */}
@@ -547,21 +743,106 @@ export default function TaskApprovalPanel() {
                     </div>
                   )}
 
-                  {isPM && task.status === "pending_approval" && (
+                  {/* PM 편집: unassigned 상태에서만 (rejected는 해당 패널에서 처리) */}
+                  {isPM && task.status === "unassigned" && editingId !== task.id && (
                     <div className="flex gap-2 pt-1">
                       <button
-                        onClick={() => handleAction(task.id, "in_progress")}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/10 transition-all"
+                        onClick={(e) => { e.stopPropagation(); startEdit(task); }}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${base}`}
                       >
-                        <Check size={12} /> 승인
-                      </button>
-                      <button
-                        onClick={() => handleAction(task.id, "rejected")}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all"
-                      >
-                        <X size={12} /> 거절
+                        <Pencil size={12} /> 편집
                       </button>
                     </div>
+                  )}
+
+                  {/* 일반 태스크: 담당자가 수락/거절 */}
+                  {!isDevGapApproval && isMyTask && task.status === "pending_approval" && (
+                    rejectingId === task.id ? (
+                      <div className={`pt-2 space-y-2 p-3 rounded-xl border ${isDarkMode ? "bg-red-500/5 border-red-500/20" : "bg-red-50 border-red-200"}`}>
+                        <p className="text-xs font-bold text-red-400">거절 사유를 입력하세요</p>
+                        <textarea
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder="거절 이유를 작성해주세요 (PM이 확인합니다)"
+                          rows={2}
+                          className={`w-full px-3 py-2 rounded-lg text-xs border outline-none resize-none ${isDarkMode ? "bg-white/5 border-white/10 text-white placeholder:text-slate-500" : "bg-white border-slate-200 text-slate-800"}`}
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleRejectWithReason(task.id)}
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-500 hover:bg-red-400 text-white transition-all"
+                          >
+                            <X size={12} /> 거절 확인
+                          </button>
+                          <button
+                            onClick={() => { setRejectingId(null); setRejectReason(""); }}
+                            className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${base}`}
+                          >
+                            취소
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          onClick={() => handleAction(task.id, "in_progress")}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/10 transition-all"
+                        >
+                          <Check size={12} /> 수락
+                        </button>
+                        <button
+                          onClick={() => { setRejectingId(task.id); setRejectReason(""); }}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all"
+                        >
+                          <X size={12} /> 거절
+                        </button>
+                      </div>
+                    )
+                  )}
+
+                  {/* Dev GAP 태스크: PM이 승인/거절 */}
+                  {isDevGapApproval && isPM && task.status === "pending_approval" && (
+                    rejectingId === task.id ? (
+                      <div className={`pt-2 space-y-2 p-3 rounded-xl border ${isDarkMode ? "bg-red-500/5 border-red-500/20" : "bg-red-50 border-red-200"}`}>
+                        <p className="text-xs font-bold text-red-400">거절 사유를 입력하세요</p>
+                        <textarea
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder="거절 이유를 작성해주세요"
+                          rows={2}
+                          className={`w-full px-3 py-2 rounded-lg text-xs border outline-none resize-none ${isDarkMode ? "bg-white/5 border-white/10 text-white placeholder:text-slate-500" : "bg-white border-slate-200 text-slate-800"}`}
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleRejectWithReason(task.id)}
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-500 hover:bg-red-400 text-white transition-all"
+                          >
+                            <X size={12} /> 거절 확인
+                          </button>
+                          <button
+                            onClick={() => { setRejectingId(null); setRejectReason(""); }}
+                            className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${base}`}
+                          >
+                            취소
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          onClick={() => handleAction(task.id, "in_progress")}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/10 transition-all"
+                        >
+                          <Check size={12} /> 승인
+                        </button>
+                        <button
+                          onClick={() => { setRejectingId(task.id); setRejectReason(""); }}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all"
+                        >
+                          <X size={12} /> 거절
+                        </button>
+                      </div>
+                    )
                   )}
 
                   {/* 작업자 액션: in_progress → PR대기중 */}
@@ -573,6 +854,69 @@ export default function TaskApprovalPanel() {
                       >
                         <GitPullRequest size={12} /> PR 제출
                       </button>
+                    </div>
+                  )}
+
+                  {/* PM: rejected 태스크 처리 옵션 */}
+                  {isPM && !isDevGapApproval && task.status === "rejected" && (
+                    <div className={`p-3 rounded-xl border space-y-2 ${isDarkMode ? "bg-orange-500/5 border-orange-500/20" : "bg-orange-50 border-orange-200"}`}>
+                      {task.result && (
+                        <div className="text-xs text-orange-400 font-semibold">
+                          거절 사유: <span className="font-normal opacity-80">{task.result}</span>
+                        </div>
+                      )}
+                      <p className="text-xs font-bold opacity-60">이 태스크를 어떻게 처리할까요?</p>
+                      {reassignId === task.id ? (
+                        <div className="space-y-2">
+                          <select
+                            value={reassignTarget}
+                            onChange={(e) => setReassignTarget(e.target.value)}
+                            style={{ colorScheme: isDarkMode ? "dark" : "light" }}
+                            className={`w-full px-3 py-2 rounded-lg text-xs font-semibold border outline-none ${isDarkMode ? "bg-slate-800 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-800"}`}
+                          >
+                            <option value="">담당자 선택</option>
+                            {teamMembers.filter((m) => m.role !== "pm" && m.name !== task.assignee).map((m) => (
+                              <option key={m.id} value={m.name}>{m.name} — {m.role}</option>
+                            ))}
+                          </select>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleReassign(task.id)}
+                              disabled={!reassignTarget}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white transition-all disabled:opacity-40"
+                            >
+                              <UserCheck size={12} /> 배정
+                            </button>
+                            <button
+                              onClick={() => { setReassignId(null); setReassignTarget(""); }}
+                              className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${base}`}
+                            >
+                              취소
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => handleReturnToUnassigned(task.id)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${base}`}
+                          >
+                            <RotateCcw size={12} /> 미할당으로
+                          </button>
+                          <button
+                            onClick={() => startEdit(task)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${base}`}
+                          >
+                            <Pencil size={12} /> 내용 수정
+                          </button>
+                          <button
+                            onClick={() => { setReassignId(task.id); setReassignTarget(""); }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white transition-all"
+                          >
+                            <UserCheck size={12} /> 다른 팀원에게
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
 

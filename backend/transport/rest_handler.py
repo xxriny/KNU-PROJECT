@@ -709,6 +709,13 @@ class TaskUpdateRequest(BaseModel):
     status: str
     reviewed_by: str = ""
     result: str = ""
+    # editable fields (unassigned tasks only)
+    title: Optional[str] = None
+    description: Optional[str] = None
+    area: Optional[str] = None
+    effort: Optional[str] = None
+    task_type: Optional[str] = None
+    assignee: Optional[str] = None
 
 
 def _normalize_status_check(result: dict | None) -> dict:
@@ -1097,7 +1104,12 @@ async def update_task_endpoint(
             else req.reviewed_by
         )
 
-        task = update_task_status(task_id, req.status, reviewed_by, req.result)
+        editable = {k: v for k, v in {
+            "title": req.title, "description": req.description,
+            "area": req.area, "effort": req.effort, "task_type": req.task_type,
+            "assignee": req.assignee,
+        }.items() if v is not None}
+        task = update_task_status(task_id, req.status, reviewed_by, req.result, editable_fields=editable)
         if not task:
             return {"status": "error", "error": "Task not found"}
 
