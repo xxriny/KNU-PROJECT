@@ -139,7 +139,7 @@ GitHub PR Webhook
 
 ## 7. GitHub Webhook 처리
 
-Webhook endpoint는 PR opened, synchronize, reopened 이벤트를 처리한다. 입력에서 owner, repo, pr_number, branch_name, base_branch, head_sha, created_at, title, description, actor를 정규화한다.
+Webhook endpoint는 PR opened, synchronize, reopened 이벤트를 처리한다. 입력에서 owner, repo, pr_number, branch_name, base_branch, head_sha, created_at, title, description, actor를 정규화한다. 동일 PR의 동일 head_sha가 이미 분석 이력(`dev_pr_analyses`)에 존재하면 중복 실행을 차단한다.
 
 보안 기준:
 
@@ -1058,7 +1058,7 @@ PASS는 decision이 `NEXT_PR`, `COMPLETE`, `BLOCKED`, `RETRY_CURRENT_PR` 중 하
      -> NEEDS_SA_REVIEW task 생성
 ```
 
-PM은 `TaskApprovalPanel`에서 GAP 리포트를 확인한다. 승인하면 해당 변경은 의도된 변경으로 간주한다. 승인된 변경은 `doc_sync` 확장 또는 새 `doc_updater`를 통해 설계 문서와 GitHub Wiki에 반영된다. 거절하면 PR에 재검토 코멘트를 남기고 merge를 차단한다.
+PM은 `TaskApprovalPanel`에서 GAP 리포트를 확인한다. 승인하면 해당 변경은 의도된 변경으로 간주한다. 승인된 변경은 `doc_updater` 계층을 통해 문서 업데이트 요청을 조립하고, 내부에서 `doc_sync`를 호출해 설계 문서와 GitHub Wiki에 반영한다. 거절하면 PR에 재검토 코멘트를 남기고 merge를 차단한다.
 
 ## 23. SQLite / navigator.db 연동
 
