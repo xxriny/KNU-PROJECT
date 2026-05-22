@@ -452,6 +452,16 @@ export default function TaskApprovalPanel() {
           // LLM fallback 상태를 PM이 놓치지 않도록 PM Report warning을 Dev GAP 카드에 표시한다.
           const llmWarnings = Array.isArray(pmReport.llm_warnings) ? pmReport.llm_warnings : [];
           const highGapCount = gapReport.filter((gap) => gap?.severity === "HIGH").length;
+          const normalizedGapReport = gapReport.map((gap, index) => ({
+            gap_id: gap?.gap_id || `GAP_${String(index + 1).padStart(3, "0")}`,
+            severity: String(gap?.severity || "UNKNOWN").toUpperCase(),
+            type: gap?.type || "UNKNOWN",
+            spec_target: gap?.spec_target || "-",
+            description: gap?.description || "설명 없음",
+            recommended_action: gap?.recommended_action || "-",
+            intent: gap?.intent || "-",
+            preliminary: Boolean(gap?.preliminary),
+          }));
 
           return (
             <div key={task.id} className={`rounded-2xl border transition-all ${cfg.bg} ${cfg.border}`}>
@@ -518,6 +528,46 @@ export default function TaskApprovalPanel() {
                       </div>
                       {pmReport.summary && (
                         <p className="text-xs leading-relaxed opacity-80">{pmReport.summary}</p>
+                      )}
+                      {normalizedGapReport.length > 0 && (
+                        <div className="space-y-2">
+                          <div className={`text-[11px] font-bold uppercase tracking-wider ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                            Gap Report Details
+                          </div>
+                          <div className="space-y-2">
+                            {normalizedGapReport.map((gap) => (
+                              <div
+                                key={gap.gap_id}
+                                className={`rounded-xl border p-2.5 ${isDarkMode ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200"}`}
+                              >
+                                <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                                  <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${isDarkMode ? "bg-black/30 text-slate-200" : "bg-white text-slate-700 border border-slate-200"}`}>
+                                    {gap.gap_id}
+                                  </span>
+                                  <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${gap.severity === "HIGH" ? "bg-red-500/15 text-red-400" : (isDarkMode ? "bg-white/10 text-slate-300" : "bg-slate-200 text-slate-700")}`}>
+                                    {gap.severity}
+                                  </span>
+                                  <span className={`text-[10px] px-2 py-0.5 rounded ${isDarkMode ? "bg-white/10 text-slate-300" : "bg-slate-200 text-slate-700"}`}>
+                                    {gap.type}
+                                  </span>
+                                  {gap.preliminary && (
+                                    <span className="text-[10px] px-2 py-0.5 rounded bg-yellow-500/15 text-yellow-400">
+                                      PRELIMINARY
+                                    </span>
+                                  )}
+                                </div>
+                                <p className={`text-[11px] leading-relaxed mb-1 ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>
+                                  {gap.description}
+                                </p>
+                                <div className={`grid grid-cols-1 md:grid-cols-3 gap-1.5 text-[10px] ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>
+                                  <span><strong>Spec:</strong> {gap.spec_target}</span>
+                                  <span><strong>Action:</strong> {gap.recommended_action}</span>
+                                  <span><strong>Intent:</strong> {gap.intent}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       )}
                       {llmWarnings.length > 0 && (
                         <div className={`rounded-xl border p-3 space-y-2 ${isDarkMode ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-100" : "bg-yellow-50 border-yellow-200 text-yellow-900"}`}>
