@@ -123,6 +123,9 @@ async def github_oauth_url(request: Request, db: Session = Depends(get_shared_db
     if not client_id or "your_" in client_id.lower():
         raise HTTPException(status_code=503, detail="needs_oauth_setup")
     session_id = _create_oauth_session()
+    #author: xxrin
+    # OAuth authorize와 token 교환 단계에서 동일한 redirect_uri를 사용해야 하므로
+    # 서버 callback URL을 단일 기준으로 생성한다.
     redirect_uri = str(request.base_url).rstrip("/") + "/auth/github/callback"
     params = urllib.parse.urlencode({
         "client_id": client_id,
@@ -134,7 +137,7 @@ async def github_oauth_url(request: Request, db: Session = Depends(get_shared_db
 
 
 @auth_router.get("/auth/github/callback")
-async def github_callback(code: str, state: str, db: Session = Depends(get_shared_db)):
+async def github_callback(code: str, state: str, request: Request, db: Session = Depends(get_shared_db)):
     """GitHub OAuth 콜백: code → token → 유저 생성 → 세션에 결과 저장 후 완료 HTML 반환."""
     from fastapi.responses import HTMLResponse
     if not _get_oauth_session(state):
@@ -142,7 +145,10 @@ async def github_callback(code: str, state: str, db: Session = Depends(get_share
         return HR(content="<html><body>유효하지 않거나 만료된 인증 세션입니다.</body></html>", status_code=400)
     client_id, client_secret = get_github_credentials(db)
     try:
-        token_data = exchange_github_code(client_id, client_secret, code)
+        #author: xxrin
+        # authorize 단계와 동일한 callback URL을 token 교환에 전달해 redirect_uri mismatch를 방지한다.
+        redirect_uri = str(request.base_url).rstrip("/") + "/auth/github/callback"
+        token_data = exchange_github_code(client_id, client_secret, code, redirect_uri)
         access_token = token_data.get("access_token")
         if not access_token:
             raise ValueError("토큰 발급 실패")
