@@ -15,6 +15,7 @@ from typing import Optional
 from sqlalchemy import Column, String, Text, DateTime, create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 import os
+from observability.logger import get_logger
 
 _STORAGE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
@@ -77,10 +78,38 @@ def create_task(
     feature_ref: str = "",
     effort: str = "",
     status: str = "unassigned",
-) -> dict:
+) -> dict | None:
+    """
+    태스크를 생성한다. 중복 방지:
+    - feature_ref가 있으면 동일 team + feature_ref 조합이 이미 존재하면 None 반환
+    - feature_ref가 없으면 동일 team + 정확히 같은 title이 이미 존재하면 None 반환
+    """
     import json
+    import re
+
+    def _norm(s: str) -> str:
+        return re.sub(r"[\s\-_()（）]", "", s).lower()
+
     init_tasks_db()
     with _Session() as session:
+        q = session.query(AgileTask).filter(AgileTask.team_id == team_id)
+        if feature_ref:
+            dup = q.filter(AgileTask.feature_ref == feature_ref).first()
+        else:
+            title_norm = _norm(title)
+            dup = q.filter(AgileTask.title == title).first()
+            if dup is None:
+                # 정규화 제목으로도 체크 (SQLite에서 LOWER 사용)
+                from sqlalchemy import func
+                dup = session.query(AgileTask).filter(
+                    AgileTask.team_id == team_id,
+                    func.lower(AgileTask.title) == title.lower(),
+                ).first()
+
+        if dup is not None:
+            get_logger().info(f"[create_task] 중복 차단 (feature_ref={feature_ref!r}, title={title!r})")
+            return None
+
         task = AgileTask(
             id=str(uuid.uuid4()),
             task_type=task_type,

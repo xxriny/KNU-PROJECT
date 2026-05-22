@@ -72,6 +72,10 @@ export default function TaskApprovalPanel() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [teamMembers, setTeamMembers]   = useState([]);
 
+  // 선택 삭제
+  const [selectedIds, setSelectedIds]       = useState(() => new Set());
+  const [deleteLoading, setDeleteLoading]   = useState(false);
+
   // 커스텀 태스크 생성 폼
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createForm, setCreateForm] = useState({
@@ -118,7 +122,6 @@ export default function TaskApprovalPanel() {
     setLoading(true); setError("");
     try {
       const params = new URLSearchParams();
-      if (filterStatus !== "all") params.set("status", filterStatus);
       if (teamId) params.set("team_id", teamId);
       const query = params.toString() ? `?${params}` : "";
       const res  = await fetch(`http://127.0.0.1:${port}/api/tasks${query}`);
@@ -127,9 +130,13 @@ export default function TaskApprovalPanel() {
       else setError(json.error || "조회 실패");
     } catch (e) { setError("서버 연결 실패: " + e.message); }
     finally { setLoading(false); }
-  }, [port, filterStatus, teamId]);
+  }, [port, teamId]);
 
-  useEffect(() => { fetchTasks(); }, [fetchTasks]);
+  useEffect(() => {
+    fetchTasks();
+    const id = setInterval(fetchTasks, 5000);
+    return () => clearInterval(id);
+  }, [fetchTasks]);
 
   // 상태 전환
   const handleAction = async (taskId, newStatus) => {
@@ -244,7 +251,10 @@ export default function TaskApprovalPanel() {
       const json = await res.json();
       if (json.status === "ok") {
         const d = json.data;
-        setGenMsg(`생성 완료: ${d.created}개 추가, ${d.skipped}개 스킵`);
+        const parts = [`${d.created}개 추가`];
+        if (d.updated) parts.push(`${d.updated}개 수정`);
+        if (d.skipped) parts.push(`${d.skipped}개 스킵`);
+        setGenMsg(`생성 완료: ${parts.join(", ")}`);
         fetchTasks();
       } else {
         setGenMsg("실패: " + (json.error || "unknown"));
@@ -316,6 +326,26 @@ export default function TaskApprovalPanel() {
       return next;
     });
 
+  const toggleSelect = (id) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const handleDeleteSelected = async () => {
+    if (!selectedIds.size) return;
+    setDeleteLoading(true);
+    try {
+      await Promise.all([...selectedIds].map((id) =>
+        fetch(`http://127.0.0.1:${port}/api/tasks/${id}`, { method: "DELETE" })
+      ));
+      setTasks((prev) => prev.filter((t) => !selectedIds.has(t.id)));
+      setSelectedIds(new Set());
+    } catch (e) { setError("삭제 실패: " + e.message); }
+    finally { setDeleteLoading(false); }
+  };
+
   const roleAreaFilter = ROLE_AREAS[userRole] ?? null;
   const visibleTasks = tasks
     .filter((t) => filterStatus === "all" || t.status === filterStatus)
@@ -327,7 +357,39 @@ export default function TaskApprovalPanel() {
       return roleAreaFilter.includes(t.area);
     });
 
-  const countOf = (s) => tasks.filter((t) => t.status === s).length;
+  const countOf = (s) => tasks.filter((t) => {
+    if (t.status !== s) return false;
+    if (t.assignee && t.assignee === currentUser?.name) return true;
+    if (!roleAreaFilter) return true;
+    if (!t.area) return false;
+    return roleAreaFilter.includes(t.area);
+  }).length;
+
+  // 미할당 탭일 때 도메인별 그룹핑
+  const AREA_ORDER = ["backend", "frontend", "devops", "fullstack", ""];
+  const STATUS_ORDER = ["unassigned", "pending_approval", "in_progress", "pr_pending", "completed", "rejected"];
+  const unassignedGroups = React.useMemo(() => {
+    if (filterStatus !== "unassigned") return null;
+    const groups = {};
+    for (const t of visibleTasks) {
+      const key = t.area || "";
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(t);
+    }
+    return AREA_ORDER.filter((a) => groups[a]?.length).map((a) => ({ area: a, tasks: groups[a] }));
+  }, [filterStatus, visibleTasks]);
+
+  // 전체 탭일 때 상태별 그룹핑
+  const allStatusGroups = React.useMemo(() => {
+    if (filterStatus !== "all") return null;
+    const groups = {};
+    for (const t of visibleTasks) {
+      const key = t.status || "unassigned";
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(t);
+    }
+    return STATUS_ORDER.filter((s) => groups[s]?.length).map((s) => ({ status: s, tasks: groups[s] }));
+  }, [filterStatus, visibleTasks]);
 
   const base = isDarkMode
     ? "bg-white/5 border-white/10 hover:bg-white/10"
@@ -525,6 +587,32 @@ export default function TaskApprovalPanel() {
         </div>
       )}
 
+      {/* 선택 삭제 툴바 — 미할당 탭 + 선택 항목 있을 때 */}
+      {filterStatus === "unassigned" && isPM && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const allIds = new Set(visibleTasks.map((t) => t.id));
+              const allSelected = visibleTasks.every((t) => selectedIds.has(t.id));
+              setSelectedIds(allSelected ? new Set() : allIds);
+            }}
+            className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all ${base}`}
+          >
+            {visibleTasks.length > 0 && visibleTasks.every((t) => selectedIds.has(t.id)) ? "전체 해제" : "전체 선택"}
+          </button>
+          {selectedIds.size > 0 && (
+            <button
+              onClick={handleDeleteSelected}
+              disabled={deleteLoading}
+              className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all"
+            >
+              {deleteLoading ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+              선택 삭제 ({selectedIds.size})
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Task List */}
       <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-1">
         {loading && visibleTasks.length === 0 && (
@@ -539,11 +627,47 @@ export default function TaskApprovalPanel() {
           </div>
         )}
 
-        {visibleTasks.map((task) => {
+        {/* 미할당: 도메인별 그룹 */}
+        {unassignedGroups && unassignedGroups.map(({ area, tasks: groupTasks }) => (
+          <div key={area || "etc"} className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className={`text-xs font-bold px-2.5 py-1 rounded-lg ${isDarkMode ? "bg-white/10 text-slate-300" : "bg-slate-200 text-slate-600"}`}>
+                {AREA_LABEL[area] || "기타"}
+              </span>
+              <span className="text-xs opacity-40">{groupTasks.length}개</span>
+              {isPM && (
+                <button
+                  onClick={() => {
+                    const groupIds = new Set(groupTasks.map((t) => t.id));
+                    const allSelected = groupTasks.every((t) => selectedIds.has(t.id));
+                    setSelectedIds((prev) => {
+                      const next = new Set(prev);
+                      groupIds.forEach((id) => allSelected ? next.delete(id) : next.add(id));
+                      return next;
+                    });
+                  }}
+                  className="text-[11px] opacity-50 hover:opacity-100 transition-opacity"
+                >
+                  {groupTasks.every((t) => selectedIds.has(t.id)) ? "그룹 해제" : "그룹 선택"}
+                </button>
+              )}
+            </div>
+            {groupTasks.map((task) => renderTaskCard(task))}
+          </div>
+        ))}
+
+        {/* 그 외 탭: 기존 방식 */}
+        {!unassignedGroups && visibleTasks.map((task) => renderTaskCard(task))}
+      </div>
+    </div>
+  );
+
+  function renderTaskCard(task) {
           const cfg        = STATUS_CONFIG[task.status] || STATUS_CONFIG.unassigned;
           const isExpanded = expandedIds.has(task.id);
           const isMyTask   = task.assignee && task.assignee === currentUser?.name;
           const isDevGapApproval = task.task_type === "dev_gap_approval";
+          const isSelected = selectedIds.has(task.id);
           const payload = task.payload || {};
           const pmReport = payload.pm_report || {};
           const prContext = payload.pr_context || {};
@@ -554,11 +678,25 @@ export default function TaskApprovalPanel() {
           const highGapCount = gapReport.filter((gap) => gap?.severity === "HIGH").length;
 
           return (
-            <div key={task.id} className={`rounded-2xl border transition-all ${cfg.bg} ${cfg.border}`}>
+            <div key={task.id} className={`rounded-2xl border transition-all ${isSelected ? "ring-2 ring-blue-500/50" : ""} ${cfg.bg} ${cfg.border}`}>
+              <div className="flex items-center gap-2 pr-4">
+                {/* 체크박스 — 미할당 + PM만 */}
+                {task.status === "unassigned" && isPM && (
+                  <button
+                    onClick={() => toggleSelect(task.id)}
+                    className={`ml-3 shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                      isSelected
+                        ? "bg-blue-500 border-blue-500"
+                        : isDarkMode ? "border-white/20 hover:border-white/40" : "border-slate-300 hover:border-slate-500"
+                    }`}
+                  >
+                    {isSelected && <Check size={10} className="text-white" />}
+                  </button>
+                )}
               <button
                 type="button"
                 onClick={() => toggleExpand(task.id)}
-                className="w-full flex items-center gap-3 p-4 text-left"
+                className="flex-1 flex items-center gap-3 p-4 text-left"
               >
                 <cfg.Icon size={18} className={cfg.color} />
                 <div className="flex-1 min-w-0">
@@ -590,6 +728,7 @@ export default function TaskApprovalPanel() {
                 <span className={`text-xs font-bold shrink-0 ${cfg.color}`}>{cfg.label}</span>
                 {isExpanded ? <ChevronDown size={16} className="opacity-50 shrink-0" /> : <ChevronRight size={16} className="opacity-50 shrink-0" />}
               </button>
+              </div>
 
               {isExpanded && (
                 <div className={`px-4 pb-4 space-y-3 border-t ${isDarkMode ? "border-white/5" : "border-slate-100"}`}>
@@ -935,8 +1074,5 @@ export default function TaskApprovalPanel() {
               )}
             </div>
           );
-        })}
-      </div>
-    </div>
-  );
+  }
 }
