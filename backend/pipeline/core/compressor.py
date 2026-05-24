@@ -2,6 +2,8 @@ import re, os
 from typing import List, Optional
 from llmlingua import PromptCompressor as LinguaCompressor
 
+MAX_COMPRESS_CHARS = 24000
+
 class PromptCompressor:
     """
     LLMLingua-2 기반 프롬프트 압축 매니저 (Phase 3)
@@ -54,6 +56,12 @@ class PromptCompressor:
         """
         if not self.compressor or not text:
             return text
+
+        if len(text) > MAX_COMPRESS_CHARS:
+            # author: xxrin
+            # LLMLingua-2 내부 BERT 모델은 긴 입력을 그대로 받으면 512 토큰 한계를 넘겨 에러를 낸다.
+            # 압축기 호출 전에 보수적으로 앞부분만 잘라 LLM fallback 경로가 전체 파이프라인을 깨지 않게 한다.
+            text = text[:MAX_COMPRESS_CHARS] + "\n... [truncated before compression]"
 
         # 1. 보존할 키워드 추출
         patterns = self.PRESERVE_PATTERNS + (extra_preserve or [])
