@@ -88,6 +88,40 @@ def test_code_inventory_builder_scans_temp_project(tmp_path):
     assert result["code_inventory"]["summary"]["symbol_count"] >= 2
 
 
+def test_pr_inventory_prioritizes_changed_files():
+    from pipeline.domain.dev_tracking.nodes import _prioritize_inventory_for_pr
+
+    inventory = {
+        "files": [
+            {"file": "src/unchanged.py", "internal_imports": []},
+            {"file": "src/changed.py", "internal_imports": ["src/helper.py"]},
+            {"file": "src/helper.py", "internal_imports": []},
+        ],
+        "symbols_by_file": {
+            "src/changed.py": [{"name": "changed"}],
+            "src/helper.py": [{"name": "helper"}],
+            "src/unchanged.py": [{"name": "unchanged"}],
+        },
+        "summary": {"file_count": 3},
+    }
+
+    prioritized = _prioritize_inventory_for_pr(inventory, {"src/changed.py"}, max_files=3)
+
+    assert prioritized["files"][0]["file"] == "src/changed.py"
+    assert prioritized["files"][1]["file"] == "src/helper.py"
+    assert prioritized["summary"]["changed_file_count"] == 1
+    assert "src/changed.py" in prioritized["symbols_by_file"]
+
+
+def test_split_text_chunks_keeps_chunks_under_limit():
+    from pipeline.domain.dev_tracking.nodes import _split_text_chunks
+
+    chunks = _split_text_chunks("\n".join(["x" * 20 for _ in range(10)]), 50)
+
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 50 for chunk in chunks)
+
+
 def test_gap_analyzer_creates_high_missing_api_gap():
     from pipeline.domain.dev_tracking.nodes import gap_analyzer
 
@@ -1430,6 +1464,155 @@ def test_normalize_github_pr_webhook_maps_to_dev_tracking_shape():
     assert normalized["actor"]["github_id"] == "xxrin"
 
 
+def test_github_pulls_endpoint_returns_open_pr_shape(monkeypatch):
+    import connectors.github_connector as github_connector
+    from transport.rest_handler import GitHubPullsRequest, github_pulls
+
+    captured = {}
+
+    class FakeGitHubConnector:
+        def __init__(self, token):
+            captured["token"] = token
+
+        def list_pull_requests(self, owner, repo, state, limit):
+            captured["args"] = (owner, repo, state, limit)
+            # author: xxrin
+            # UI가 PR 선택만으로 Dev Tracking 실행값을 채울 수 있는 응답 shape를 보장한다.
+            return [
+                types.SimpleNamespace(
+                    number=17,
+                    title="Dev tracking webhook",
+                    state="open",
+                    author="xxrin",
+                    head_branch="feature/dev-tracking",
+                    base_branch="main",
+                    head_sha="abc123",
+                    updated_at="2026-05-24T00:00:00",
+                    url="https://github.com/xxrin/navigator/pull/17",
+                )
+            ]
+
+    monkeypatch.setattr(github_connector, "GitHubConnector", FakeGitHubConnector)
+
+    result = asyncio.run(github_pulls(
+        GitHubPullsRequest(owner="xxrin", repo="navigator", state="open", limit=10),
+        current_user=types.SimpleNamespace(github_oauth_token="token-123"),
+    ))
+
+    assert result["status"] == "ok"
+    assert captured["token"] == "token-123"
+    assert captured["args"] == ("xxrin", "navigator", "open", 10)
+    assert result["data"][0]["number"] == 17
+    assert result["data"][0]["head_branch"] == "feature/dev-tracking"
+    assert result["data"][0]["base_branch"] == "main"
+    assert result["data"][0]["head_sha"] == "abc123"
+
+
+def test_github_branches_endpoint_keeps_head_sha_for_ui(monkeypatch):
+    import connectors.github_connector as github_connector
+    from transport.rest_handler import GitHubAnalyticsRequest, github_branches
+
+    class FakeGitHubConnector:
+        def __init__(self, token):
+            self.token = token
+
+        def list_branches(self, owner, repo):
+            # author: xxrin
+            # Branch picker가 선택값만으로 head_sha를 채울 수 있는 응답을 유지한다.
+            return [{"name": "feature/dev-tracking", "protected": False, "sha": "abc123"}]
+
+    monkeypatch.setattr(github_connector, "GitHubConnector", FakeGitHubConnector)
+
+    result = asyncio.run(github_branches(
+        GitHubAnalyticsRequest(owner="xxrin", repo="navigator", branch="main", limit=100),
+        current_user=types.SimpleNamespace(github_oauth_token="token-123"),
+    ))
+
+    assert result["status"] == "ok"
+    assert result["data"][0]["name"] == "feature/dev-tracking"
+    assert result["data"][0]["sha"] == "abc123"
+
+
+def test_serialize_dev_pr_analysis_returns_ui_history_shape():
+    from transport.rest_handler import _serialize_dev_pr_analysis
+
+    row = types.SimpleNamespace(
+        id="analysis-1",
+        team_id="team-1",
+        owner="xxrin",
+        repo="navigator",
+        pr_number=17,
+        branch_name="feature/dev-tracking",
+        base_branch="main",
+        head_sha="abc123",
+        source_dir="/repo",
+        spec_snapshot_id="snapshot-1",
+        approval_status="PENDING_PM_APPROVAL",
+        analysis_status="pm_approval_pending",
+        task_id="task-1",
+        pm_report=json.dumps({"summary": "GAP 검토 필요"}, ensure_ascii=False),
+        timeline=json.dumps([{"node": "gap_analyzer", "status": "PASS"}], ensure_ascii=False),
+        created_at=types.SimpleNamespace(isoformat=lambda: "2026-05-24T00:00:00"),
+        gap_items=[
+            types.SimpleNamespace(severity="HIGH"),
+            types.SimpleNamespace(severity="LOW"),
+        ],
+    )
+
+    serialized = _serialize_dev_pr_analysis(row)
+
+    assert serialized["id"] == "analysis-1"
+    assert serialized["pr_number"] == 17
+    assert serialized["gap_count"] == 2
+    assert serialized["high_gap_count"] == 1
+    assert serialized["pm_report_summary"] == "GAP 검토 필요"
+    assert serialized["timeline"][0]["node"] == "gap_analyzer"
+
+
+def test_serialize_dev_pr_analysis_detail_includes_gap_items():
+    from transport.rest_handler import _serialize_dev_pr_analysis_detail
+
+    row = types.SimpleNamespace(
+        id="analysis-1",
+        team_id="team-1",
+        owner="xxrin",
+        repo="navigator",
+        pr_number=17,
+        branch_name="feature/dev-tracking",
+        base_branch="main",
+        head_sha="abc123",
+        source_dir="/repo",
+        spec_snapshot_id="snapshot-1",
+        approval_status="PENDING_PM_APPROVAL",
+        analysis_status="pm_approval_pending",
+        task_id="task-1",
+        pm_report=json.dumps({"summary": "GAP 검토 필요"}, ensure_ascii=False),
+        timeline="[]",
+        created_at=None,
+        gap_items=[
+            types.SimpleNamespace(
+                id="gap-row-1",
+                gap_id="GAP_001",
+                severity="HIGH",
+                type="MISSING_API",
+                spec_target="GET /api/dev",
+                implementation_target="",
+                intent="UNCERTAIN",
+                recommended_action="PM_REVIEW",
+                description="API가 구현되지 않음",
+                created_at=None,
+            )
+        ],
+    )
+
+    serialized = _serialize_dev_pr_analysis_detail(row)
+
+    assert serialized["gap_count"] == 1
+    assert serialized["pm_report"]["summary"] == "GAP 검토 필요"
+    assert serialized["gap_items"][0]["gap_id"] == "GAP_001"
+    assert serialized["gap_items"][0]["description"] == "API가 구현되지 않음"
+
+
 def test_github_webhook_endpoint_ignores_non_pr_event():
     from transport.rest_handler import github_webhook_endpoint
 
@@ -1944,6 +2127,66 @@ def test_dev_gap_rejection_endpoint_updates_failure_status(monkeypatch):
     assert stored_results[-1]["followup"]["pr_comment"]["comment_created"] is True
     assert stored_results[-1]["followup"]["doc_sync"]["updater"] == "doc_updater"
     assert stored_results[-1]["followup"]["doc_sync"]["decision_status"] == "REJECTED_UNINTENTIONAL_CHANGE"
+
+
+def test_dev_gap_approve_endpoint_uses_explicit_contract(monkeypatch):
+    import pipeline.domain.agile.task_coordinator as agile_task_coordinator
+    import pipeline.domain.dev_tracking.nodes as dev_nodes
+    from transport.rest_handler import DevGapDecisionRequest, dev_gap_approve_endpoint
+
+    stored_results = []
+    task = {
+        "id": "task-1",
+        "task_type": "dev_gap_approval",
+        "status": "pending_approval",
+        "payload": {"pr_context": {"owner": "xxrin", "repo": "navigator", "head_sha": "abc123"}},
+    }
+
+    monkeypatch.setattr(agile_task_coordinator, "init_tasks_db", lambda: None)
+    monkeypatch.setattr(agile_task_coordinator, "get_task", lambda task_id: task)
+    monkeypatch.setattr(agile_task_coordinator, "execute_approved_task", lambda task: json.dumps({"approval_status": "APPROVED_INTENTIONAL_CHANGE"}))
+
+    def fake_update_task_status(task_id, status, reviewed_by="", result=""):
+        if result:
+            stored_results.append(json.loads(result))
+        updated = dict(task)
+        updated["status"] = status
+        updated["reviewed_by"] = reviewed_by
+        updated["result"] = result
+        return updated
+
+    monkeypatch.setattr(agile_task_coordinator, "update_task_status", fake_update_task_status)
+    monkeypatch.setattr(dev_nodes, "update_pr_status_check", lambda state, status_state, description: {"status": "PASS", "status_updated": True, "state": status_state})
+    monkeypatch.setattr(dev_nodes, "run_dev_gap_decision_followup", lambda *args, **kwargs: {"status": "PASS"})
+
+    result = asyncio.run(
+        dev_gap_approve_endpoint(
+            "task-1",
+            DevGapDecisionRequest(reason="요구사항 의도 반영"),
+            current_user=_fake_user("pm", "pm-1"),
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["status"] == "completed"
+    assert result["data"]["reviewed_by"] == "pm-1"
+    assert stored_results[-1]["approval_status"] == "APPROVED_INTENTIONAL_CHANGE"
+    assert stored_results[-1]["reason"] == "요구사항 의도 반영"
+
+
+def test_dev_gap_reject_endpoint_rejects_engineer_role(monkeypatch):
+    from transport.rest_handler import DevGapDecisionRequest, dev_gap_reject_endpoint
+
+    result = asyncio.run(
+        dev_gap_reject_endpoint(
+            "task-1",
+            DevGapDecisionRequest(reason="불일치"),
+            current_user=_fake_user("engineer", "eng-1"),
+        )
+    )
+
+    assert result["status"] == "error"
+    assert "PM or admin" in result["error"]
 
 
 def test_dev_gap_approval_requires_authenticated_pm(monkeypatch):

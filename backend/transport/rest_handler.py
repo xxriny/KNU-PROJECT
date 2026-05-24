@@ -563,6 +563,14 @@ class GitHubIssuesRequest(BaseModel):
     state: str = "open"
 
 
+class GitHubPullsRequest(BaseModel):
+    token: Optional[str] = None  # deprecated
+    owner: str
+    repo: str
+    state: str = "open"
+    limit: int = 30
+
+
 @rest_router.post("/api/github/verify")
 async def github_verify(req: GitHubVerifyRequest):
     """GitHub 토큰 + 레포지토리 접근 확인."""
@@ -692,6 +700,27 @@ async def github_issues(
         return {"status": "error", "error": str(e)}
 
 
+@rest_router.post("/api/github/pulls")
+async def github_pulls(
+    req: GitHubPullsRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """GitHub PR 목록 조회."""
+    token = (current_user.github_oauth_token if current_user else None) or req.token
+    if not token:
+        return {"status": "error", "error": "GitHub OAuth 토큰이 필요합니다."}
+    try:
+        from connectors.github_connector import GitHubConnector
+        connector = GitHubConnector(token)
+        # author: xxrin
+        # Dev Tracking 수동 실행 폼에서 브랜치와 HEAD SHA를 자동 선택할 수 있도록 PR 목록을 제공한다.
+        pulls = connector.list_pull_requests(req.owner, req.repo, req.state, req.limit)
+        return {"status": "ok", "data": [p.__dict__ for p in pulls]}
+    except Exception as e:
+        get_logger().exception("github_pulls endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
 # ── Phase 5: Task Coordinator + Doc Sync ────────────────────
 
 class TaskCreateRequest(BaseModel):
@@ -709,6 +738,11 @@ class TaskUpdateRequest(BaseModel):
     status: str
     reviewed_by: str = ""
     result: str = ""
+
+
+class DevGapDecisionRequest(BaseModel):
+    reason: str = ""
+    result: dict = Field(default_factory=dict)
 
 
 def _normalize_status_check(result: dict | None) -> dict:
@@ -752,6 +786,180 @@ def _normalize_followup(result: dict | None, *, decision_status: str) -> dict:
         **(normalized.get("pr_comment") if isinstance(normalized.get("pr_comment"), dict) else {}),
     }
     return normalized
+
+
+def _parse_json_object(value: str | dict | None) -> dict:
+    # author: xxrin
+    # 기존 PATCH와 신규 전용 endpoint가 같은 result payload 형식을 쓰도록 안전하게 dict로 맞춘다.
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, dict) else {"raw_result": value}
+    except Exception:
+        return {"raw_result": value}
+
+
+def _can_review_dev_gap(current_user: Optional[User]) -> tuple[bool, str]:
+    # author: xxrin
+    # Dev GAP 승인은 PM 의사결정이므로 전용 endpoint와 기존 PATCH 모두 같은 권한 기준을 적용한다.
+    if not current_user:
+        return False, "Authentication required for Dev GAP approval"
+    if getattr(current_user, "role", "") not in {"pm", "admin"}:
+        return False, "PM or admin role required for Dev GAP approval"
+    return True, ""
+
+
+def _run_dev_gap_decision(
+    task_id: str,
+    decision_status: str,
+    reviewed_by: str,
+    result_payload: dict | None = None,
+) -> dict:
+    # author: xxrin
+    # Dev GAP 승인/거절의 상태 변경, status check, 후속 doc/RAG/PR 처리를 한 곳에서 수행한다.
+    import json as _json
+    from pipeline.domain.agile.task_coordinator import (
+        get_task,
+        update_task_status,
+        execute_approved_task,
+        init_tasks_db,
+    )
+
+    init_tasks_db()
+    existing_task = get_task(task_id)
+    if not existing_task:
+        return {"status": "error", "error": "Task not found"}
+    if existing_task.get("task_type") != "dev_gap_approval":
+        return {"status": "error", "error": "Task is not a Dev GAP approval task"}
+
+    payload = existing_task.get("payload", {}) if isinstance(existing_task.get("payload"), dict) else {}
+    result_payload = dict(result_payload or {})
+
+    if decision_status == "APPROVED_INTENTIONAL_CHANGE":
+        seed_result = {
+            "approval_status": "APPROVED_INTENTIONAL_CHANGE",
+            **result_payload,
+        }
+        task = update_task_status(
+            task_id,
+            "in_progress",
+            reviewed_by,
+            _json.dumps(seed_result, ensure_ascii=False),
+        )
+        if not task:
+            return {"status": "error", "error": "Task not found"}
+        exec_result = execute_approved_task(task)
+        try:
+            exec_payload = _json.loads(exec_result)
+        except Exception:
+            exec_payload = {"raw_result": exec_result}
+        exec_payload = {**seed_result, **exec_payload}
+        try:
+            from pipeline.domain.dev_tracking.nodes import update_pr_status_check
+
+            status_check = update_pr_status_check(
+                {"pr_context": task.get("payload", {}).get("pr_context", {})},
+                "success",
+                "PM approved the intentional implementation change.",
+            )
+        except Exception as status_error:
+            status_check = {
+                "status": "WARN",
+                "status_updated": False,
+                "error": str(status_error) or type(status_error).__name__,
+            }
+        status_check = _normalize_status_check(status_check)
+        try:
+            from pipeline.domain.dev_tracking.nodes import run_dev_gap_decision_followup
+
+            followup = run_dev_gap_decision_followup(
+                task,
+                "APPROVED_INTENTIONAL_CHANGE",
+                reviewed_by,
+                exec_payload,
+            )
+        except Exception as followup_error:
+            followup = {
+                "status": "WARN",
+                "error": str(followup_error) or type(followup_error).__name__,
+            }
+        followup = _normalize_followup(
+            followup,
+            decision_status="APPROVED_INTENTIONAL_CHANGE",
+        )
+        exec_payload["status_check"] = status_check
+        exec_payload["followup"] = followup
+        updated = update_task_status(
+            task_id,
+            "completed",
+            reviewed_by=reviewed_by,
+            result=_json.dumps(exec_payload, ensure_ascii=False),
+        )
+        return {"status": "ok", "data": updated or task}
+
+    if decision_status == "REJECTED_UNINTENTIONAL_CHANGE":
+        reject_payload = {
+            "message": "Dev Tracking GAP report rejected by PM.",
+            "approval_status": "REJECTED_UNINTENTIONAL_CHANGE",
+            "pr_context": payload.get("pr_context", {}),
+            "recommended_actions": ["REQUEST_FIX"],
+            **result_payload,
+        }
+        task = update_task_status(
+            task_id,
+            "rejected",
+            reviewed_by,
+            _json.dumps(reject_payload, ensure_ascii=False),
+        )
+        if not task:
+            return {"status": "error", "error": "Task not found"}
+        try:
+            from pipeline.domain.dev_tracking.nodes import update_pr_status_check
+
+            status_check = update_pr_status_check(
+                {"pr_context": payload.get("pr_context", {})},
+                "failure",
+                "PM rejected the implementation change.",
+            )
+        except Exception as status_error:
+            status_check = {
+                "status": "WARN",
+                "status_updated": False,
+                "error": str(status_error) or type(status_error).__name__,
+            }
+        status_check = _normalize_status_check(status_check)
+        try:
+            from pipeline.domain.dev_tracking.nodes import run_dev_gap_decision_followup
+
+            followup = run_dev_gap_decision_followup(
+                task,
+                "REJECTED_UNINTENTIONAL_CHANGE",
+                reviewed_by,
+                reject_payload,
+            )
+        except Exception as followup_error:
+            followup = {
+                "status": "WARN",
+                "error": str(followup_error) or type(followup_error).__name__,
+            }
+        followup = _normalize_followup(
+            followup,
+            decision_status="REJECTED_UNINTENTIONAL_CHANGE",
+        )
+        reject_payload["status_check"] = status_check
+        reject_payload["followup"] = followup
+        updated = update_task_status(
+            task_id,
+            "rejected",
+            reviewed_by=reviewed_by,
+            result=_json.dumps(reject_payload, ensure_ascii=False),
+        )
+        return {"status": "ok", "data": updated or task}
+
+    return {"status": "error", "error": "Unsupported Dev GAP decision"}
 
 
 class DocSyncRequest(BaseModel):
@@ -802,6 +1010,71 @@ class DevKnowledgeQueryRequest(BaseModel):
     artifact_type: str = ""
     query: str = ""
     limit: int = Field(default=10, ge=1, le=50)
+
+
+def _safe_json_loads(value, fallback):
+    # author: xxrin
+    # Dev Tracking 이력 테이블의 JSON 문자열 필드를 UI 응답용 dict/list로 안전하게 복원한다.
+    if value in (None, ""):
+        return fallback
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except Exception:
+        return fallback
+
+
+def _serialize_dev_pr_analysis(row) -> dict:
+    # author: xxrin
+    # webhook과 수동 실행으로 저장된 PR 분석 이력을 DevTrackingTab에서 쓰기 쉬운 형태로 압축한다.
+    pm_report = _safe_json_loads(getattr(row, "pm_report", ""), {})
+    timeline = _safe_json_loads(getattr(row, "timeline", ""), [])
+    gap_items = list(getattr(row, "gap_items", []) or [])
+    return {
+        "id": getattr(row, "id", ""),
+        "team_id": getattr(row, "team_id", ""),
+        "owner": getattr(row, "owner", ""),
+        "repo": getattr(row, "repo", ""),
+        "pr_number": getattr(row, "pr_number", 0),
+        "branch_name": getattr(row, "branch_name", ""),
+        "base_branch": getattr(row, "base_branch", ""),
+        "head_sha": getattr(row, "head_sha", ""),
+        "source_dir": getattr(row, "source_dir", ""),
+        "spec_snapshot_id": getattr(row, "spec_snapshot_id", ""),
+        "approval_status": getattr(row, "approval_status", ""),
+        "analysis_status": getattr(row, "analysis_status", ""),
+        "task_id": getattr(row, "task_id", ""),
+        "gap_count": len(gap_items),
+        "high_gap_count": sum(1 for gap in gap_items if str(getattr(gap, "severity", "")).upper() == "HIGH"),
+        "pm_report_summary": pm_report.get("summary", "") if isinstance(pm_report, dict) else "",
+        "timeline": timeline if isinstance(timeline, list) else [],
+        "created_at": getattr(row, "created_at", None).isoformat() if getattr(row, "created_at", None) else "",
+    }
+
+
+def _serialize_dev_pr_analysis_detail(row) -> dict:
+    # author: xxrin
+    # 분석 상세 화면에서 GAP 항목까지 보여줄 수 있도록 list 응답보다 깊은 payload를 만든다.
+    data = _serialize_dev_pr_analysis(row)
+    gap_items = list(getattr(row, "gap_items", []) or [])
+    data["gap_items"] = [
+        {
+            "id": getattr(gap, "id", ""),
+            "gap_id": getattr(gap, "gap_id", ""),
+            "severity": getattr(gap, "severity", ""),
+            "type": getattr(gap, "type", ""),
+            "spec_target": getattr(gap, "spec_target", ""),
+            "implementation_target": getattr(gap, "implementation_target", ""),
+            "intent": getattr(gap, "intent", ""),
+            "recommended_action": getattr(gap, "recommended_action", ""),
+            "description": getattr(gap, "description", ""),
+            "created_at": getattr(gap, "created_at", None).isoformat() if getattr(gap, "created_at", None) else "",
+        }
+        for gap in gap_items
+    ]
+    data["pm_report"] = _safe_json_loads(getattr(row, "pm_report", ""), {})
+    return data
 
 
 def _verify_github_webhook_signature(
@@ -1050,6 +1323,121 @@ async def dev_tracking_knowledge_query_endpoint(
         return {"status": "error", "error": str(e)}
 
 
+@rest_router.get("/api/dev-tracking/analyses")
+async def dev_tracking_analyses_endpoint(
+    team_id: Optional[str] = None,
+    owner: Optional[str] = None,
+    repo: Optional[str] = None,
+    pr_number: Optional[int] = None,
+    limit: int = 20,
+    shared_db: Session = Depends(get_shared_db),
+):
+    """저장된 Dev Tracking PR 분석 이력을 조회한다."""
+    try:
+        from auth.database import Base, shared_engine
+        from auth.shared_models import DevGapItem, DevPrAnalysis
+
+        # author: xxrin
+        # 운영 UI가 webhook으로 들어온 분석도 볼 수 있도록 shared.db의 분석 이력을 읽는다.
+        Base.metadata.create_all(
+            bind=shared_engine,
+            tables=[DevPrAnalysis.__table__, DevGapItem.__table__],
+        )
+        query = shared_db.query(DevPrAnalysis)
+        if team_id:
+            query = query.filter(DevPrAnalysis.team_id == team_id)
+        if owner:
+            query = query.filter(DevPrAnalysis.owner == owner)
+        if repo:
+            query = query.filter(DevPrAnalysis.repo == repo)
+        if pr_number:
+            query = query.filter(DevPrAnalysis.pr_number == pr_number)
+        safe_limit = max(1, min(int(limit or 20), 100))
+        rows = query.order_by(DevPrAnalysis.created_at.desc()).limit(safe_limit).all()
+        return {
+            "status": "ok",
+            "data": [_serialize_dev_pr_analysis(row) for row in rows],
+        }
+    except Exception as e:
+        get_logger().exception("dev_tracking_analyses_endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.get("/api/dev-tracking/analyses/{analysis_id}")
+async def dev_tracking_analysis_detail_endpoint(
+    analysis_id: str,
+    shared_db: Session = Depends(get_shared_db),
+):
+    """저장된 Dev Tracking PR 분석 상세를 조회한다."""
+    try:
+        from auth.database import Base, shared_engine
+        from auth.shared_models import DevGapItem, DevPrAnalysis
+
+        # author: xxrin
+        # 운영 UI에서 저장된 GAP 상세를 다시 열람할 수 있도록 단건 상세 조회를 제공한다.
+        Base.metadata.create_all(
+            bind=shared_engine,
+            tables=[DevPrAnalysis.__table__, DevGapItem.__table__],
+        )
+        row = shared_db.query(DevPrAnalysis).filter(DevPrAnalysis.id == analysis_id).first()
+        if not row:
+            return {"status": "error", "error": "Dev Tracking analysis not found"}
+        return {"status": "ok", "data": _serialize_dev_pr_analysis_detail(row)}
+    except Exception as e:
+        get_logger().exception("dev_tracking_analysis_detail_endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/dev-tracking/tasks/{task_id}/approve")
+async def dev_gap_approve_endpoint(
+    task_id: str,
+    req: DevGapDecisionRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Dev GAP 승인 전용 endpoint."""
+    allowed, error = _can_review_dev_gap(current_user)
+    if not allowed:
+        return {"status": "error", "error": error}
+    reviewed_by = str(getattr(current_user, "id", "") or "")
+    # author: xxrin
+    # 전용 승인 API는 PATCH status 재해석 없이 명시적인 승인 상태를 helper에 전달한다.
+    return _run_dev_gap_decision(
+        task_id,
+        "APPROVED_INTENTIONAL_CHANGE",
+        reviewed_by,
+        {
+            "approval_status": "APPROVED_INTENTIONAL_CHANGE",
+            "reason": req.reason,
+            **(req.result or {}),
+        },
+    )
+
+
+@rest_router.post("/api/dev-tracking/tasks/{task_id}/reject")
+async def dev_gap_reject_endpoint(
+    task_id: str,
+    req: DevGapDecisionRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Dev GAP 거절 전용 endpoint."""
+    allowed, error = _can_review_dev_gap(current_user)
+    if not allowed:
+        return {"status": "error", "error": error}
+    reviewed_by = str(getattr(current_user, "id", "") or "")
+    # author: xxrin
+    # 전용 거절 API는 PM 판단 사유를 명시적으로 후속 처리 payload에 남긴다.
+    return _run_dev_gap_decision(
+        task_id,
+        "REJECTED_UNINTENTIONAL_CHANGE",
+        reviewed_by,
+        {
+            "approval_status": "REJECTED_UNINTENTIONAL_CHANGE",
+            "reason": req.reason,
+            **(req.result or {}),
+        },
+    )
+
+
 @rest_router.get("/api/tasks")
 async def list_tasks_endpoint(status: Optional[str] = None, team_id: Optional[str] = None):
     """태스크 목록 조회."""
@@ -1073,135 +1461,40 @@ async def update_task_endpoint(
     if req.status not in allowed_statuses:
         return {"status": "error", "error": f"Invalid status. Allowed: {allowed_statuses}"}
     try:
-        import json
-        from pipeline.domain.agile.task_coordinator import get_task, update_task_status, execute_approved_task, init_tasks_db
+        from pipeline.domain.agile.task_coordinator import get_task, update_task_status, init_tasks_db
         init_tasks_db()
         existing_task = get_task(task_id)
         if not existing_task:
             return {"status": "error", "error": "Task not found"}
 
-        # Dev GAP 승인/거절은 PM 의사결정이므로 인증 사용자와 역할 검사를 강제한다.
+        # author: xxrin
+        # 기존 PATCH 경로도 호환하되 Dev GAP 승인/거절은 전용 helper로 위임한다.
         is_dev_gap_decision = (
             existing_task.get("task_type") == "dev_gap_approval"
             and req.status in {"in_progress", "rejected"}
         )
         if is_dev_gap_decision:
-            if not current_user:
-                return {"status": "error", "error": "Authentication required for Dev GAP approval"}
-            if getattr(current_user, "role", "") not in {"pm", "admin"}:
-                return {"status": "error", "error": "PM or admin role required for Dev GAP approval"}
+            allowed, error = _can_review_dev_gap(current_user)
+            if not allowed:
+                return {"status": "error", "error": error}
+            reviewed_by = str(getattr(current_user, "id", "") or "")
+            decision_status = (
+                "APPROVED_INTENTIONAL_CHANGE"
+                if req.status == "in_progress"
+                else "REJECTED_UNINTENTIONAL_CHANGE"
+            )
+            result_payload = _parse_json_object(req.result)
+            result_payload.setdefault("approval_status", decision_status)
+            return _run_dev_gap_decision(
+                task_id,
+                decision_status,
+                reviewed_by,
+                result_payload,
+            )
 
-        reviewed_by = (
-            str(getattr(current_user, "id", "") or "")
-            if is_dev_gap_decision and current_user
-            else req.reviewed_by
-        )
-
-        task = update_task_status(task_id, req.status, reviewed_by, req.result)
+        task = update_task_status(task_id, req.status, req.reviewed_by, req.result)
         if not task:
             return {"status": "error", "error": "Task not found"}
-
-        if task.get("task_type") == "dev_gap_approval" and req.status == "in_progress":
-            exec_result = execute_approved_task(task)
-            # PM 승인 결과를 GitHub commit status에 반영한다.
-            # GitHub status 업데이트 실패는 승인 완료 처리를 막지 않고 result에 경고로 남긴다.
-            try:
-                exec_payload = json.loads(exec_result)
-            except Exception:
-                exec_payload = {"raw_result": exec_result}
-            try:
-                from pipeline.domain.dev_tracking.nodes import update_pr_status_check
-
-                status_check = update_pr_status_check(
-                    {"pr_context": task.get("payload", {}).get("pr_context", {})},
-                    "success",
-                    "PM approved the intentional implementation change.",
-                )
-            except Exception as status_error:
-                status_check = {
-                    "status": "WARN",
-                    "status_updated": False,
-                    "error": str(status_error) or type(status_error).__name__,
-                }
-            status_check = _normalize_status_check(status_check)
-            try:
-                from pipeline.domain.dev_tracking.nodes import run_dev_gap_decision_followup
-
-                followup = run_dev_gap_decision_followup(
-                    task,
-                    "APPROVED_INTENTIONAL_CHANGE",
-                    reviewed_by,
-                    exec_payload,
-                )
-            except Exception as followup_error:
-                followup = {
-                    "status": "WARN",
-                    "error": str(followup_error) or type(followup_error).__name__,
-                }
-            followup = _normalize_followup(
-                followup,
-                decision_status="APPROVED_INTENTIONAL_CHANGE",
-            )
-            exec_payload["status_check"] = status_check
-            exec_payload["followup"] = followup
-            exec_result = json.dumps(exec_payload, ensure_ascii=False)
-            updated = update_task_status(task_id, "completed", reviewed_by=reviewed_by, result=exec_result)
-            if updated:
-                task = updated
-        elif task.get("task_type") == "dev_gap_approval" and req.status == "rejected":
-            payload = task.get("payload", {}) if isinstance(task.get("payload"), dict) else {}
-            reject_payload = {
-                "message": "Dev Tracking GAP report rejected by PM.",
-                "approval_status": "REJECTED_UNINTENTIONAL_CHANGE",
-                "pr_context": payload.get("pr_context", {}),
-                "recommended_actions": ["REQUEST_FIX"],
-            }
-            if req.result:
-                try:
-                    reject_payload.update(json.loads(req.result))
-                except Exception:
-                    reject_payload["raw_result"] = req.result
-            # PM 거절 결과를 GitHub commit status에 반영한다.
-            # 실패하더라도 task 상태는 rejected로 유지하고 result에 경고를 저장한다.
-            try:
-                from pipeline.domain.dev_tracking.nodes import update_pr_status_check
-
-                status_check = update_pr_status_check(
-                    {"pr_context": payload.get("pr_context", {})},
-                    "failure",
-                    "PM rejected the implementation change.",
-                )
-            except Exception as status_error:
-                status_check = {
-                    "status": "WARN",
-                    "status_updated": False,
-                    "error": str(status_error) or type(status_error).__name__,
-                }
-            status_check = _normalize_status_check(status_check)
-            try:
-                from pipeline.domain.dev_tracking.nodes import run_dev_gap_decision_followup
-
-                followup = run_dev_gap_decision_followup(
-                    task,
-                    "REJECTED_UNINTENTIONAL_CHANGE",
-                    reviewed_by,
-                    reject_payload,
-                )
-            except Exception as followup_error:
-                followup = {
-                    "status": "WARN",
-                    "error": str(followup_error) or type(followup_error).__name__,
-                }
-            followup = _normalize_followup(
-                followup,
-                decision_status="REJECTED_UNINTENTIONAL_CHANGE",
-            )
-            reject_payload["status_check"] = status_check
-            reject_payload["followup"] = followup
-            reject_result = json.dumps(reject_payload, ensure_ascii=False)
-            updated = update_task_status(task_id, "rejected", reviewed_by=reviewed_by, result=reject_result)
-            if updated:
-                task = updated
 
         return {"status": "ok", "data": task}
     except Exception as e:
