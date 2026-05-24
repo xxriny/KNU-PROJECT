@@ -13,6 +13,7 @@ import AgileVerifierTab from "./resultViewer/AgileVerifierTab";
 import AgileImpactTab from "./resultViewer/AgileImpactTab";
 import GitHubDashboard from "./github/GitHubDashboard";
 import TaskApprovalPanel from "./resultViewer/TaskApprovalPanel";
+import DevTrackingTab from "./resultViewer/DevTrackingTab";
 import SharedTab from "./resultViewer/SharedTab";
 import Skeleton from "./ui/Skeleton";
 
@@ -30,6 +31,9 @@ const TAB_COMPONENTS = {
   agile_impact: AgileImpactTab,
   github_dashboard: GitHubDashboard,
   task_approval: TaskApprovalPanel,
+  // author: xxrin
+  // Dev Tracking 수동 실행과 타임라인 확인을 ResultViewer 탭으로 연결한다.
+  dev_tracking: DevTrackingTab,
   shared: SharedTab,
   memo: AgileImpactTab,  // 메모 탭은 통합된 변경분석 탭으로 리디렉션
 };
