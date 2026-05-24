@@ -17,6 +17,11 @@ const STATUS_CONFIG = {
 };
 
 const FILTER_TABS = ["all", "unassigned", "pending_approval", "in_progress", "pr_pending", "completed", "rejected"];
+const TYPE_FILTERS = [
+  { id: "all", label: "전체 태스크" },
+  { id: "regular", label: "일반 태스크" },
+  { id: "dev_gap", label: "Dev GAP 승인" },
+];
 
 const TASK_TYPE_LABEL = {
   feature:       "기능 개발",
@@ -70,6 +75,8 @@ export default function TaskApprovalPanel() {
   const [error, setError]               = useState("");
   const [expandedIds, setExpandedIds]   = useState(() => new Set());
   const [filterStatus, setFilterStatus] = useState("all");
+  const [taskTypeFilter, setTaskTypeFilter] = useState("all");
+  const [decisionReasons, setDecisionReasons] = useState({});
   const [teamMembers, setTeamMembers]   = useState([]);
 
   // 커스텀 태스크 생성 폼
@@ -119,16 +126,40 @@ export default function TaskApprovalPanel() {
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
 
   // 상태 전환
-  const handleAction = async (taskId, newStatus) => {
+  const handleAction = async (taskId, newStatus, resultPayload = null) => {
     try {
+      // author: xxrin
+      // 일반 태스크 상태 변경은 기존 PATCH 계약을 유지한다.
+      const headers = { "Content-Type": "application/json" };
+      if (authToken) headers.Authorization = `Bearer ${authToken}`;
+      const body = { status: newStatus, reviewed_by: userId };
+      if (resultPayload) body.result = JSON.stringify(resultPayload);
       const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus, reviewed_by: userId }),
+        headers,
+        body: JSON.stringify(body),
       });
       const json = await res.json();
       if (json.status === "ok") setTasks((prev) => prev.map((t) => t.id === taskId ? json.data : t));
       else setError(json.error || "업데이트 실패");
+    } catch (e) { setError("서버 연결 실패: " + e.message); }
+  };
+
+  const handleDevGapDecision = async (taskId, action, reason) => {
+    try {
+      // author: xxrin
+      // Dev GAP 승인/거절은 상태값 재해석 대신 전용 endpoint를 호출해 PM 결정 계약을 명확히 한다.
+      const headers = { "Content-Type": "application/json" };
+      if (authToken) headers.Authorization = `Bearer ${authToken}`;
+      const endpoint = action === "approve" ? "approve" : "reject";
+      const res = await fetch(`http://127.0.0.1:${port}/api/dev-tracking/tasks/${taskId}/${endpoint}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ reason }),
+      });
+      const json = await res.json();
+      if (json.status === "ok") setTasks((prev) => prev.map((t) => t.id === taskId ? json.data : t));
+      else setError(json.error || "Dev GAP 결정 처리 실패");
     } catch (e) { setError("서버 연결 실패: " + e.message); }
   };
 
@@ -222,12 +253,42 @@ export default function TaskApprovalPanel() {
   const visibleTasks = tasks
     .filter((t) => filterStatus === "all" || t.status === filterStatus)
     .filter((t) => {
+      // author: xxrin
+      // PM이 일반 태스크와 Dev GAP 승인 태스크를 분리해서 볼 수 있도록 타입 필터를 적용한다.
+      if (taskTypeFilter === "dev_gap") return t.task_type === "dev_gap_approval";
+      if (taskTypeFilter === "regular") return t.task_type !== "dev_gap_approval";
+      return true;
+    })
+    .filter((t) => {
       if (!roleAreaFilter) return true;
       if (!t.area) return false;
       return roleAreaFilter.includes(t.area);
     });
 
   const countOf = (s) => tasks.filter((t) => t.status === s).length;
+  const countType = (type) => {
+    if (type === "dev_gap") return tasks.filter((t) => t.task_type === "dev_gap_approval").length;
+    if (type === "regular") return tasks.filter((t) => t.task_type !== "dev_gap_approval").length;
+    return tasks.length;
+  };
+
+  const getDecisionReason = (taskId, fallback) => {
+    const value = decisionReasons[taskId];
+    return value && value.trim() ? value.trim() : fallback;
+  };
+
+  // author: xxrin
+  // PM 승인 이후 저장된 후속 처리 결과를 Dev GAP 카드에서 읽기 위해 result JSON을 안전하게 파싱한다.
+  const parseTaskResult = (result) => {
+    if (!result) return {};
+    if (typeof result === "object") return result;
+    try {
+      const parsed = JSON.parse(result);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_) {
+      return { raw_result: result };
+    }
+  };
 
   const base = isDarkMode
     ? "bg-white/5 border-white/10 hover:bg-white/10"
@@ -400,6 +461,24 @@ export default function TaskApprovalPanel() {
         </div>
       )}
 
+      {/* Type Filter Tabs */}
+      <div className="flex gap-1.5 flex-wrap">
+        {TYPE_FILTERS.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => setTaskTypeFilter(item.id)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              taskTypeFilter === item.id
+                ? isDarkMode ? "bg-emerald-500/20 text-emerald-200" : "bg-emerald-700 text-white"
+                : isDarkMode ? "bg-white/5 text-slate-400 hover:text-slate-200" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            }`}
+          >
+            {item.label}
+            <span className="ml-1.5 opacity-60">({countType(item.id)})</span>
+          </button>
+        ))}
+      </div>
+
       {/* Filter Tabs */}
       <div className="flex gap-1.5 flex-wrap">
         {FILTER_TABS.map((s) => (
@@ -452,6 +531,12 @@ export default function TaskApprovalPanel() {
           // LLM fallback 상태를 PM이 놓치지 않도록 PM Report warning을 Dev GAP 카드에 표시한다.
           const llmWarnings = Array.isArray(pmReport.llm_warnings) ? pmReport.llm_warnings : [];
           const highGapCount = gapReport.filter((gap) => gap?.severity === "HIGH").length;
+          const taskResult = parseTaskResult(task.result);
+          const followup = taskResult.followup || {};
+          const statusCheck = taskResult.status_check || {};
+          const docSync = followup.doc_sync || {};
+          const prComment = followup.pr_comment || {};
+          const ragMetadata = followup.rag_metadata || {};
           const normalizedGapReport = gapReport.map((gap, index) => ({
             gap_id: gap?.gap_id || `GAP_${String(index + 1).padStart(3, "0")}`,
             severity: String(gap?.severity || "UNKNOWN").toUpperCase(),
@@ -512,6 +597,9 @@ export default function TaskApprovalPanel() {
                     <div className={`rounded-xl border p-3 space-y-2 ${isDarkMode ? "bg-black/20 border-white/10" : "bg-white border-slate-200"}`}>
                       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
                         <span className={`px-2 py-1 rounded ${isDarkMode ? "bg-white/10 text-slate-200" : "bg-slate-100 text-slate-700"}`}>
+                          {prContext.owner || "-"} / {prContext.repo || "-"}
+                        </span>
+                        <span className={`px-2 py-1 rounded ${isDarkMode ? "bg-white/10 text-slate-200" : "bg-slate-100 text-slate-700"}`}>
                           PR #{prContext.pr_number || "-"}
                         </span>
                         <span className={`px-2 py-1 rounded font-mono ${isDarkMode ? "bg-white/10 text-slate-300" : "bg-slate-100 text-slate-600"}`}>
@@ -520,6 +608,11 @@ export default function TaskApprovalPanel() {
                         <span className="px-2 py-1 rounded bg-red-500/10 text-red-400">
                           GAP {gapReport.length}
                         </span>
+                        {payload.approval_status && (
+                          <span className="px-2 py-1 rounded bg-amber-500/10 text-amber-400">
+                            {payload.approval_status}
+                          </span>
+                        )}
                         {highGapCount > 0 && (
                           <span className="px-2 py-1 rounded bg-orange-500/10 text-orange-400">
                             HIGH {highGapCount}
@@ -594,23 +687,80 @@ export default function TaskApprovalPanel() {
                           ))}
                         </div>
                       )}
+                      {task.status === "pending_approval" && isPM && (
+                        <div className="space-y-1.5">
+                          <label className={`text-[11px] font-bold uppercase tracking-wider ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                            PM Decision Reason
+                          </label>
+                          <textarea
+                            value={decisionReasons[task.id] || ""}
+                            onChange={(event) => setDecisionReasons((prev) => ({ ...prev, [task.id]: event.target.value }))}
+                            rows={2}
+                            placeholder="승인 또는 거절 사유를 입력하세요."
+                            className={`w-full px-3 py-2 rounded-xl text-xs border outline-none resize-none ${isDarkMode ? "bg-white/5 border-white/10 text-white placeholder:text-slate-500" : "bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400"}`}
+                          />
+                        </div>
+                      )}
+                      {(taskResult.approval_status || taskResult.message || statusCheck.status || docSync.action || prComment.status) && (
+                        <div className={`rounded-xl border p-3 space-y-2 text-[11px] ${isDarkMode ? "bg-white/5 border-white/10 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"}`}>
+                          <div className="font-bold uppercase tracking-wider opacity-70">Decision Result</div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {taskResult.approval_status && <span><strong>Decision:</strong> {taskResult.approval_status}</span>}
+                            {statusCheck.status && <span><strong>Status Check:</strong> {statusCheck.status}</span>}
+                            {docSync.action && <span><strong>Doc Sync:</strong> {docSync.action}</span>}
+                            {prComment.status && <span><strong>PR Comment:</strong> {prComment.status}</span>}
+                            {typeof ragMetadata.stored !== "undefined" && <span><strong>RAG Stored:</strong> {String(ragMetadata.stored)}</span>}
+                          </div>
+                          {taskResult.message && <p className="leading-relaxed opacity-80">{taskResult.message}</p>}
+                          {docSync.message && <p className="leading-relaxed opacity-80"><strong>Doc Sync Message:</strong> {docSync.message}</p>}
+                          {statusCheck.error && <p className="leading-relaxed text-red-400"><strong>Status Error:</strong> {statusCheck.error}</p>}
+                          {prComment.error && <p className="leading-relaxed text-red-400"><strong>PR Comment Error:</strong> {prComment.error}</p>}
+                        </div>
+                      )}
                     </div>
                   )}
 
                   {isPM && task.status === "pending_approval" && (
                     <div className="flex gap-2 pt-1">
-                      <button
-                        onClick={() => handleAction(task.id, "in_progress")}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/10 transition-all"
-                      >
-                        <Check size={12} /> 승인
-                      </button>
-                      <button
-                        onClick={() => handleAction(task.id, "rejected")}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all"
-                      >
-                        <X size={12} /> 거절
-                      </button>
+                      {isDevGapApproval ? (
+                        <>
+                          <button
+                            onClick={() => handleDevGapDecision(
+                              task.id,
+                              "approve",
+                              getDecisionReason(task.id, "PM approved this Dev GAP as an intentional implementation change."),
+                            )}
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/10 transition-all"
+                          >
+                            <Check size={12} /> 의도된 변경 승인
+                          </button>
+                          <button
+                            onClick={() => handleDevGapDecision(
+                              task.id,
+                              "reject",
+                              getDecisionReason(task.id, "PM rejected this Dev GAP as an unintended implementation change."),
+                            )}
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all"
+                          >
+                            <X size={12} /> 비의도 변경 거절
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleAction(task.id, "in_progress")}
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/10 transition-all"
+                          >
+                            <Check size={12} /> 승인
+                          </button>
+                          <button
+                            onClick={() => handleAction(task.id, "rejected")}
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all"
+                          >
+                            <X size={12} /> 거절
+                          </button>
+                        </>
+                      )}
                     </div>
                   )}
 
