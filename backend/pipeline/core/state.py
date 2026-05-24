@@ -164,6 +164,7 @@ class _IdeaFields(TypedDict, total=False):
                                       # [{"text": "...", "section": "Idea Chat"}, ...]
                                       # LangGraph가 노드 반환 키를 스키마와 매칭하므로,
                                       # 이 필드를 명시해야 idea_chat_node의 출력이 보존된다.
+    suggested_followups: list         # 매 응답마다 LLM이 제안하는 후속 질문 4개 (UI 칩으로 노출)
 
 
 # ── RAG 파이프라인 필드 ──────────────────────────

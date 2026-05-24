@@ -68,6 +68,7 @@ class MemoItem(Base):
     detail = Column(Text, default="")
     applied = Column(Boolean, default=False)
     applied_at = Column(String(100), nullable=True)
+    reflected_version = Column(String(32), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (

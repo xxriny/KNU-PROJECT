@@ -117,6 +117,10 @@ def _run_migrations() -> None:
             _add_column_if_missing(conn, "agile_tasks", "team_id", "TEXT DEFAULT ''")
         except Exception:
             pass
+        try:
+            _add_column_if_missing(conn, "memo_items", "reflected_version", "VARCHAR(32)")
+        except Exception:
+            pass
 
 
 def init_db():

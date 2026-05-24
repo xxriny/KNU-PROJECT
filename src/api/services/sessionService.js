@@ -31,10 +31,12 @@ export const sessionService = {
   },
 
   /** 메모 일괄 적용 표시 (UPDATE 분석 성공 후 호출) */
-  async applyMemos(port, memoIds) {
+  async applyMemos(port, memoIds, reflectedVersion = null) {
+    const body = { memo_ids: memoIds || [] };
+    if (reflectedVersion) body.reflected_version = reflectedVersion;
     return request(port, "/api/memos/apply", {
       method: "POST",
-      body: JSON.stringify({ memo_ids: memoIds || [] }),
+      body: JSON.stringify(body),
     });
   }
 };

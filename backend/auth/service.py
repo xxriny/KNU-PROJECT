@@ -249,11 +249,12 @@ def create_or_update_github_user(
             user.github_username = github_login
     else:
         # 신규 가입 — team_id는 null로 시작, 프론트 TeamCreateScreen에서 팀을 만들 때 PM 부여
+        # User.role CHECK constraint은 'software_engineer'만 허용 — 'engineer'는 IntegrityError.
         user = User(
             name=name,
             email=email,
             password_hash=hash_password(str(uuid.uuid4())),
-            role="engineer",
+            role="software_engineer",
             github_username=github_login,
             github_id=github_id,
             github_login=github_login,
