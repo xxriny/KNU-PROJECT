@@ -745,6 +745,11 @@ class DevGapDecisionRequest(BaseModel):
     result: dict = Field(default_factory=dict)
 
 
+class DevGapSaReviewRequest(BaseModel):
+    reason: str = ""
+    result: dict = Field(default_factory=dict)
+
+
 def _normalize_status_check(result: dict | None) -> dict:
     normalized = {
         "status": "WARN",
@@ -764,6 +769,7 @@ def _normalize_followup(result: dict | None, *, decision_status: str) -> dict:
         "status": "WARN",
         "artifact": {},
         "rag_metadata": {"stored": False, "write_enabled": False},
+        "code_chunk_upsert": {"write_enabled": False, "code_chunks_upserted": False, "stored_count": 0},
         "doc_sync": {},
         "pr_comment": {},
     }
@@ -771,6 +777,8 @@ def _normalize_followup(result: dict | None, *, decision_status: str) -> dict:
         normalized.update(result)
     if not isinstance(normalized.get("rag_metadata"), dict):
         normalized["rag_metadata"] = {"stored": False, "write_enabled": False}
+    if not isinstance(normalized.get("code_chunk_upsert"), dict):
+        normalized["code_chunk_upsert"] = {"write_enabled": False, "code_chunks_upserted": False, "stored_count": 0}
     normalized["doc_sync"] = {
         "synced": False,
         "action": "unknown",
@@ -810,6 +818,61 @@ def _can_review_dev_gap(current_user: Optional[User]) -> tuple[bool, str]:
     if getattr(current_user, "role", "") not in {"pm", "admin"}:
         return False, "PM or admin role required for Dev GAP approval"
     return True, ""
+
+
+def _create_sa_review_task(
+    source_task: dict,
+    reviewed_by: str,
+    result_payload: dict | None = None,
+) -> dict:
+    # author: xxrin
+    # PM이 비의도 변경으로 거절한 GAP은 개발자 수정 전에 SA가 설계/스펙 영향도를 재검토할 수 있도록 별도 task로 분리한다.
+    from pipeline.domain.agile.task_coordinator import create_task
+
+    payload = source_task.get("payload", {}) if isinstance(source_task.get("payload"), dict) else {}
+    result_payload = dict(result_payload or {})
+    pr_context = payload.get("pr_context", {}) if isinstance(payload.get("pr_context"), dict) else {}
+    rejected_gaps = result_payload.get("rejected_gaps")
+    if not isinstance(rejected_gaps, list) or not rejected_gaps:
+        rejected_gaps = payload.get("gap_report", []) if isinstance(payload.get("gap_report"), list) else []
+
+    reason = str(result_payload.get("reason") or result_payload.get("message") or "").strip()
+    pr_number = pr_context.get("pr_number") or source_task.get("pr_number") or ""
+    review_task = create_task(
+        task_type="sa_re_review",
+        title=f"PR #{pr_number} SA GAP 재검토",
+        description=reason or "PM rejected a Dev Tracking GAP and requested SA review.",
+        area="sa",
+        payload={
+            "source": "dev_tracking_pm_rejection",
+            "parent_task_id": source_task.get("id") or "",
+            "approval_status": "REJECTED_UNINTENTIONAL_CHANGE",
+            "requested_by": reviewed_by,
+            "requested_reason": reason,
+            "pr_context": pr_context,
+            "pm_report": payload.get("pm_report") or {},
+            "gap_report": rejected_gaps,
+            "original_gap_report": payload.get("gap_report") or [],
+            "intent_classification": payload.get("intent_classification") or [],
+            "milestone_status": payload.get("milestone_status") or {},
+            "source_dir": payload.get("source_dir") or "",
+            "spec_outdated": bool(payload.get("spec_outdated")),
+            "approved_spec_version_lock": str(result_payload.get("approved_spec_version_lock") or ""),
+            "result": result_payload,
+        },
+        created_by=reviewed_by,
+        team_id=str(source_task.get("team_id") or payload.get("team_id") or ""),
+        status="unassigned",
+        pr_number=pr_number,
+        analysis_id=str(result_payload.get("analysis_id") or source_task.get("analysis_id") or ""),
+    )
+    return {
+        "created": True,
+        "task": review_task,
+        "task_id": review_task.get("id"),
+        "status": review_task.get("status"),
+        "task_type": review_task.get("task_type"),
+    }
 
 
 def _run_dev_gap_decision(
@@ -949,8 +1012,16 @@ def _run_dev_gap_decision(
             followup,
             decision_status="REJECTED_UNINTENTIONAL_CHANGE",
         )
+        try:
+            sa_review_task = _create_sa_review_task(task, reviewed_by, reject_payload)
+        except Exception as sa_review_error:
+            sa_review_task = {
+                "created": False,
+                "error": str(sa_review_error) or type(sa_review_error).__name__,
+            }
         reject_payload["status_check"] = status_check
         reject_payload["followup"] = followup
+        reject_payload["sa_review_task"] = sa_review_task
         updated = update_task_status(
             task_id,
             "rejected",
@@ -1033,6 +1104,7 @@ def _serialize_dev_pr_analysis(row) -> dict:
     gap_items = list(getattr(row, "gap_items", []) or [])
     return {
         "id": getattr(row, "id", ""),
+        "project_id": getattr(row, "project_id", ""),
         "team_id": getattr(row, "team_id", ""),
         "owner": getattr(row, "owner", ""),
         "repo": getattr(row, "repo", ""),
@@ -1040,16 +1112,20 @@ def _serialize_dev_pr_analysis(row) -> dict:
         "branch_name": getattr(row, "branch_name", ""),
         "base_branch": getattr(row, "base_branch", ""),
         "head_sha": getattr(row, "head_sha", ""),
+        "branch_created_at": getattr(row, "branch_created_at", ""),
         "source_dir": getattr(row, "source_dir", ""),
         "spec_snapshot_id": getattr(row, "spec_snapshot_id", ""),
+        "spec_outdated": bool(getattr(row, "spec_outdated", False)),
         "approval_status": getattr(row, "approval_status", ""),
         "analysis_status": getattr(row, "analysis_status", ""),
         "task_id": getattr(row, "task_id", ""),
-        "gap_count": len(gap_items),
+        "gap_count": getattr(row, "gap_count", None) if getattr(row, "gap_count", None) is not None else len(gap_items),
+        "has_high_gap": bool(getattr(row, "has_high_gap", False)),
         "high_gap_count": sum(1 for gap in gap_items if str(getattr(gap, "severity", "")).upper() == "HIGH"),
         "pm_report_summary": pm_report.get("summary", "") if isinstance(pm_report, dict) else "",
         "timeline": timeline if isinstance(timeline, list) else [],
         "created_at": getattr(row, "created_at", None).isoformat() if getattr(row, "created_at", None) else "",
+        "updated_at": getattr(row, "updated_at", None).isoformat() if getattr(row, "updated_at", None) else "",
     }
 
 
@@ -1066,8 +1142,13 @@ def _serialize_dev_pr_analysis_detail(row) -> dict:
             "type": getattr(gap, "type", ""),
             "spec_target": getattr(gap, "spec_target", ""),
             "implementation_target": getattr(gap, "implementation_target", ""),
+            "spec_outdated_related": bool(getattr(gap, "spec_outdated_related", False)),
             "intent": getattr(gap, "intent", ""),
+            "confidence": getattr(gap, "confidence", None),
             "recommended_action": getattr(gap, "recommended_action", ""),
+            "approval_status": getattr(gap, "approval_status", ""),
+            "approved_by": getattr(gap, "approved_by", ""),
+            "approved_at": getattr(gap, "approved_at", ""),
             "description": getattr(gap, "description", ""),
             "created_at": getattr(gap, "created_at", None).isoformat() if getattr(gap, "created_at", None) else "",
         }
@@ -1075,6 +1156,113 @@ def _serialize_dev_pr_analysis_detail(row) -> dict:
     ]
     data["pm_report"] = _safe_json_loads(getattr(row, "pm_report", ""), {})
     return data
+
+
+def _serialize_dev_gap_item(gap) -> dict:
+    return {
+        "id": getattr(gap, "id", ""),
+        "analysis_id": getattr(gap, "analysis_id", ""),
+        "gap_id": getattr(gap, "gap_id", ""),
+        "severity": getattr(gap, "severity", ""),
+        "type": getattr(gap, "type", ""),
+        "spec_target": getattr(gap, "spec_target", ""),
+        "implementation_target": getattr(gap, "implementation_target", ""),
+        "spec_outdated_related": bool(getattr(gap, "spec_outdated_related", False)),
+        "intent": getattr(gap, "intent", ""),
+        "confidence": getattr(gap, "confidence", None),
+        "recommended_action": getattr(gap, "recommended_action", ""),
+        "approval_status": getattr(gap, "approval_status", ""),
+        "approved_by": getattr(gap, "approved_by", ""),
+        "approved_at": getattr(gap, "approved_at", ""),
+        "description": getattr(gap, "description", ""),
+        "created_at": getattr(gap, "created_at", None).isoformat() if getattr(gap, "created_at", None) else "",
+    }
+
+
+def _aggregate_gap_decision_status(gap_items: list) -> str:
+    statuses = {str(getattr(gap, "approval_status", "") or "") for gap in gap_items}
+    if "REJECTED_UNINTENTIONAL_CHANGE" in statuses:
+        return "REJECTED_UNINTENTIONAL_CHANGE"
+    if gap_items and statuses <= {"APPROVED_INTENTIONAL_CHANGE"}:
+        return "APPROVED_INTENTIONAL_CHANGE"
+    return "PENDING_PM_APPROVAL"
+
+
+def _update_dev_gap_item_decision(
+    shared_db: Session,
+    gap_item_id: str,
+    decision_status: str,
+    reviewed_by: str,
+    reason: str = "",
+) -> dict:
+    from auth.shared_models import DevGapItem, DevPrAnalysis, ensure_dev_tracking_schema
+
+    ensure_dev_tracking_schema(shared_db)
+    gap = shared_db.query(DevGapItem).filter(DevGapItem.id == gap_item_id).first()
+    if not gap:
+        return {"status": "error", "error": "Dev GAP item not found"}
+
+    # author: xxrin
+    # GAP 항목별 PM 판단을 저장하고 같은 analysis의 전체 승인 상태를 항목 상태에서 재계산한다.
+    gap.approval_status = decision_status
+    gap.approved_by = reviewed_by
+    gap.approved_at = datetime.utcnow().isoformat()
+    if reason:
+        prefix = f"[PM decision reason] {reason}"
+        gap.description = f"{gap.description}\n\n{prefix}" if gap.description else prefix
+
+    analysis = shared_db.query(DevPrAnalysis).filter(DevPrAnalysis.id == gap.analysis_id).first()
+    aggregate_status = ""
+    task_decision: dict = {}
+    if analysis:
+        gap_items = list(analysis.gap_items or [])
+        aggregate_status = _aggregate_gap_decision_status(gap_items)
+        analysis.approval_status = aggregate_status
+        analysis.gap_count = len(gap_items)
+        analysis.has_high_gap = any(str(getattr(item, "severity", "")).upper() == "HIGH" for item in gap_items)
+        if hasattr(analysis, "updated_at"):
+            analysis.updated_at = datetime.utcnow()
+    shared_db.commit()
+
+    if analysis and getattr(analysis, "task_id", "") and aggregate_status in {
+        "APPROVED_INTENTIONAL_CHANGE",
+        "REJECTED_UNINTENTIONAL_CHANGE",
+    }:
+        gap_items = list(analysis.gap_items or [])
+        approved_gaps = [
+            _serialize_dev_gap_item(item)
+            for item in gap_items
+            if str(getattr(item, "approval_status", "")) == "APPROVED_INTENTIONAL_CHANGE"
+        ]
+        rejected_gaps = [
+            _serialize_dev_gap_item(item)
+            for item in gap_items
+            if str(getattr(item, "approval_status", "")) == "REJECTED_UNINTENTIONAL_CHANGE"
+        ]
+        # author: xxrin
+        # 모든 GAP 항목 판단이 끝난 경우에만 task 단위 후속 처리(doc_updater/status/comment)로 승격한다.
+        task_decision = _run_dev_gap_decision(
+            str(getattr(analysis, "task_id", "")),
+            aggregate_status,
+            reviewed_by,
+            {
+                "reason": reason,
+                "approved_gaps": approved_gaps,
+                "rejected_gaps": rejected_gaps,
+                "analysis_id": getattr(analysis, "id", ""),
+                "approval_status": aggregate_status,
+            },
+        )
+
+    return {
+        "status": "ok",
+        "data": {
+            "gap_item": _serialize_dev_gap_item(gap),
+            "analysis": _serialize_dev_pr_analysis_detail(analysis) if analysis else {},
+            "analysis_approval_status": getattr(analysis, "approval_status", "") if analysis else "",
+            "task_decision": task_decision,
+        },
+    }
 
 
 def _verify_github_webhook_signature(
@@ -1334,15 +1522,11 @@ async def dev_tracking_analyses_endpoint(
 ):
     """저장된 Dev Tracking PR 분석 이력을 조회한다."""
     try:
-        from auth.database import Base, shared_engine
-        from auth.shared_models import DevGapItem, DevPrAnalysis
+        from auth.shared_models import DevGapItem, DevPrAnalysis, ensure_dev_tracking_schema
 
         # author: xxrin
         # 운영 UI가 webhook으로 들어온 분석도 볼 수 있도록 shared.db의 분석 이력을 읽는다.
-        Base.metadata.create_all(
-            bind=shared_engine,
-            tables=[DevPrAnalysis.__table__, DevGapItem.__table__],
-        )
+        ensure_dev_tracking_schema(shared_db)
         query = shared_db.query(DevPrAnalysis)
         if team_id:
             query = query.filter(DevPrAnalysis.team_id == team_id)
@@ -1370,15 +1554,11 @@ async def dev_tracking_analysis_detail_endpoint(
 ):
     """저장된 Dev Tracking PR 분석 상세를 조회한다."""
     try:
-        from auth.database import Base, shared_engine
-        from auth.shared_models import DevGapItem, DevPrAnalysis
+        from auth.shared_models import DevGapItem, DevPrAnalysis, ensure_dev_tracking_schema
 
         # author: xxrin
         # 운영 UI에서 저장된 GAP 상세를 다시 열람할 수 있도록 단건 상세 조회를 제공한다.
-        Base.metadata.create_all(
-            bind=shared_engine,
-            tables=[DevPrAnalysis.__table__, DevGapItem.__table__],
-        )
+        ensure_dev_tracking_schema(shared_db)
         row = shared_db.query(DevPrAnalysis).filter(DevPrAnalysis.id == analysis_id).first()
         if not row:
             return {"status": "error", "error": "Dev Tracking analysis not found"}
@@ -1386,6 +1566,48 @@ async def dev_tracking_analysis_detail_endpoint(
     except Exception as e:
         get_logger().exception("dev_tracking_analysis_detail_endpoint failed")
         return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/dev-tracking/gaps/{gap_item_id}/approve")
+async def dev_gap_item_approve_endpoint(
+    gap_item_id: str,
+    req: DevGapDecisionRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    shared_db: Session = Depends(get_shared_db),
+):
+    """Dev GAP 항목 단위 승인 endpoint."""
+    allowed, error = _can_review_dev_gap(current_user)
+    if not allowed:
+        return {"status": "error", "error": error}
+    reviewed_by = str(getattr(current_user, "id", "") or "")
+    return _update_dev_gap_item_decision(
+        shared_db,
+        gap_item_id,
+        "APPROVED_INTENTIONAL_CHANGE",
+        reviewed_by,
+        req.reason,
+    )
+
+
+@rest_router.post("/api/dev-tracking/gaps/{gap_item_id}/reject")
+async def dev_gap_item_reject_endpoint(
+    gap_item_id: str,
+    req: DevGapDecisionRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    shared_db: Session = Depends(get_shared_db),
+):
+    """Dev GAP 항목 단위 거절 endpoint."""
+    allowed, error = _can_review_dev_gap(current_user)
+    if not allowed:
+        return {"status": "error", "error": error}
+    reviewed_by = str(getattr(current_user, "id", "") or "")
+    return _update_dev_gap_item_decision(
+        shared_db,
+        gap_item_id,
+        "REJECTED_UNINTENTIONAL_CHANGE",
+        reviewed_by,
+        req.reason,
+    )
 
 
 @rest_router.post("/api/dev-tracking/tasks/{task_id}/approve")
@@ -1436,6 +1658,43 @@ async def dev_gap_reject_endpoint(
             **(req.result or {}),
         },
     )
+
+
+@rest_router.post("/api/dev-tracking/tasks/{task_id}/sa-review")
+async def dev_gap_sa_review_request_endpoint(
+    task_id: str,
+    req: DevGapSaReviewRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Dev GAP SA 재검토 task 생성 endpoint."""
+    allowed, error = _can_review_dev_gap(current_user)
+    if not allowed:
+        return {"status": "error", "error": error}
+    try:
+        from pipeline.domain.agile.task_coordinator import get_task, init_tasks_db
+
+        init_tasks_db()
+        task = get_task(task_id)
+        if not task:
+            return {"status": "error", "error": "Task not found"}
+        if task.get("task_type") != "dev_gap_approval":
+            return {"status": "error", "error": "Task is not a Dev GAP approval task"}
+        reviewed_by = str(getattr(current_user, "id", "") or "")
+        # author: xxrin
+        # PM이 즉시 거절 처리하지 않고도 SA에게 설계 재검토를 별도로 요청할 수 있도록 명시 endpoint를 둔다.
+        result = _create_sa_review_task(
+            task,
+            reviewed_by,
+            {
+                "approval_status": "REJECTED_UNINTENTIONAL_CHANGE",
+                "reason": req.reason,
+                **(req.result or {}),
+            },
+        )
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        get_logger().exception("dev_gap_sa_review_request_endpoint failed")
+        return {"status": "error", "error": str(e)}
 
 
 @rest_router.get("/api/tasks")
