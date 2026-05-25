@@ -21,6 +21,42 @@ from pipeline.domain.dev_tracking.test.dev_tracking_test_utils import (
 # author: xxrin
 # 원본 대형 Dev Tracking 테스트 파일에서 기능 단위로 분리한 테스트 모듈이다.
 
+class _FakeWebhookUser:
+    id = "user-1"
+    team_id = "team-user"
+    role = "software_engineer"
+
+
+class _FakeQuery:
+    def __init__(self, first_value=None):
+        self.first_value = first_value
+
+    def filter(self, *args, **kwargs):
+        return self
+
+    def order_by(self, *args, **kwargs):
+        return self
+
+    def first(self):
+        return self.first_value
+
+
+_DEFAULT_WEBHOOK_USER = object()
+
+
+class _FakeWebhookSharedDB:
+    # author: xxrin
+    # webhook RBAC와 duplicate check가 같은 shared_db에서 순서대로 실행되는 상황을 재현한다.
+    def __init__(self, *, user=_DEFAULT_WEBHOOK_USER, duplicate=None):
+        self.user = _FakeWebhookUser() if user is _DEFAULT_WEBHOOK_USER else user
+        self.duplicate = duplicate
+
+    def query(self, model):
+        if getattr(model, "__name__", "") == "User":
+            return _FakeQuery(self.user)
+        return _FakeQuery(self.duplicate)
+
+
 def test_github_webhook_signature_validation_accepts_valid_signature():
     from transport.rest_handler import _verify_github_webhook_signature
 
@@ -176,7 +212,7 @@ def test_github_webhook_endpoint_runs_dev_tracking_for_opened_pr(monkeypatch):
         async def body(self):
             return json.dumps(_github_pr_payload(action="opened")).encode("utf-8")
 
-    result = asyncio.run(github_webhook_endpoint(FakeRequest(), shared_db="shared"))
+    result = asyncio.run(github_webhook_endpoint(FakeRequest(), shared_db=_FakeWebhookSharedDB()))
 
     assert result["status"] == "ok"
     assert result["handled"] is True
@@ -187,6 +223,33 @@ def test_github_webhook_endpoint_runs_dev_tracking_for_opened_pr(monkeypatch):
     assert captured["github_oauth_token"] == "token-123"
     assert captured["notify_pr"] is True
     assert captured["team_id"] == "team-1"
+    assert captured["created_by"] == "user-1"
+
+def test_github_webhook_endpoint_rejects_unlinked_actor(monkeypatch):
+    import pipeline.domain.dev_tracking as dev_tracking
+    from transport.rest_handler import github_webhook_endpoint
+
+    called = {"run": False}
+
+    def fake_run_dev_tracking_analysis(payload, *, shared_db=None):
+        called["run"] = True
+        return {"status": "pending_pm_approval", "timeline": [], "data": {}}
+
+    monkeypatch.setattr(dev_tracking, "run_dev_tracking_analysis", fake_run_dev_tracking_analysis)
+    monkeypatch.delenv("NAVIGATOR_GITHUB_WEBHOOK_SECRET", raising=False)
+
+    class FakeRequest:
+        headers = {"X-GitHub-Event": "pull_request"}
+
+        async def body(self):
+            return json.dumps(_github_pr_payload(action="opened")).encode("utf-8")
+
+    result = asyncio.run(github_webhook_endpoint(FakeRequest(), shared_db=_FakeWebhookSharedDB(user=None)))
+
+    assert result["status"] == "error"
+    assert result["handled"] is False
+    assert "linked" in result["error"]
+    assert called["run"] is False
 
 def test_github_webhook_endpoint_rejects_bad_signature(monkeypatch):
     from transport.rest_handler import github_webhook_endpoint
@@ -216,20 +279,6 @@ def test_github_webhook_endpoint_skips_duplicate_head_sha(monkeypatch):
         def __init__(self):
             self.created_at = None
 
-    class FakeQuery:
-        def filter(self, *args, **kwargs):
-            return self
-
-        def order_by(self, *args, **kwargs):
-            return self
-
-        def first(self):
-            return FakeAnalysis()
-
-    class FakeSharedDB:
-        def query(self, model):
-            return FakeQuery()
-
     called = {"run": False}
 
     def fake_run_dev_tracking_analysis(payload, *, shared_db=None):
@@ -244,7 +293,10 @@ def test_github_webhook_endpoint_skips_duplicate_head_sha(monkeypatch):
         async def body(self):
             return json.dumps(_github_pr_payload(action="opened")).encode("utf-8")
 
-    result = asyncio.run(github_webhook_endpoint(FakeRequest(), shared_db=FakeSharedDB()))
+    result = asyncio.run(github_webhook_endpoint(
+        FakeRequest(),
+        shared_db=_FakeWebhookSharedDB(duplicate=FakeAnalysis()),
+    ))
 
     assert result["status"] == "ok"
     assert result["handled"] is False

@@ -72,6 +72,64 @@ def test_code_inventory_builder_scans_temp_project(tmp_path):
     assert result["code_inventory"]["summary"]["file_count"] == 2
     assert result["code_inventory"]["summary"]["symbol_count"] >= 2
 
+def test_branch_fetcher_resets_repo_cache_to_webhook_head_sha(monkeypatch, tmp_path):
+    from pipeline.domain.dev_tracking import nodes
+    import connectors.repo_cache as repo_cache
+
+    repo_dir = tmp_path / "repo"
+    (repo_dir / ".git").mkdir(parents=True)
+    calls = []
+
+    def fake_get_local_repo_path(owner, repo, token=None):
+        return str(repo_dir)
+
+    def fake_run_git(args, cwd):
+        calls.append(args)
+        if args[:2] == ["rev-parse", "HEAD"]:
+            return 0, "abc123def456\n", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(repo_cache, "get_local_repo_path", fake_get_local_repo_path)
+    monkeypatch.setattr(nodes, "_run_git", fake_run_git)
+
+    result = nodes.branch_fetcher({
+        "pr_context": {
+            "owner": "xxrin",
+            "repo": "navigator",
+            "branch_name": "feature/dev-tracking",
+            "head_sha": "abc123",
+            "changed_files": ["backend/app.py"],
+        }
+    })
+
+    assert result["status"] == "PASS"
+    assert ["reset", "--hard", "abc123"] in calls
+    assert result["checkout"]["reset_to_head_sha"] is True
+    assert result["checkout"]["head_sha_matched"] is True
+
+def test_reverse_analyzer_returns_inventory_without_separate_builder(monkeypatch, tmp_path):
+    import orchestration.pipeline_runner as pipeline_runner
+    from pipeline.domain.dev_tracking import nodes
+
+    def fake_build_reverse_context(source_dir):
+        return (
+            "ctx",
+            {
+                "app/api/auth.py": [
+                    {"name": "login", "summary": "login endpoint"},
+                ]
+            },
+        )
+
+    monkeypatch.setattr(pipeline_runner, "build_reverse_context", fake_build_reverse_context)
+
+    result = nodes.reverse_analyzer({"source_dir": str(tmp_path)})
+
+    assert result["status"] == "PASS"
+    assert result["dev_tracking_next_action"] == "forensic_profiler"
+    assert result["code_inventory"]["summary"]["file_count"] == 1
+    assert result["code_inventory"]["symbols_by_file"]["app/api/auth.py"][0]["name"] == "login"
+
 def test_pr_inventory_prioritizes_changed_files():
     from pipeline.domain.dev_tracking.nodes import _prioritize_inventory_for_pr
 

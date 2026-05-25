@@ -35,6 +35,8 @@ def test_dev_tracking_graph_is_exported_without_legacy_develop_name():
     assert graph is not None
     assert routing["first_node"] == "dev_task_planner"
     assert "gap_analyzer" in routing["next_nodes"]
+    assert "code_inventory_builder" not in routing["next_nodes"]
+    assert routing["next_nodes"]["reverse_analyzer"] == ["forensic_profiler"]
 
 def test_dev_tracking_graph_blocks_invalid_payload_before_task_creation(monkeypatch):
     from pipeline.domain.dev_tracking.service import run_dev_tracking_analysis
@@ -135,11 +137,9 @@ def test_dev_tracking_graph_calls_three_llm_paths_for_high_gap(monkeypatch, tmp_
         }
 
     def fake_reverse_analyzer(state):
-        return {"status": "PASS", "project_context": "ctx", "dev_tracking_next_action": "code_inventory_builder"}
-
-    def fake_code_inventory_builder(state):
         return {
             "status": "PASS",
+            "project_context": "ctx",
             "code_inventory": {
                 "files": [{"file": "app/api/auth.py"}],
                 "symbols_by_file": {"app/api/auth.py": [{"name": "login"}]},
@@ -174,7 +174,6 @@ def test_dev_tracking_graph_calls_three_llm_paths_for_high_gap(monkeypatch, tmp_
 
     monkeypatch.setattr(dev_nodes, "branch_fetcher", fake_branch_fetcher)
     monkeypatch.setattr(dev_nodes, "reverse_analyzer", fake_reverse_analyzer)
-    monkeypatch.setattr(dev_nodes, "code_inventory_builder", fake_code_inventory_builder)
     monkeypatch.setattr(dev_nodes, "spec_loader", fake_spec_loader)
     monkeypatch.setattr(dev_nodes, "_call_structured_for_forensic", fake_forensic_llm)
     monkeypatch.setattr(dev_nodes, "_call_structured_for_gap", fake_gap_llm)
@@ -233,9 +232,9 @@ def test_dev_tracking_graph_accumulates_llm_warning_when_gap_llm_fails(monkeypat
             self.parsed = parsed
 
     monkeypatch.setattr(dev_nodes, "branch_fetcher", lambda state: {"status": "PASS", "source_dir": str(tmp_path), "checkout": {}, "dev_tracking_next_action": "reverse_analyzer"})
-    monkeypatch.setattr(dev_nodes, "reverse_analyzer", lambda state: {"status": "PASS", "project_context": "ctx", "dev_tracking_next_action": "code_inventory_builder"})
-    monkeypatch.setattr(dev_nodes, "code_inventory_builder", lambda state: {
+    monkeypatch.setattr(dev_nodes, "reverse_analyzer", lambda state: {
         "status": "PASS",
+        "project_context": "ctx",
         "code_inventory": {
             "files": [{"file": "app/service/auth.py"}],
             "symbols_by_file": {"app/service/auth.py": [{"name": "helper"}]},
@@ -295,9 +294,9 @@ def test_dev_tracking_graph_respects_llm_node_flags(monkeypatch, tmp_path):
         raise AssertionError("intent LLM should be skipped")
 
     monkeypatch.setattr(dev_nodes, "branch_fetcher", lambda state: {"status": "PASS", "source_dir": str(tmp_path), "checkout": {}, "dev_tracking_next_action": "reverse_analyzer"})
-    monkeypatch.setattr(dev_nodes, "reverse_analyzer", lambda state: {"status": "PASS", "project_context": "ctx", "dev_tracking_next_action": "code_inventory_builder"})
-    monkeypatch.setattr(dev_nodes, "code_inventory_builder", lambda state: {
+    monkeypatch.setattr(dev_nodes, "reverse_analyzer", lambda state: {
         "status": "PASS",
+        "project_context": "ctx",
         "code_inventory": {
             "files": [{"file": "app/service/auth.py"}],
             "symbols_by_file": {"app/service/auth.py": [{"name": "helper"}]},

@@ -16,7 +16,6 @@ _DEV_TRACKING_CHAIN = (
     "dev_task_planner",
     "branch_fetcher",
     "reverse_analyzer",
-    "code_inventory_builder",
     "forensic_profiler",
     "spec_loader",
     "gap_analyzer",
@@ -91,7 +90,6 @@ def _build_dev_tracking_pipeline():
     workflow.add_node("dev_task_planner", _with_timeline("dev_task_planner", nodes.dev_task_planner))
     workflow.add_node("branch_fetcher", _with_timeline("branch_fetcher", nodes.branch_fetcher))
     workflow.add_node("reverse_analyzer", _with_timeline("reverse_analyzer", nodes.reverse_analyzer))
-    workflow.add_node("code_inventory_builder", _with_timeline("code_inventory_builder", nodes.code_inventory_builder))
     workflow.add_node("forensic_profiler", _with_timeline("forensic_profiler", nodes.forensic_profiler))
     workflow.add_node("spec_loader", _with_timeline("spec_loader", nodes.spec_loader, uses_shared_db=True))
     workflow.add_node("gap_analyzer", _with_timeline("gap_analyzer", nodes.gap_analyzer))
@@ -129,9 +127,8 @@ def _build_dev_tracking_pipeline():
         _route_after_step,
         {"continue": "reverse_analyzer", "end": END},
     )
-    workflow.add_edge("reverse_analyzer", "code_inventory_builder")
     workflow.add_conditional_edges(
-        "code_inventory_builder",
+        "reverse_analyzer",
         _route_after_step,
         {"continue": "forensic_profiler", "end": END},
     )
@@ -166,8 +163,9 @@ def get_dev_tracking_routing_map() -> dict:
         "next_nodes": {
             "dev_task_planner": ["branch_fetcher"],
             "branch_fetcher": ["reverse_analyzer"],
-            "reverse_analyzer": ["code_inventory_builder"],
-            "code_inventory_builder": ["forensic_profiler"],
+            # author: xxrin
+            # reverse_analyzer가 project_context와 code_inventory를 함께 생성하므로 별도 inventory 노드는 라우팅에서 제외한다.
+            "reverse_analyzer": ["forensic_profiler"],
             "forensic_profiler": ["spec_loader"],
             "spec_loader": ["gap_analyzer"],
             "gap_analyzer": ["dev_knowledge_loader", "milestone_tracker"],

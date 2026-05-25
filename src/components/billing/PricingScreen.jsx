@@ -189,6 +189,8 @@ export default function PricingScreen({ onContinue, onClose }) {
                             : "bg-slate-100 text-slate-400 cursor-default"
                   }`}
                 >
+                  {/* author: xxrin */}
+                  {/* TODO: Billing API 구현 후 pro/enterprise 선택 시 checkout-session을 호출한다. */}
                   {isCurrent ? "현재 플랜" : plan.id === "free" ? "무료로 시작" : "준비 중"}
                 </button>
               </div>

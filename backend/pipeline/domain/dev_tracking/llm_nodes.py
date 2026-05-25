@@ -58,11 +58,27 @@ FORENSIC_PROFILE_PROMPT = (
     "  3. file_role_map\n"
     "  4. implementation_summary\n"
     "- 추가 설명, 마크다운, 자연어 해설, 별도 메타데이터를 출력하지 마세요.\n"
+    "추가 주의 사항:\n"
+    "- code_inventory나 pr_context가 비어있거나 null인 경우, "
+    "존재하지 않는 API나 컴포넌트를 추측하지 말고 "
+    "detected_apis와 detected_components를 빈 리스트로 반환하세요.\n"
+    "- 입력 컨텍스트가 불완전해도 implementation_summary에 '데이터 없음'을 명시하세요.\n"
 )
 
 
 GAP_REPORT_PROMPT = (
     "당신은 PR 구현 결과가 제품/기획 스펙을 충족하는지 검증하는 Gap Analysis Agent입니다.\n"
+    "\n"
+    "당신의 임무는 published product/spec snapshot과 PR implementation_profile을 비교하여 "
+    "구체적인 gap_report를 생성하는 것입니다.\n"
+    "\n"
+    "## 선행 검사 (반드시 먼저 수행)\n"
+    "분석을 시작하기 전에 published_spec_snapshot의 유효성을 확인하세요:\n"
+    "- api_contracts와 component_contracts가 모두 비어있거나 null이면:\n"
+    "  → gap_report를 빈 리스트([])로 반환하고 분석을 중단하세요.\n"
+    "  → 스펙 부재 자체를 GAP으로 기록하지 마세요.\n"
+    "- spec_outdated가 true이고 스펙이 비어있으면:\n"
+    "  → 마찬가지로 빈 리스트를 반환하세요.\n"
     "\n"
     "당신의 임무는 published product/spec snapshot과 PR implementation_profile을 비교하여 "
     "구체적인 gap_report를 생성하는 것입니다.\n"
@@ -121,11 +137,22 @@ GAP_REPORT_PROMPT = (
     "- 분석 과정이나 내부 추론을 출력하지 마세요.\n"
     "\n"
     "출력은 반드시 gap_report shape만 따르세요.\n"
+    "추가 금지사항:\n"
+    "- 스펙 스냅샷이 비어있거나 로딩되지 않은 상태를 GAP으로 보고하지 마세요.\n"
+    "- 비교 대상 스펙이 없는 경우 GAP을 생성하지 말고 빈 리스트를 반환하세요.\n"
+    "- '스펙이 없다', '스펙을 확인할 수 없다'는 내용의 GAP item을 만들지 마세요.\n"
+    "\n"
+    "출력은 반드시 gap_report shape만 따르세요.\n"
 )
 
 
 INTENT_CLASSIFICATION_PROMPT = (
     "당신은 Product Manager를 위한 PR Gap Intent Classification Agent입니다.\n"
+    "\n"
+    "## 선행 검사\n"
+    "gap_report가 비어있으면([] 또는 null) classifications도 빈 리스트([])로 반환하세요.\n"
+    "각 gap item이 실제 스펙 근거를 가지고 있는지 확인하세요:\n"
+    "- spec_target이 null이거나 스펙 출처를 확인할 수 없는 gap은 UNCERTAIN + PM_REVIEW로 처리하세요.\n"
     "\n"
     "목표:\n"
     "- 입력으로 주어진 각 implementation gap이 의도된 변경인지, 의도하지 않은 누락인지, 판단 불가능한지 분류합니다.\n"

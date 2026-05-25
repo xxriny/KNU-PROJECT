@@ -1317,6 +1317,57 @@ def _normalize_github_pr_webhook(payload: dict) -> dict:
     }
 
 
+def _role_is_developer_plus(role: str) -> bool:
+    return role in {"pm", "software_engineer", "backend", "frontend", "devops", "developer", "admin"}
+
+
+def _resolve_github_webhook_actor(normalized: dict, shared_db: Session | None) -> tuple[bool, dict]:
+    # author: xxrin
+    # GitHub webhook sender를 shared.db 사용자와 매핑해 내부 RBAC 기준으로 developer+ 여부를 검증한다.
+    # webhook에는 JWT가 없으므로 GitHub login/id와 가입 사용자 정보를 연결하는 방식으로 권한을 판단한다.
+    actor = normalized.get("actor") if isinstance(normalized.get("actor"), dict) else {}
+    github_actor = str(actor.get("github_id") or "").strip()
+    if not github_actor:
+        return False, {"error": "GitHub webhook actor is missing"}
+    if shared_db is None or not hasattr(shared_db, "query"):
+        return False, {"error": "shared_db is required for GitHub webhook RBAC"}
+
+    try:
+        from auth.shared_models import User as SharedUser
+
+        matched_user = None
+        for field_name in ("github_login", "github_username", "github_id"):
+            field = getattr(SharedUser, field_name)
+            matched_user = shared_db.query(SharedUser).filter(field == github_actor).first()
+            if matched_user is not None:
+                break
+        if matched_user is None:
+            return False, {
+                "error": f"GitHub actor '{github_actor}' is not linked to a NAVIGATOR user",
+                "github_actor": github_actor,
+            }
+
+        role = str(getattr(matched_user, "role", "") or "")
+        if not _role_is_developer_plus(role):
+            return False, {
+                "error": f"GitHub actor '{github_actor}' does not have developer+ role",
+                "github_actor": github_actor,
+                "role": role,
+            }
+
+        return True, {
+            "github_actor": github_actor,
+            "user_id": str(getattr(matched_user, "id", "") or ""),
+            "team_id": str(getattr(matched_user, "team_id", "") or ""),
+            "role": role,
+        }
+    except Exception as exc:
+        return False, {
+            "error": f"GitHub webhook RBAC check failed: {str(exc) or type(exc).__name__}",
+            "github_actor": github_actor,
+        }
+
+
 @rest_router.post("/api/tasks")
 async def create_task_endpoint(req: TaskCreateRequest):
     """새 태스크 생성 (PM 승인 대기)."""
@@ -1387,6 +1438,21 @@ async def github_webhook_endpoint(
             }
 
         normalized = _normalize_github_pr_webhook(payload)
+        rbac_allowed, actor_meta = _resolve_github_webhook_actor(normalized, shared_db)
+        if not rbac_allowed:
+            return {
+                "status": "error",
+                "handled": False,
+                "error": actor_meta.get("error", "GitHub webhook actor is not allowed"),
+                "github_actor": actor_meta.get("github_actor", ""),
+                "role": actor_meta.get("role", ""),
+                "signature_verified": bool(secret),
+                "signature_warning": verification_error if not secret else "",
+            }
+        normalized["actor"] = {
+            **(normalized.get("actor") if isinstance(normalized.get("actor"), dict) else {}),
+            **actor_meta,
+        }
         # author: xxrin
         # 무엇: 동일 PR head_sha가 이미 분석된 경우 webhook 재진입을 차단한다.
         # 왜: 중복 분석으로 동일 승인 태스크/코멘트가 반복 생성되는 것을 방지하기 위해서다.
@@ -1429,8 +1495,8 @@ async def github_webhook_endpoint(
                 or os.environ.get("GITHUB_TOKEN")
                 or "",
                 "notify_pr": True,
-                "team_id": os.environ.get("NAVIGATOR_DEFAULT_TEAM_ID", ""),
-                "created_by": normalized.get("actor", {}).get("github_id", ""),
+                "team_id": os.environ.get("NAVIGATOR_DEFAULT_TEAM_ID", "") or actor_meta.get("team_id", ""),
+                "created_by": actor_meta.get("user_id", "") or normalized.get("actor", {}).get("github_id", ""),
             }
         )
         result = run_dev_tracking_analysis(normalized, shared_db=shared_db)

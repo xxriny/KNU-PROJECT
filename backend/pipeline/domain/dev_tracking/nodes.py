@@ -66,6 +66,61 @@ def _fallback_reverse_context(source_dir: str, reason: str) -> tuple[str, dict[s
     return context, {"files": files, "fallback_reason": reason}
 
 
+def _normalize_reverse_code_inventory(reverse_inventory: dict[str, Any]) -> dict[str, Any]:
+    # author: xxrin
+    # build_reverse_context()의 튜플 반환값을 Dev Tracking 공통 code_inventory shape로 맞춘다.
+    # 별도 code_inventory_builder 노드 없이 reverse_analyzer 단일 단계에서 후속 노드 입력을 완성하기 위함이다.
+    if not isinstance(reverse_inventory, dict):
+        return {"files": [], "symbols_by_file": {}, "summary": {"file_count": 0, "symbol_count": 0}}
+    if "files" in reverse_inventory and "symbols_by_file" in reverse_inventory:
+        files = reverse_inventory.get("files") if isinstance(reverse_inventory.get("files"), list) else []
+        symbols_by_file = (
+            reverse_inventory.get("symbols_by_file")
+            if isinstance(reverse_inventory.get("symbols_by_file"), dict)
+            else {}
+        )
+        summary = reverse_inventory.get("summary") if isinstance(reverse_inventory.get("summary"), dict) else {}
+        return {
+            "files": files,
+            "symbols_by_file": symbols_by_file,
+            "summary": {
+                "file_count": summary.get("file_count", len(files)),
+                "symbol_count": summary.get("symbol_count", sum(len(items) for items in symbols_by_file.values())),
+            },
+        }
+
+    files: list[dict[str, Any]] = []
+    symbols_by_file: dict[str, list[dict[str, Any]]] = {}
+    for file_path, symbols in reverse_inventory.items():
+        if not isinstance(file_path, str) or not file_path:
+            continue
+        if not isinstance(symbols, list):
+            continue
+        files.append({"file": file_path})
+        symbols_by_file[file_path] = [
+            {
+                "name": item.get("name", "") if isinstance(item, dict) else "",
+                "type": item.get("type", "function") if isinstance(item, dict) else "function",
+                "summary": item.get("summary", "") if isinstance(item, dict) else "",
+                "docstring": item.get("docstring", "") if isinstance(item, dict) else "",
+                "start_line": item.get("start_line", item.get("lineno", 0)) if isinstance(item, dict) else 0,
+                "end_line": item.get("end_line", item.get("lineno", 0)) if isinstance(item, dict) else 0,
+                "lang": item.get("lang", "") if isinstance(item, dict) else "",
+            }
+            for item in symbols
+            if isinstance(item, dict)
+        ]
+
+    return {
+        "files": files,
+        "symbols_by_file": symbols_by_file,
+        "summary": {
+            "file_count": len(files),
+            "symbol_count": sum(len(items) for items in symbols_by_file.values()),
+        },
+    }
+
+
 def _validate_llm_gap_report(gaps: list[dict[str, Any]], state: dict[str, Any]) -> list[dict[str, Any]]:
     # author:xxrin
     # LLM GAP 결과가 비어 있거나 중복된 식별자를 내면 PM 판단이 흔들리므로 semantic validation을 수행한다.
@@ -191,6 +246,23 @@ def branch_fetcher(state: dict[str, Any]) -> dict[str, Any]:
         if branch and not provided_source_dir:
             _run_git(["fetch", "origin", branch], str(repo_path))
             _run_git(["checkout", branch], str(repo_path))
+        if expected_sha and not provided_source_dir:
+            code, out, err = _run_git(["reset", "--hard", expected_sha], str(repo_path))
+            checkout["reset_to_head_sha"] = code == 0
+            if code != 0:
+                return {
+                    "status": "FAIL",
+                    "error_type": "HEAD_SHA_RESET_FAILED",
+                    "errors": [err or out],
+                    "checkout": checkout,
+                    "dev_tracking_next_action": "blocked",
+                    "current_step": "branch_fetcher_failed",
+                }
+        elif expected_sha:
+            # author: xxrin
+            # 사용자가 직접 넘긴 source_dir는 로컬 작업물이 있을 수 있어 reset하지 않고 검증 실패로만 막는다.
+            checkout["reset_to_head_sha"] = False
+            checkout["reset_skipped_reason"] = "provided_source_dir"
         code, out, err = _run_git(["rev-parse", "HEAD"], str(repo_path))
         if code != 0:
             return {
@@ -235,7 +307,7 @@ def branch_fetcher(state: dict[str, Any]) -> dict[str, Any]:
 
 def reverse_analyzer(state: dict[str, Any]) -> dict[str, Any]:
     # author:xxrin
-    # 기존 역분석 helper를 수정하지 않고 호출해서 project_context를 만든다.
+    # build_reverse_context()의 project_context와 code_inventory를 단일 reverse 단계에서 함께 만든다.
     source_dir = str(state.get("source_dir") or "")
     fallback_warning = ""
     try:
@@ -254,6 +326,7 @@ def reverse_analyzer(state: dict[str, Any]) -> dict[str, Any]:
     else:
         project_context = reverse_result or ""
         reverse_inventory = {}
+    code_inventory = _normalize_reverse_code_inventory(reverse_inventory)
     status = "PASS" if project_context else "WARN"
     warnings = [] if project_context else ["REVERSE_CONTEXT_EMPTY"]
     if fallback_warning:
@@ -261,8 +334,9 @@ def reverse_analyzer(state: dict[str, Any]) -> dict[str, Any]:
     result = {
         "status": status,
         "project_context": project_context,
+        "code_inventory": code_inventory,
         "warnings": warnings,
-        "dev_tracking_next_action": "code_inventory_builder",
+        "dev_tracking_next_action": "forensic_profiler",
         "current_step": "reverse_analyzer_done",
     }
     if reverse_inventory:

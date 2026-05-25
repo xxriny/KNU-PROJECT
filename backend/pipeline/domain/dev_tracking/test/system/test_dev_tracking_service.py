@@ -38,11 +38,9 @@ def test_dev_tracking_service_returns_pending_after_completed_graph(monkeypatch,
         }
 
     def fake_reverse_analyzer(state):
-        return {"status": "PASS", "project_context": "ctx", "dev_tracking_next_action": "code_inventory_builder"}
-
-    def fake_code_inventory_builder(state):
         return {
             "status": "PASS",
+            "project_context": "ctx",
             "code_inventory": {"files": [], "symbols_by_file": {}, "summary": {}},
             "dev_tracking_next_action": "forensic_profiler",
         }
@@ -85,7 +83,6 @@ def test_dev_tracking_service_returns_pending_after_completed_graph(monkeypatch,
 
     monkeypatch.setattr(dev_nodes, "branch_fetcher", fake_branch_fetcher)
     monkeypatch.setattr(dev_nodes, "reverse_analyzer", fake_reverse_analyzer)
-    monkeypatch.setattr(dev_nodes, "code_inventory_builder", fake_code_inventory_builder)
     monkeypatch.setattr(dev_nodes, "forensic_profiler", fake_forensic_profiler)
     monkeypatch.setattr(dev_nodes, "spec_loader", fake_spec_loader)
     monkeypatch.setattr(dev_nodes, "analysis_persister", fake_analysis_persister)
@@ -114,12 +111,6 @@ def test_dev_tracking_service_returns_pending_after_completed_graph(monkeypatch,
         return {
             "status": "PASS",
             "project_context": "ctx",
-            "dev_tracking_next_action": "code_inventory_builder",
-        }
-
-    def fake_code_inventory_builder(state):
-        return {
-            "status": "PASS",
             "code_inventory": {"files": [], "symbols_by_file": {}, "summary": {}},
             "dev_tracking_next_action": "forensic_profiler",
         }
@@ -168,7 +159,6 @@ def test_dev_tracking_service_returns_pending_after_completed_graph(monkeypatch,
 
     monkeypatch.setattr(dev_nodes, "branch_fetcher", fake_branch_fetcher)
     monkeypatch.setattr(dev_nodes, "reverse_analyzer", fake_reverse_analyzer)
-    monkeypatch.setattr(dev_nodes, "code_inventory_builder", fake_code_inventory_builder)
     monkeypatch.setattr(dev_nodes, "forensic_profiler", fake_forensic_profiler)
     monkeypatch.setattr(dev_nodes, "spec_loader", fake_spec_loader)
     monkeypatch.setattr(dev_nodes, "intent_classifier", fake_intent_classifier)
