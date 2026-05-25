@@ -48,6 +48,34 @@ def _build_update_metadata(artifact: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_dev_gap_doc_update(artifact: dict[str, Any]) -> dict[str, Any]:
+    # author: xxrin
+    # 승인된 Dev GAP 결정을 doc_sync가 문서/Wiki에 반영할 수 있는 명시적 섹션 payload로 만든다.
+    pr_context = _as_dict(artifact.get("pr_context"))
+    result_payload = _as_dict(artifact.get("result"))
+    approved_gaps = result_payload.get("approved_gaps")
+    if not isinstance(approved_gaps, list):
+        approved_gaps = artifact.get("gap_report") if isinstance(artifact.get("gap_report"), list) else []
+    return {
+        "approved_gaps": approved_gaps,
+        "spec_outdated": bool(artifact.get("spec_outdated") or result_payload.get("spec_outdated")),
+        "branch_created_at": (
+            pr_context.get("created_at")
+            or pr_context.get("branch_created_at")
+            or result_payload.get("branch_created_at")
+            or ""
+        ),
+        "approved_spec_version_lock": str(
+            result_payload.get("approved_spec_version_lock")
+            or artifact.get("approved_spec_version_lock")
+            or ""
+        ),
+        "decision_status": artifact.get("decision_status", ""),
+        "reviewed_by": artifact.get("reviewed_by", ""),
+        "pr_context": pr_context,
+    }
+
+
 def run_doc_updater_for_dev_gap_decision(
     artifact: dict[str, Any],
 ) -> dict[str, Any]:
@@ -75,7 +103,10 @@ def run_doc_updater_for_dev_gap_decision(
 
     try:
         from pipeline.domain.agile.nodes.doc_sync import sync_docs
-        req = _build_doc_sync_request(artifact)
+        req = _build_doc_sync_request({
+            **artifact,
+            "dev_gap_doc_update": _build_dev_gap_doc_update(artifact),
+        })
         max_attempts = int(artifact.get("doc_update_max_attempts") or 2)
         if max_attempts < 1:
             max_attempts = 1

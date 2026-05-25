@@ -98,16 +98,21 @@ def _run_git(args: list[str], cwd: str) -> tuple[int, str, str]:
 def _run_gh(args: list[str], cwd: str, input_text: str | None = None) -> tuple[int, str, str]:
     # author:xxrin
     # 기존 PR에 코멘트만 남기기 위한 gh 래퍼. 자동 merge/approve에는 쓰지 않는다.
-    completed = subprocess.run(
-        ["gh", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        input=input_text,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            ["gh", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            input=input_text,
+            check=False,
+        )
+    except FileNotFoundError:
+        # author: xxrin
+        # 운영 PC에 gh CLI가 없으면 E2E 후속 처리만 WARN으로 낮추고 Dev Tracking 분석 흐름은 계속 진행한다.
+        return 127, "", "gh CLI is not installed or not available on PATH"
     return completed.returncode, completed.stdout.strip(), completed.stderr.strip()
 
 
@@ -212,6 +217,25 @@ def _prioritize_inventory_for_pr(
             "changed_file_count": len(changed_files),
         },
     }
+
+
+def _compact_inventory_for_approval_task(
+    inventory: dict[str, Any],
+    changed_files: set[str],
+) -> dict[str, Any]:
+    # author: xxrin
+    # PM 승인 이후 code chunk 반영에 필요한 근거만 task payload에 남겨 local.db payload 비대화를 막는다.
+    compact = _prioritize_inventory_for_pr(
+        inventory,
+        changed_files,
+        max_files=60,
+        max_symbols=120,
+    )
+    compact["summary"] = {
+        **_as_dict(compact.get("summary")),
+        "approval_payload_compacted": True,
+    }
+    return compact
 
 
 def _fallback_reverse_context(source_dir: str, reason: str) -> tuple[str, dict[str, Any]]:
@@ -1807,6 +1831,7 @@ def task_coordinator(state: dict[str, Any]) -> dict[str, Any]:
 
     pr_context = _as_dict(state.get("pr_context"))
     pm_report = _as_dict(state.get("pm_report"))
+    changed_files = _changed_file_set(state)
     task = create_task(
         task_type="dev_gap_approval",
         title=f"PR #{pr_context.get('pr_number')} GAP ?뱀씤 ?붿껌",
@@ -1820,10 +1845,20 @@ def task_coordinator(state: dict[str, Any]) -> dict[str, Any]:
             "intent_classification": state.get("intent_classification") or [],
             "milestone_status": state.get("milestone_status") or {},
             "source_dir": state.get("source_dir") or "",
+            "spec_outdated": bool(state.get("spec_outdated")),
+            # author: xxrin
+            # PM이 승인한 뒤에만 코드 청크 artifact를 만들 수 있도록 변경 파일 중심의 축약 inventory를 task에 보존한다.
+            "changed_files": sorted(changed_files),
+            "code_inventory": _compact_inventory_for_approval_task(
+                _as_dict(state.get("code_inventory")),
+                changed_files,
+            ),
+            "implementation_profile": _as_dict(state.get("implementation_profile")),
         },
         created_by=str(_as_dict(state.get("actor")).get("github_id") or state.get("created_by") or ""),
         team_id=str(state.get("team_id") or ""),
         status="pending_approval",
+        pr_number=pr_context.get("pr_number") or "",
     )
     return {
         "status": "PASS",
@@ -1849,13 +1884,9 @@ def analysis_persister(state: dict[str, Any], shared_db: Any = None) -> dict[str
             "current_step": "analysis_persister_done",
         }
 
-    from auth.database import Base, shared_engine
-    from auth.shared_models import DevGapItem, DevPrAnalysis
+    from auth.shared_models import DevGapItem, DevPrAnalysis, ensure_dev_tracking_schema
 
-    Base.metadata.create_all(
-        bind=shared_engine,
-        tables=[DevPrAnalysis.__table__, DevGapItem.__table__],
-    )
+    ensure_dev_tracking_schema(shared_db)
 
     pr_context = _as_dict(state.get("pr_context"))
     snapshot = _as_dict(state.get("published_spec_snapshot"))
@@ -1865,7 +1896,9 @@ def analysis_persister(state: dict[str, Any], shared_db: Any = None) -> dict[str
         for item in state.get("intent_classification") or []
         if isinstance(item, dict)
     }
+    gaps = [gap for gap in (state.get("gap_report") or []) if isinstance(gap, dict)]
     analysis = DevPrAnalysis(
+        project_id=str(state.get("project_id") or state.get("team_id") or ""),
         team_id=str(state.get("team_id") or ""),
         owner=str(pr_context.get("owner") or ""),
         repo=str(pr_context.get("repo") or ""),
@@ -1873,21 +1906,23 @@ def analysis_persister(state: dict[str, Any], shared_db: Any = None) -> dict[str
         branch_name=str(pr_context.get("branch_name") or ""),
         base_branch=str(pr_context.get("base_branch") or ""),
         head_sha=str(pr_context.get("head_sha") or ""),
+        branch_created_at=str(pr_context.get("created_at") or pr_context.get("branch_created_at") or ""),
         source_dir=str(state.get("source_dir") or ""),
         spec_snapshot_id=str(snapshot.get("snapshot_id") or ""),
+        spec_outdated=bool(state.get("spec_outdated")),
         approval_status=str(state.get("approval_status") or ""),
         analysis_status=str(state.get("dev_tracking_next_action") or "complete"),
         task_id=str(approval_task.get("task_id") or ""),
         pm_report=json.dumps(state.get("pm_report") or {}, ensure_ascii=False, default=str),
         timeline=json.dumps(state.get("timeline") or [], ensure_ascii=False, default=str),
+        gap_count=len(gaps),
+        has_high_gap=bool(state.get("has_high_gap")),
     )
     shared_db.add(analysis)
     shared_db.flush()
 
     gap_count = 0
-    for gap in state.get("gap_report") or []:
-        if not isinstance(gap, dict):
-            continue
+    for gap in gaps:
         gap_id = str(gap.get("gap_id") or "")
         classification = classifications.get(gap_id, {})
         shared_db.add(
@@ -1898,8 +1933,11 @@ def analysis_persister(state: dict[str, Any], shared_db: Any = None) -> dict[str
                 type=str(gap.get("type") or ""),
                 spec_target=str(gap.get("spec_target") or ""),
                 implementation_target=str(gap.get("implementation_target") or ""),
+                spec_outdated_related=bool(gap.get("spec_outdated_related")),
                 intent=str(classification.get("intent") or ""),
+                confidence=classification.get("confidence") if isinstance(classification.get("confidence"), (int, float)) else None,
                 recommended_action=str(classification.get("recommended_action") or ""),
+                approval_status=str(classification.get("approval_status") or state.get("approval_status") or "PENDING_PM_APPROVAL"),
                 description=str(gap.get("description") or ""),
             )
         )
@@ -1926,6 +1964,8 @@ def develop_embedding(state: dict[str, Any], shared_db: Any = None) -> dict[str,
     # Dev GAP 리포트는 별도 artifacts 모듈에서 정규화하고 shared.db에 저장한다.
     pr_context = _as_dict(state.get("pr_context"))
     gaps = state.get("gap_report") or []
+    approval_status = str(state.get("approval_status") or "PENDING")
+    code_chunks_allowed = approval_status == "APPROVED_INTENTIONAL_CHANGE"
     artifact = build_dev_gap_report_artifact(state)
     persistence = persist_dev_knowledge_artifact(artifact, shared_db)
     return {
@@ -1938,10 +1978,14 @@ def develop_embedding(state: dict[str, Any], shared_db: Any = None) -> dict[str,
                 "artifact_type": "DEV_GAP_REPORT",
                 "pr_number": pr_context.get("pr_number"),
                 "branch_name": pr_context.get("branch_name"),
-                "approval_status": state.get("approval_status", "PENDING"),
+                "approval_status": approval_status,
                 "gap_count": len(gaps),
                 "has_high_gap": bool(state.get("has_high_gap")),
-                "write_enabled": True,
+                # author: xxrin
+                # 문서 정책상 PENDING 상태에서는 코드 청크 RAG upsert를 금지하고 GAP artifact만 저장한다.
+                "write_enabled": code_chunks_allowed,
+                "code_chunks_upserted": False,
+                "code_chunk_policy": "blocked_until_pm_approval" if not code_chunks_allowed else "approval_required_path_ready",
             },
         },
         "dev_tracking_next_action": "develop_loop_controller",

@@ -35,6 +35,10 @@ def build_dev_gap_decision_artifact(
         "gap_report": gap_report,
         "intent_classification": payload.get("intent_classification") or [],
         "milestone_status": payload.get("milestone_status") or {},
+        # author: xxrin
+        # PM 승인 후 문서 갱신에서 spec_outdated와 브랜치 시점 고정 정보를 사용할 수 있도록 보존한다.
+        "spec_outdated": bool(payload.get("spec_outdated") or _as_dict(result_payload).get("spec_outdated")),
+        "approved_spec_version_lock": str(_as_dict(result_payload).get("approved_spec_version_lock") or ""),
         "result": result_payload or {},
         "summary": {
             "pr_number": pr_context.get("pr_number"),
@@ -42,6 +46,100 @@ def build_dev_gap_decision_artifact(
             "gap_count": len(gap_report) if isinstance(gap_report, list) else 0,
         },
     }
+
+
+def _normalize_path(value: Any) -> str:
+    return str(value or "").replace("\\", "/").strip()
+
+
+def _select_approved_code_files(
+    payload: dict[str, Any],
+    *,
+    max_files: int = 25,
+) -> list[dict[str, Any]]:
+    # author: xxrin
+    # PM 승인 전까지는 코드 청크를 정답 지식으로 보지 않고, 승인 후에는 변경 파일을 우선해서 최소 단위만 저장한다.
+    inventory = _as_dict(payload.get("code_inventory"))
+    files = inventory.get("files") if isinstance(inventory.get("files"), list) else []
+    changed_files = {
+        _normalize_path(item)
+        for item in payload.get("changed_files") or []
+        if _normalize_path(item)
+    }
+    normalized_files = [
+        item for item in files
+        if isinstance(item, dict) and _normalize_path(item.get("file") or item.get("path"))
+    ]
+
+    if changed_files:
+        changed = [
+            item for item in normalized_files
+            if _normalize_path(item.get("file") or item.get("path")) in changed_files
+        ]
+        rest = [item for item in normalized_files if item not in changed]
+        selected = [*changed, *rest]
+    else:
+        selected = normalized_files
+
+    if not selected and changed_files:
+        selected = [{"file": file_path} for file_path in sorted(changed_files)]
+
+    return selected[:max_files]
+
+
+def build_approved_code_chunk_artifacts(
+    task: dict[str, Any],
+    decision_status: str,
+    reviewed_by: str = "",
+    result_payload: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    # author: xxrin
+    # 문서 기준상 승인된 변경만 RAG 코드 청크로 반영해야 하므로 PM 승인 결과에서 별도 code chunk artifact를 만든다.
+    if decision_status != "APPROVED_INTENTIONAL_CHANGE":
+        return []
+
+    payload = _as_dict(task.get("payload"))
+    pr_context = _as_dict(payload.get("pr_context"))
+    inventory = _as_dict(payload.get("code_inventory"))
+    symbols_by_file = _as_dict(inventory.get("symbols_by_file"))
+    profile = _as_dict(payload.get("implementation_profile"))
+    role_map = _as_dict(profile.get("file_role_map"))
+    selected_files = _select_approved_code_files(payload)
+    approved_at = _now_iso()
+    gap_report = payload.get("gap_report") or []
+    approved_gap_ids = [
+        str(item.get("gap_id") or "")
+        for item in _as_dict(result_payload).get("approved_gaps") or gap_report
+        if isinstance(item, dict) and str(item.get("gap_id") or "")
+    ]
+
+    artifacts: list[dict[str, Any]] = []
+    for item in selected_files:
+        file_path = _normalize_path(item.get("file") or item.get("path"))
+        if not file_path:
+            continue
+        artifacts.append(
+            {
+                "artifact_type": "APPROVED_CODE_CHUNK",
+                "task_id": task.get("id"),
+                "team_id": task.get("team_id") or payload.get("team_id") or "",
+                "decision_status": decision_status,
+                "reviewed_by": reviewed_by,
+                "approved_at": approved_at,
+                "pr_context": pr_context,
+                "file_path": file_path,
+                "file_role": str(role_map.get(file_path) or item.get("role") or ""),
+                "file_summary": {
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"content", "raw", "source"}
+                },
+                "symbols": symbols_by_file.get(file_path) or [],
+                "approved_gap_ids": approved_gap_ids,
+                "result": result_payload or {},
+            }
+        )
+    return artifacts
 
 
 def build_dev_gap_report_artifact(state: dict[str, Any]) -> dict[str, Any]:
@@ -106,6 +204,28 @@ def artifact_to_searchable_text(artifact: dict[str, Any]) -> str:
             )
         )
 
+    code_lines = []
+    if artifact.get("artifact_type") == "APPROVED_CODE_CHUNK":
+        code_lines.extend(
+            [
+                f"file_path: {artifact.get('file_path', '')}",
+                f"file_role: {artifact.get('file_role', '')}",
+                f"approved_gap_ids: {', '.join(artifact.get('approved_gap_ids') or [])}",
+            ]
+        )
+        for symbol in artifact.get("symbols") or []:
+            if isinstance(symbol, dict):
+                code_lines.append(
+                    " | ".join(
+                        str(part or "")
+                        for part in [
+                            symbol.get("name"),
+                            symbol.get("type"),
+                            symbol.get("line"),
+                        ]
+                    )
+                )
+
     return "\n".join(
         [
             f"artifact_type: {artifact.get('artifact_type', '')}",
@@ -119,6 +239,8 @@ def artifact_to_searchable_text(artifact: dict[str, Any]) -> str:
             *gap_lines,
             "intent_classification:",
             *intent_lines,
+            "approved_code:",
+            *code_lines,
         ]
     ).strip()
 
