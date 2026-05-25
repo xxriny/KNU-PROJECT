@@ -21,6 +21,7 @@ const TYPE_FILTERS = [
   { id: "all", label: "전체 태스크" },
   { id: "regular", label: "일반 태스크" },
   { id: "dev_gap", label: "Dev GAP 승인" },
+  { id: "sa_review", label: "SA 재검토" },
 ];
 
 const TASK_TYPE_LABEL = {
@@ -32,6 +33,7 @@ const TASK_TYPE_LABEL = {
   doc_sync:      "문서 동기화",
   publish_docs:  "설계 문서 퍼블리시",
   verify_sa:     "SA 검증",
+  sa_re_review:  "SA GAP 재검토",
 };
 
 const EFFORT_LABEL = { S: "S (2h↓)", M: "M (2~8h)", L: "L (1~3d)", XL: "XL (3d↑)" };
@@ -41,6 +43,7 @@ const AREA_LABEL = {
   frontend:  "프론트엔드",
   fullstack: "풀스택",
   devops:    "DevOps",
+  sa:         "SA",
 };
 
 const TASK_TYPES = ["feature", "bugfix", "refactor", "test", "infra", "doc_sync"];
@@ -254,9 +257,10 @@ export default function TaskApprovalPanel() {
     .filter((t) => filterStatus === "all" || t.status === filterStatus)
     .filter((t) => {
       // author: xxrin
-      // PM이 일반 태스크와 Dev GAP 승인 태스크를 분리해서 볼 수 있도록 타입 필터를 적용한다.
+      // PM이 일반 태스크, Dev GAP 승인, SA 재검토 요청을 분리해서 볼 수 있도록 타입 필터를 적용한다.
       if (taskTypeFilter === "dev_gap") return t.task_type === "dev_gap_approval";
-      if (taskTypeFilter === "regular") return t.task_type !== "dev_gap_approval";
+      if (taskTypeFilter === "sa_review") return t.task_type === "sa_re_review";
+      if (taskTypeFilter === "regular") return !["dev_gap_approval", "sa_re_review"].includes(t.task_type);
       return true;
     })
     .filter((t) => {
@@ -268,7 +272,8 @@ export default function TaskApprovalPanel() {
   const countOf = (s) => tasks.filter((t) => t.status === s).length;
   const countType = (type) => {
     if (type === "dev_gap") return tasks.filter((t) => t.task_type === "dev_gap_approval").length;
-    if (type === "regular") return tasks.filter((t) => t.task_type !== "dev_gap_approval").length;
+    if (type === "sa_review") return tasks.filter((t) => t.task_type === "sa_re_review").length;
+    if (type === "regular") return tasks.filter((t) => !["dev_gap_approval", "sa_re_review"].includes(t.task_type)).length;
     return tasks.length;
   };
 
@@ -537,6 +542,8 @@ export default function TaskApprovalPanel() {
           const docSync = followup.doc_sync || {};
           const prComment = followup.pr_comment || {};
           const ragMetadata = followup.rag_metadata || {};
+          const codeChunkUpsert = followup.code_chunk_upsert || {};
+          const saReviewTask = taskResult.sa_review_task || {};
           const normalizedGapReport = gapReport.map((gap, index) => ({
             gap_id: gap?.gap_id || `GAP_${String(index + 1).padStart(3, "0")}`,
             severity: String(gap?.severity || "UNKNOWN").toUpperCase(),
@@ -701,7 +708,7 @@ export default function TaskApprovalPanel() {
                           />
                         </div>
                       )}
-                      {(taskResult.approval_status || taskResult.message || statusCheck.status || docSync.action || prComment.status) && (
+                      {(taskResult.approval_status || taskResult.message || statusCheck.status || docSync.action || prComment.status || saReviewTask.task_id) && (
                         <div className={`rounded-xl border p-3 space-y-2 text-[11px] ${isDarkMode ? "bg-white/5 border-white/10 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"}`}>
                           <div className="font-bold uppercase tracking-wider opacity-70">Decision Result</div>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -710,6 +717,8 @@ export default function TaskApprovalPanel() {
                             {docSync.action && <span><strong>Doc Sync:</strong> {docSync.action}</span>}
                             {prComment.status && <span><strong>PR Comment:</strong> {prComment.status}</span>}
                             {typeof ragMetadata.stored !== "undefined" && <span><strong>RAG Stored:</strong> {String(ragMetadata.stored)}</span>}
+                            {typeof codeChunkUpsert.stored_count !== "undefined" && <span><strong>Code Chunks:</strong> {codeChunkUpsert.stored_count}</span>}
+                            {saReviewTask.task_id && <span><strong>SA Review:</strong> {saReviewTask.task_id}</span>}
                           </div>
                           {taskResult.message && <p className="leading-relaxed opacity-80">{taskResult.message}</p>}
                           {docSync.message && <p className="leading-relaxed opacity-80"><strong>Doc Sync Message:</strong> {docSync.message}</p>}

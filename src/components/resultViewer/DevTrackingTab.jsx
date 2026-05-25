@@ -30,10 +30,10 @@ const DEFAULT_FORM = {
 
 function statusTone(status) {
   const value = String(status || "").toUpperCase();
-  if (["PASS", "OK", "SUCCESS", "COMPLETE", "COMPLETED"].includes(value)) {
+  if (["PASS", "OK", "SUCCESS", "COMPLETE", "COMPLETED", "APPROVED_INTENTIONAL_CHANGE", "NO_GAP_DETECTED"].includes(value)) {
     return "text-emerald-400 bg-emerald-500/10 border-emerald-500/25";
   }
-  if (["FAIL", "ERROR", "BLOCKED"].includes(value)) {
+  if (["FAIL", "ERROR", "BLOCKED", "REJECTED_UNINTENTIONAL_CHANGE"].includes(value)) {
     return "text-red-400 bg-red-500/10 border-red-500/25";
   }
   if (value === "HIGH") {
@@ -45,7 +45,7 @@ function statusTone(status) {
   if (value === "LOW") {
     return "text-emerald-400 bg-emerald-500/10 border-emerald-500/25";
   }
-  if (["WARN", "WARNING", "SKIPPED"].includes(value)) {
+  if (["WARN", "WARNING", "SKIPPED", "PENDING_PM_APPROVAL"].includes(value)) {
     return "text-amber-400 bg-amber-500/10 border-amber-500/25";
   }
   return "text-slate-400 bg-slate-500/10 border-slate-500/20";
@@ -81,6 +81,7 @@ export default function DevTrackingTab() {
   const [running, setRunning] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [detailLoadingId, setDetailLoadingId] = useState("");
+  const [gapDecisionLoadingId, setGapDecisionLoadingId] = useState("");
   const [error, setError] = useState("");
   const [historyError, setHistoryError] = useState("");
   const [result, setResult] = useState(null);
@@ -175,6 +176,7 @@ export default function DevTrackingTab() {
           status: detail.approval_status || detail.analysis_status || "history",
           timeline: detail.timeline || [],
           data: {
+            analysis_id: detail.id,
             approval_status: detail.approval_status,
             gap_report: detail.gap_items || [],
             pm_report: detail.pm_report || { summary: detail.pm_report_summary || "" },
@@ -324,7 +326,8 @@ export default function DevTrackingTab() {
     if (!connectedRepo?.owner || !connectedRepo?.repo || !authToken) return;
     fetchPullRequests();
     fetchBranches();
-  }, [authToken, connectedRepo?.owner, connectedRepo?.repo, fetchBranches, fetchPullRequests]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, connectedRepo?.owner, connectedRepo?.repo]);
 
   const runAnalysis = async () => {
     setRunning(true);
@@ -381,6 +384,57 @@ export default function DevTrackingTab() {
       setError(`서버 연결 실패: ${runError.message}`);
     } finally {
       setRunning(false);
+    }
+  };
+
+  const handleGapItemDecision = async (gap, action) => {
+    if (!gap?.id) {
+      setError("저장된 GAP 항목만 항목별 승인/거절할 수 있습니다.");
+      return;
+    }
+    setGapDecisionLoadingId(`${gap.id}:${action}`);
+    setError("");
+    try {
+      const headers = { "Content-Type": "application/json" };
+      if (authToken) headers.Authorization = `Bearer ${authToken}`;
+      const response = await fetch(`http://127.0.0.1:${port}/api/dev-tracking/gaps/${gap.id}/${action}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          reason: action === "approve"
+            ? "PM approved this GAP item as intentional."
+            : "PM rejected this GAP item as unintended.",
+        }),
+      });
+      const json = await response.json();
+      if (json.status !== "ok") {
+        setError(json.error || "GAP 항목 결정 처리에 실패했습니다.");
+        return;
+      }
+      const analysis = json.data?.analysis || {};
+      // author: xxrin
+      // GAP 항목별 결정 후 상세 카드와 요약 카드가 즉시 같은 analysis 상태를 보도록 local result를 갱신한다.
+      setResult((prev) => {
+        if (!prev?.data?.data) return prev;
+        return {
+          ...prev,
+          data: {
+            ...prev.data,
+            status: analysis.approval_status || prev.data.status,
+            data: {
+              ...prev.data.data,
+              approval_status: analysis.approval_status || prev.data.data.approval_status,
+              gap_report: analysis.gap_items || prev.data.data.gap_report,
+              pm_report: analysis.pm_report || prev.data.data.pm_report,
+            },
+          },
+        };
+      });
+      fetchAnalyses();
+    } catch (decisionError) {
+      setError(`GAP 항목 결정 처리 실패: ${decisionError.message}`);
+    } finally {
+      setGapDecisionLoadingId("");
     }
   };
 
@@ -704,6 +758,11 @@ export default function DevTrackingTab() {
                       <span className={`text-[11px] px-2 py-0.5 rounded ${isDarkMode ? "bg-white/10 text-slate-300" : "bg-slate-200 text-slate-700"}`}>
                         {gap.type || "-"}
                       </span>
+                      {gap.approval_status && (
+                        <span className={`text-[11px] px-2 py-0.5 rounded border font-bold ${statusTone(gap.approval_status)}`}>
+                          {gap.approval_status}
+                        </span>
+                      )}
                     </div>
                     <p className={`mt-2 text-xs leading-relaxed ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>
                       {gap.description || "설명 없음"}
@@ -713,7 +772,29 @@ export default function DevTrackingTab() {
                       <span><strong>Implementation:</strong> {gap.implementation_target || "-"}</span>
                       <span><strong>Intent:</strong> {gap.intent || "-"}</span>
                       <span><strong>Action:</strong> {gap.recommended_action || "-"}</span>
+                      {gap.approved_by && <span><strong>Reviewed:</strong> {gap.approved_by}</span>}
+                      {gap.approved_at && <span><strong>At:</strong> {gap.approved_at}</span>}
                     </div>
+                    {gap.id && (
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        <button
+                          type="button"
+                          onClick={() => handleGapItemDecision(gap, "approve")}
+                          disabled={Boolean(gapDecisionLoadingId)}
+                          className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white"
+                        >
+                          {gapDecisionLoadingId === `${gap.id}:approve` ? "처리 중" : "항목 승인"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleGapItemDecision(gap, "reject")}
+                          disabled={Boolean(gapDecisionLoadingId)}
+                          className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white"
+                        >
+                          {gapDecisionLoadingId === `${gap.id}:reject` ? "처리 중" : "항목 거절"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
