@@ -505,6 +505,16 @@ async def github_device_poll(
                 logged_in_user = db.query(User).filter(User.id == token_payload["sub"]).first()
 
     if logged_in_user:
+        # 다른 유저가 이미 같은 github_id를 갖고 있으면 먼저 해제 (UNIQUE 충돌 방지)
+        existing = db.query(User).filter(
+            User.github_id == github_id,
+            User.id != logged_in_user.id,
+        ).first()
+        if existing:
+            existing.github_id = None
+            existing.github_login = None
+            existing.github_oauth_token = None
+
         # 기존 로그인 사용자에 GitHub 정보 연결 (계정 전환 없음)
         logged_in_user.github_id          = github_id
         logged_in_user.github_login       = login
