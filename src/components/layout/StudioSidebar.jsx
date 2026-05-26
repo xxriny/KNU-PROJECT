@@ -1,6 +1,5 @@
 import React from "react";
 import useAppStore from "../../store/useAppStore";
-import ModeSegmentedControl from "./ModeSegmentedControl";
 
 const GROUP_META = {
   pm:     { label: "요구사항",      color: "text-cyan-400",   dot: "bg-cyan-400" },
@@ -13,8 +12,6 @@ export default function StudioSidebar({
   hasProgress, pipelineStatus,
   onPanel, onOpenProgress,
 }) {
-  const selectedMode = useAppStore((s) => s.selectedMode);
-  const setSelectedMode = useAppStore((s) => s.setSelectedMode);
   const groups = Object.keys(GROUP_META);
   const grouped = groups.reduce((acc, g) => {
     acc[g] = panels.filter(p => p.group === g);
@@ -23,15 +20,6 @@ export default function StudioSidebar({
 
   return (
     <div className="flex flex-col gap-0 pt-3 px-3">
-
-      {/* 모드 선택 (Segmented Control) — 메인 화면의 모드 진입점 */}
-      <ModeSegmentedControl
-        value={selectedMode}
-        onChange={setSelectedMode}
-        isDarkMode={isDarkMode}
-        disabled={pipelineStatus === "running"}
-      />
-
       {/* 그룹별 섹션 */}
       {groups.map((g) => {
         const items = grouped[g];

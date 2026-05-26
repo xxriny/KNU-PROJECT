@@ -292,7 +292,7 @@ function createWindow() {
     titleBarOverlay: {
       color: "#0D1117",
       symbolColor: "#8B949E",
-      height: 36,
+      height: 56,
     },
     autoHideMenuBar: true,
     webPreferences: {
@@ -374,7 +374,7 @@ ipcMain.handle("set-titlebar-theme", (event, isDark) => {
 
     mainWindow.setTitleBarOverlay({
       ...themeColors,
-      height: 36,
+      height: 56,
     });
   } catch (err) {
     safeError("[Electron] Failed to update title bar overlay:", err.message);

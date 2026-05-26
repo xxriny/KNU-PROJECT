@@ -76,7 +76,7 @@ export default function ChatThread({ onSync }) {
 
   return (
     <ScrollArea className="flex-1 px-4 pt-4">
-      <div className="max-w-3xl mx-auto pb-4">
+      <div className="max-w-5xl mx-auto pb-4">
         {(chatHistory || []).map((msg, idx) => {
           if (msg?.role === "system_marker") {
             return (
@@ -382,28 +382,43 @@ function parseMarkdownList(md) {
 /* ── FollowupChips ────────────────────────────── */
 function FollowupChips({ items, isDarkMode, onPick }) {
   return (
-    <div className="mt-3 ml-11 flex flex-col gap-2 animate-fade-in">
-      <div className="flex items-center gap-1.5">
-        <MessageCircleQuestion size={12} className={isDarkMode ? "text-slate-500" : "text-slate-400"} />
-        <span className={`text-[10px] font-bold uppercase tracking-[0.2em] ${
-          isDarkMode ? "text-slate-600" : "text-slate-400"
+    <div className="mt-8 ml-11 animate-fade-in">
+      {/* 타이틀 */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className={`text-[14px] font-extrabold tracking-tight ${
+          isDarkMode ? "text-slate-300" : "text-slate-800"
         }`}>
-          이어갈 질문
+          후속 조치
         </span>
       </div>
-      <div className="flex flex-wrap gap-2">
+
+      {/* 세로 리스트 */}
+      <div className={`flex flex-col border-t ${
+        isDarkMode ? "border-white/[0.06]" : "border-slate-100"
+      }`}>
         {items.map((text, idx) => (
           <button
             key={idx}
             onClick={() => onPick(text)}
-            title="클릭하면 바로 전송됩니다"
-            className={`px-3 py-1.5 rounded-full text-[12px] font-medium border transition-all hover:scale-[1.02] text-left ${
+            className={`w-full flex items-start gap-3 py-3.5 text-left border-b transition-all duration-150 group ${
               isDarkMode
-                ? "bg-white/[0.04] border-white/10 text-slate-300 hover:text-white hover:border-blue-400/40 hover:bg-blue-500/10"
-                : "bg-white border-slate-200 text-slate-700 hover:text-blue-700 hover:border-blue-300 hover:bg-blue-50"
+                ? "border-white/[0.06] hover:bg-white/[0.02] text-slate-300"
+                : "border-slate-100 hover:bg-slate-50 text-slate-700"
             }`}
           >
-            {text}
+            {/* 파란색 ↳ 화살표 */}
+            <span className={`text-[15px] leading-none shrink-0 font-bold ${
+              isDarkMode ? "text-blue-400 group-hover:text-blue-300" : "text-blue-600 group-hover:text-blue-500"
+            }`}>
+              ↳
+            </span>
+            <span className={`text-[13px] font-medium leading-relaxed transition-colors ${
+              isDarkMode 
+                ? "text-slate-300 group-hover:text-white" 
+                : "text-slate-700 group-hover:text-blue-600"
+            }`}>
+              {text}
+            </span>
           </button>
         ))}
       </div>

@@ -33,48 +33,11 @@ export default function TopBar({
   return (
     <div className={`h-14 app-drag flex items-center px-6 gap-4 border-b border-[var(--border)] backdrop-blur-xl shrink-0 z-20 relative ${isDarkMode ? "bg-[rgba(19,23,31,0.9)]" : "bg-[rgba(255,255,255,0.9)]"
       }`}>
-      {/* 로고 영역 */}
-      <div className="flex items-center gap-3 shrink-0 app-no-drag">
-        <span className="text-sm font-display font-black text-gradient tracking-[0.25em] select-none ml-2">
+      {/* App Logo/Name */}
+      <div className="flex-1 flex items-center app-no-drag overflow-hidden pl-4">
+        <span className="text-[13px] font-display font-black text-gradient tracking-[0.2em] select-none">
           NAVIGATOR
         </span>
-
-        {/* 새 프로젝트 시작 — 로고 우측에 배치 */}
-        <button
-          onClick={handleNewProject}
-          title="새 프로젝트 / 새 대화 시작"
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold rounded-lg border transition-all ${
-            isDarkMode
-              ? "border-white/10 text-slate-400 hover:text-white hover:bg-white/5 hover:border-white/20"
-              : "border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 hover:border-slate-300"
-          }`}
-        >
-          <RotateCcw size={12} />
-          <span>새 프로젝트</span>
-        </button>
-      </div>
-
-      <div className="w-px h-6 bg-[var(--border)] shrink-0 mx-2" />
-
-      {/* 팀 이름 */}
-      <div className="flex-1 flex items-center app-no-drag overflow-hidden">
-        <span className={`text-xl font-bold tracking-tight truncate ${isDarkMode ? "text-slate-100" : "text-slate-800"}`}>
-          {teamName}
-        </span>
-      </div>
-
-      {/* 라이브러리 버튼 */}
-      <div className="flex items-center gap-2 app-no-drag shrink-0 mr-[140px]">
-        <button
-          onClick={() => setShowSessions(!showSessions)}
-          className={`flex items-center gap-2 px-4 py-2 text-[13px] font-bold rounded-xl border transition-all ${showSessions
-            ? "bg-blue-500/10 border-blue-500/30 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.1)]"
-            : `border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] ${isDarkMode ? "hover:bg-white/10" : "hover:bg-black/5"}`
-            }`}
-        >
-          <Library size={16} />
-          <span>라이브러리</span>
-        </button>
       </div>
 
       {/* 확인 모달 — 진행 중 작업이 있을 때만 */}

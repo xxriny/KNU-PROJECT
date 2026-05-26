@@ -14,7 +14,7 @@ import os
 import re
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, UploadFile, File
 from fastapi.security import OAuth2PasswordBearer
 from auth.deps import get_current_user, get_current_user_optional
 from auth.database import get_db, get_shared_db
@@ -338,6 +338,37 @@ async def idea_chat(req: IdeaChatRequest):
         ))
     except Exception as e:
         get_logger().exception("idea_chat endpoint failed")
+        return {"status": "error", "error": str(e)}
+
+
+@rest_router.post("/api/upload-doc")
+async def upload_doc(file: UploadFile = File(...)):
+    """PDF / Word / TXT 파일에서 텍스트를 추출해 반환한다."""
+    name = (file.filename or "").lower()
+    content = await file.read()
+    try:
+        if name.endswith(".pdf"):
+            import io
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(content))
+            text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
+        elif name.endswith(".docx"):
+            import io
+            from docx import Document
+            doc = Document(io.BytesIO(content))
+            text = "\n".join(p.text for p in doc.paragraphs)
+        elif name.endswith(".doc"):
+            return {"status": "error", "error": ".doc 형식은 지원하지 않습니다. .docx로 변환 후 업로드해 주세요."}
+        else:
+            # .txt, .md 등 텍스트 계열
+            text = content.decode("utf-8", errors="replace")
+
+        text = text.strip()
+        if not text:
+            return {"status": "error", "error": "파일에서 텍스트를 추출하지 못했습니다."}
+        return {"status": "ok", "text": text, "chars": len(text)}
+    except Exception as e:
+        get_logger().exception("upload_doc failed")
         return {"status": "error", "error": str(e)}
 
 

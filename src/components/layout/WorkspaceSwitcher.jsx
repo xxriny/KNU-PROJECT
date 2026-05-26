@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import useAppStore from "../../store/useAppStore";
 import { serverRequest } from "../../api/serverClient";
-import { Plus, Loader2, Check, X, Copy, LogOut, UserPlus, Users, Edit3, Moon, Sun, CreditCard } from "lucide-react";
+import { Plus, Loader2, Check, X, Copy, LogOut, UserPlus, Users, Edit3, Moon, Sun, CreditCard, Library } from "lucide-react";
 
-export default function WorkspaceSwitcher({ onOpenGithub, onOpenPricing, onCreateTeam }) {
+export default function WorkspaceSwitcher({ onOpenGithub, onOpenPricing, onCreateTeam, showSessions, setShowSessions }) {
   const {
     myTeams, loadMyTeams, switchTeam, currentUser, isDarkMode, toggleDarkMode,
     teamWorkspaces, pipelineStatus,
@@ -136,17 +136,34 @@ export default function WorkspaceSwitcher({ onOpenGithub, onOpenPricing, onCreat
         <Plus size={20} />
       </button>
 
-      {/* 하단 유저 아바타 */}
-      <div className="mt-auto relative" ref={userPopupRef}>
+      {/* 하단 유저 아바타 및 라이브러리 단축 버튼 */}
+      <div className="mt-auto flex flex-col items-center gap-3">
         <button
-          onClick={() => setUserPopup((v) => !v)}
-          title={currentUser?.name || currentUser?.email}
-          className={`w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-black transition-all ring-2 ${
-            userPopup ? "ring-blue-500" : "ring-transparent hover:ring-blue-500/40"
-          } ${isDarkMode ? "bg-white/10 text-slate-300" : "bg-slate-200 text-slate-700"}`}
+          onClick={() => setShowSessions?.(!showSessions)}
+          title="라이브러리 (대화 기록)"
+          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
+            showSessions
+              ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
+              : isDarkMode
+              ? "bg-transparent text-slate-400 hover:text-white hover:bg-white/5"
+              : "bg-transparent text-slate-500 hover:bg-slate-100"
+          }`}
         >
-          {currentUser?.name ? currentUser.name.substring(0, 2).toUpperCase() : "?"}
+          <Library size={18} />
         </button>
+
+        <div className={`w-8 border-t ${isDarkMode ? "border-white/10" : "border-slate-200"}`} />
+
+        <div className="relative" ref={userPopupRef}>
+          <button
+            onClick={() => setUserPopup((v) => !v)}
+            title={currentUser?.name || currentUser?.email}
+            className={`w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-black transition-all ring-2 ${
+              userPopup ? "ring-blue-500" : "ring-transparent hover:ring-blue-500/40"
+            } ${isDarkMode ? "bg-white/10 text-slate-300" : "bg-slate-200 text-slate-700"}`}
+          >
+            {currentUser?.name ? currentUser.name.substring(0, 2).toUpperCase() : "?"}
+          </button>
 
         {userPopup && (
           <div className={`absolute bottom-12 left-full ml-2 z-[9000] w-[220px] rounded-2xl shadow-2xl border overflow-hidden py-1 ${
@@ -188,15 +205,7 @@ export default function WorkspaceSwitcher({ onOpenGithub, onOpenPricing, onCreat
                 : "bg-purple-500/20 text-purple-400"
               }`}>{userPlan || "free"}</span>
             </button>
-            <button
-              onClick={() => toggleDarkMode?.()}
-              className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-xs font-semibold transition-colors ${
-                isDarkMode ? "text-slate-300 hover:bg-white/8" : "text-slate-700 hover:bg-slate-50"
-              }`}
-            >
-              {isDarkMode ? <Sun size={13} className="opacity-70" /> : <Moon size={13} className="opacity-70" />}
-              {isDarkMode ? "라이트 모드" : "다크 모드"}
-            </button>
+
             <div className={`my-1 border-t ${isDarkMode ? "border-white/5" : "border-slate-100"}`} />
             <button
               onClick={() => { setUserPopup(false); logout?.(); }}
@@ -206,6 +215,7 @@ export default function WorkspaceSwitcher({ onOpenGithub, onOpenPricing, onCreat
             </button>
           </div>
         )}
+        </div>
       </div>
 
       {/* ── 컨텍스트 메뉴 ─────────────────────────────── */}

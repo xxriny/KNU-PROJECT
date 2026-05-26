@@ -10,13 +10,13 @@ import SettingsPanel from "./components/SettingsPanel";
 import LoginScreen from "./components/auth/LoginScreen";
 import TeamCreateScreen from "./components/auth/TeamCreateScreen";
 import PricingScreen from "./components/billing/PricingScreen";
-import ModeBridge from "./components/onboarding/ModeBridge";
 
 import TopBar from "./components/layout/TopBar";
 import StudioCard from "./components/layout/StudioCard";
 import StudioSidebar from "./components/layout/StudioSidebar";
 import PanelWrapper from "./components/layout/PanelWrapper";
 import WorkspaceSwitcher from "./components/layout/WorkspaceSwitcher";
+import LeftSidebar from "./components/layout/LeftSidebar";
 import ToastContainer from "./components/ui/ToastContainer";
 import { ICON_PANELS } from "./constants/uiConstants";
 
@@ -104,14 +104,6 @@ export default function App() {
   };
 
   const renderCenter = () => {
-    if (showSessions) {
-      return (
-        <PanelWrapper title="세션" onClose={() => setShowSessions(false)}>
-          <SessionPanel />
-        </PanelWrapper>
-      );
-    }
-
     if (activeIconPanel) {
       const panel = ICON_PANELS.find(p => p.id === activeIconPanel);
       if (!panel) {
@@ -181,9 +173,13 @@ export default function App() {
       <div className="flex-1 min-h-0 overflow-hidden flex app-no-drag">
         {/* Slack-style Workspace Switcher */}
         <WorkspaceSwitcher
+          showSessions={showSessions}
+          setShowSessions={setShowSessions}
           onOpenGithub={() => { setShowGithubModal(true); setShowSessions(false); }}
           onOpenPricing={() => { setShowPricingModal(true); }}
         />
+
+        {showSessions && <LeftSidebar />}
 
         <div className="flex-1 flex flex-col bg-transparent min-h-0 overflow-hidden relative">
           <div className="flex-1 min-h-0 overflow-hidden">
@@ -194,7 +190,7 @@ export default function App() {
         </div>
 
         <div
-          className={`relative h-full flex flex-col border-l border-[var(--border)] overflow-hidden transition-all duration-250 ease-out ${isStudioOpen ? "w-[360px]" : "w-[72px]"
+          className={`relative h-full flex flex-col border-l border-[var(--border)] overflow-hidden transition-all duration-250 ease-out ${isStudioOpen ? "w-[240px]" : "w-[72px]"
             } ${isDarkMode ? "bg-[#0F1219]" : "bg-transparent"}`}
         >
           <div className={`h-14 flex items-center justify-center shrink-0 border-b ${isDarkMode ? "border-white/5" : "border-[var(--border)]"
@@ -321,11 +317,6 @@ export default function App() {
       )}
 
       <ToastContainer />
-
-      {/* 온보딩 모드 브릿지 — 활성 세션이 없고 아직 dismiss 안 된 경우에만 노출 */}
-      {showOnboardingBridge && !currentSessionId && (chatHistory || []).length === 0 && (
-        <ModeBridge />
-      )}
 
     </div>
   );

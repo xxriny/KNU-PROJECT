@@ -45,7 +45,7 @@ export default function ChatInput({
               w-9 h-9 flex items-center justify-center rounded-full transition-all duration-300
               ${value.trim() && !isProcessing
                 ? "bg-blue-600 text-white hover:bg-blue-500 shadow-lg active:scale-90"
-                : "bg-white/5 text-slate-500 cursor-not-allowed grayscale"
+                : "bg-white/5 text-slate-500 cursor-default grayscale"
               }
             `}
           >

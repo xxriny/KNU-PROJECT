@@ -6,6 +6,71 @@ export default function ChatMessage({ message }) {
   const isUser = message.role === "user";
   const { isDarkMode } = useAppStore();
 
+  const renderMarkdown = (text) => {
+    if (!text) return null;
+    const lines = text.split("\n");
+    return lines.map((line, lineIdx) => {
+      const isBulletList = line.trim().startsWith("- ") || line.trim().startsWith("* ");
+      const isOrderedList = /^\d+\.\s/.test(line.trim());
+      
+      let content = line;
+      if (isBulletList) {
+        content = line.trim().replace(/^[-*]\s+/, "");
+      } else if (isOrderedList) {
+        content = line.trim().replace(/^\d+\.\s+/, "");
+      }
+
+      const parts = content.split(/(\*\*.*?\*\*|`.*?`)/g);
+      const parsedLine = parts.map((part, partIdx) => {
+        if (part.startsWith("**") && part.endsWith("**")) {
+          return (
+            <strong key={partIdx} className="font-extrabold text-blue-400">
+              {part.slice(2, -2)}
+            </strong>
+          );
+        }
+        if (part.startsWith("`") && part.endsWith("`")) {
+          return (
+            <code
+              key={partIdx}
+              className="px-1.5 py-0.5 rounded bg-black/40 text-pink-400 font-mono text-[12px] border border-white/5"
+            >
+              {part.slice(1, -1)}
+            </code>
+          );
+        }
+        return part;
+      });
+
+      if (isBulletList) {
+        return (
+          <li key={lineIdx} className="ml-5 list-disc mb-1.5 pl-1 text-[13.5px]">
+            {parsedLine}
+          </li>
+        );
+      }
+      if (isOrderedList) {
+        const match = line.trim().match(/^(\d+)\.\s+/);
+        const num = match ? match[1] : "1";
+        return (
+          <li key={lineIdx} className="ml-5 list-decimal mb-1.5 pl-1 text-[13.5px]" value={num}>
+            {parsedLine}
+          </li>
+        );
+      }
+
+      if (!line.trim()) {
+        return <div key={lineIdx} className="h-3" />;
+      }
+
+      return (
+        <p key={lineIdx} className="mb-2 last:mb-0">
+          {parsedLine}
+        </p>
+      );
+    });
+  };
+
   return (
     <div className={`flex gap-3 mt-4 animate-fade-in animate-slide-up ${isUser ? "flex-row-reverse" : ""}`}>
       {/* Icon Area */}
@@ -33,7 +98,7 @@ export default function ChatMessage({ message }) {
               : "bg-slate-100 text-slate-800 rounded-tl-sm"
         }`}
       >
-        <div className="whitespace-pre-wrap">{message.content}</div>
+        <div>{renderMarkdown(message.content)}</div>
       </div>
     </div>
   );
