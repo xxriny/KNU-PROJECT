@@ -217,7 +217,9 @@ def _remove_worktree(repo_path: Path, worktree_path: Path) -> None:
     """worktree를 정리한다. 실패해도 분석 전체에 영향 없음."""
     import shutil
     try:
-        _run_git(["worktree", "remove", "--force", str(worktree_path)], str(repo_path))
+        wt_str = str(worktree_path).replace("\\", "/")
+        _run_git(["worktree", "remove", "--force", wt_str], str(repo_path))
+        _run_git(["worktree", "prune"], str(repo_path))
     except Exception:
         pass
     if worktree_path.exists():
@@ -311,18 +313,34 @@ def branch_fetcher(state: dict[str, Any]) -> dict[str, Any]:
     # fetch the branch into main clone (read-only side effect on main clone)
     if branch:
         _run_git(["fetch", "origin", branch], str(main_clone))
+    elif expected_sha:
+        # SHA만 있고 브랜치가 없는 경우 전체 fetch로 SHA를 확보
+        _run_git(["fetch", "origin"], str(main_clone))
+
+    # stale worktree 항목 정리 (디렉토리가 없어도 .git/worktrees 등록이 남아있을 수 있음)
+    _run_git(["worktree", "prune"], str(main_clone))
 
     # worktree 경로 결정 및 기존 잔여 worktree 정리
     worktree_path = _worktree_path_for(CACHE_DIR, owner, repo, pr_number, expected_sha)
     if worktree_path.exists():
         _remove_worktree(main_clone, worktree_path)
+    worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # worktree 생성: 지정 SHA 또는 브랜치로
+    # worktree 생성: 지정 SHA 또는 브랜치로 (Windows 경로 호환: 슬래시 통일)
     wt_ref = expected_sha or (f"origin/{branch}" if branch else "HEAD")
+    wt_path_str = str(worktree_path).replace("\\", "/")
     wt_code, wt_out, wt_err = _run_git(
-        ["worktree", "add", "--detach", str(worktree_path), wt_ref],
+        ["worktree", "add", "--detach", wt_path_str, wt_ref],
         str(main_clone),
     )
+    if wt_code != 0:
+        # SHA로 실패한 경우 브랜치 ref로 재시도
+        if expected_sha and branch:
+            wt_ref_fallback = f"origin/{branch}"
+            wt_code, wt_out, wt_err = _run_git(
+                ["worktree", "add", "--detach", wt_path_str, wt_ref_fallback],
+                str(main_clone),
+            )
     if wt_code != 0:
         return {
             "status": "FAIL",

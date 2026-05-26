@@ -68,6 +68,10 @@ export default function DevTrackingTab() {
   const githubOwner = useAppStore((state) => state.githubOwner);
   const githubRepo = useAppStore((state) => state.githubRepo);
   const githubBranch = useAppStore((state) => state.githubBranch) || "main";
+  const storedResult = useAppStore((state) => state.devTrackingResult);
+  const setDevTrackingResult = useAppStore((state) => state.setDevTrackingResult);
+  const storedAnalyses = useAppStore((state) => state.devTrackingAnalyses);
+  const setDevTrackingAnalyses = useAppStore((state) => state.setDevTrackingAnalyses);
 
   const port = backendPort || 8000;
   const [form, setForm] = useState(DEFAULT_FORM);
@@ -84,9 +88,19 @@ export default function DevTrackingTab() {
   const [gapDecisionLoadingId, setGapDecisionLoadingId] = useState("");
   const [error, setError] = useState("");
   const [historyError, setHistoryError] = useState("");
-  const [result, setResult] = useState(null);
-  const [analyses, setAnalyses] = useState([]);
+  const [result, setResultLocal] = useState(storedResult);
+  const [analyses, setAnalysesLocal] = useState(storedAnalyses);
   const [showManualRun, setShowManualRun] = useState(false);
+
+  const setResult = useCallback((val) => {
+    setResultLocal(val);
+    setDevTrackingResult(val);
+  }, [setDevTrackingResult]);
+
+  const setAnalyses = useCallback((val) => {
+    setAnalysesLocal(val);
+    setDevTrackingAnalyses(val);
+  }, [setDevTrackingAnalyses]);
 
   const data = result?.data || {};
   const state = data?.data || {};

@@ -30,8 +30,13 @@ export const createPipelineSlice = (set, get) => ({
   _syncMemoIdsForApply: [],
   _syncTargetVersion: null,
 
+  devTrackingResult: null,
+  devTrackingAnalyses: [],
+
   setAgileVerifyResult: (result) => set({ agileVerifyResult: result }),
   setAgileImpactResult: (result) => set({ agileImpactResult: result }),
+  setDevTrackingResult: (result) => set({ devTrackingResult: result }),
+  setDevTrackingAnalyses: (analyses) => set({ devTrackingAnalyses: analyses }),
 
   // 디버그 시스템
   debugLogs: [],
