@@ -126,6 +126,8 @@ def count_users(db: Session) -> int:
 
 # ── GitHub OAuth Web Flow ────────────────────────────────────
 
+REDIRECT_URI = "navigator://auth/callback"
+
 def exchange_github_code(client_id: str, client_secret: str, code: str, redirect_uri: str) -> dict:
     """Authorization Code를 access_token으로 교환."""
     url = "https://github.com/login/oauth/access_token"

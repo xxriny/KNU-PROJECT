@@ -109,6 +109,13 @@ class IdeaChatRequest(BaseModel):
     model: str = DEFAULT_MODEL
 
 
+class ExtractFinalIdeaRequest(BaseModel):
+    chat_history: list = []
+    memos: list = []
+    api_key: str = ""
+    model: str = DEFAULT_MODEL
+
+
 class ScanRequest(BaseModel):
     path: str
     max_depth: int = 3
@@ -132,6 +139,7 @@ class MemoRequest(BaseModel):
 
 class MemoApplyRequest(BaseModel):
     memo_ids: list = []
+    reflected_version: Optional[str] = None
 
 
 class HealthResponse(BaseModel):
@@ -331,6 +339,28 @@ async def idea_chat(req: IdeaChatRequest):
         return {"status": "error", "error": str(e)}
 
 
+@rest_router.post("/api/extract-final-idea")
+async def extract_final_idea_endpoint(req: ExtractFinalIdeaRequest):
+    """Sync 빌드 전 Pre-flight 단계. 날것의 대화/메모를 정제해 최종 확정 요구사항 마크다운만 추출."""
+    try:
+        from pipeline.domain.chat.idea_extractor import extract_final_idea
+        result = extract_final_idea(
+            chat_history=req.chat_history or [],
+            memos=req.memos or [],
+            api_key=req.api_key or "",
+            model=req.model or DEFAULT_MODEL,
+        )
+        return result
+    except Exception as e:
+        get_logger().exception("extract_final_idea endpoint failed")
+        return {
+            "status": "error",
+            "summary_markdown": "",
+            "dropped_points": [],
+            "error": str(e),
+        }
+
+
 @rest_router.delete("/api/session/{run_id}")
 async def delete_session(run_id: str, req: Optional[DeleteSessionRequest] = None):
     if not re.match(r"^\d{8}_\d{6}$", run_id):
@@ -362,11 +392,11 @@ async def restore_session(run_id: str):
 async def get_memos_endpoint(session_id: Optional[str] = None):
     from auth.database import get_db as _get_db
     from auth.models import MemoItem
+    if not session_id:
+        return {"status": "ok", "memos": []}
     try:
         db = next(_get_db())
-        q = db.query(MemoItem)
-        if session_id:
-            q = q.filter(MemoItem.session_id == session_id)
+        q = db.query(MemoItem).filter(MemoItem.session_id == session_id)
         items = q.order_by(MemoItem.created_at.asc()).all()
         memos = [
             {
@@ -379,6 +409,7 @@ async def get_memos_endpoint(session_id: Optional[str] = None):
                     "detail": m.detail,
                     "applied": m.applied,
                     "applied_at": m.applied_at,
+                    "reflected_version": getattr(m, "reflected_version", None),
                 },
             }
             for m in items
@@ -440,6 +471,8 @@ async def apply_memos_endpoint(req: MemoApplyRequest):
         for m in updated:
             m.applied = True
             m.applied_at = ts
+            if req.reflected_version:
+                m.reflected_version = req.reflected_version
         db.commit()
         return {"status": "ok", "updated": len(updated)}
     except Exception as e:

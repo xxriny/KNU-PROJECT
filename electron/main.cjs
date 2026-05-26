@@ -20,6 +20,7 @@ const { spawn } = require("child_process");
 const path = require("path");
 const net = require("net");
 const http = require("http");
+const fs = require("fs");
 
 // ── GitHub OAuth 커스텀 프로토콜 ─────────────────────────────
 // Windows에서 navigator:// 콜백을 받으려면 single-instance lock이 필요
@@ -122,10 +123,15 @@ function findFreePort() {
  * @param {number} port - 할당된 포트 번호
  */
 function startPythonBackend(port) {
-  const pythonCmd = process.platform === "win32" ? "python" : "python3";
+  // venv가 존재하면 우선 사용해 의존성 드리프트(예: anaconda Python pick-up) 방지.
+  const venvPython = process.platform === "win32"
+    ? path.join(BACKEND_DIR, ".venv", "Scripts", "python.exe")
+    : path.join(BACKEND_DIR, ".venv", "bin", "python");
+  const fallbackCmd = process.platform === "win32" ? "python" : "python3";
+  const pythonCmd = fs.existsSync(venvPython) ? venvPython : fallbackCmd;
   const mainScript = path.join(BACKEND_DIR, "main.py");
 
-  safeLog(`[Electron] Starting Python backend on port ${port}...`);
+  safeLog(`[Electron] Starting Python backend using ${pythonCmd} on port ${port}...`);
   safeLog(`[Electron] Script: ${mainScript}`);
 
   pythonProcess = spawn(pythonCmd, ["main.py", "--port", String(port)], {

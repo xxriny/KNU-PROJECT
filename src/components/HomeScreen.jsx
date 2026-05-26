@@ -1,556 +1,400 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import useAppStore from "../store/useAppStore";
-import { Sparkles, Layers, ScanSearch, Send, Paperclip, X, GitBranch, Loader2, Search, FileText, Trash2 } from "lucide-react";
+import {
+  Send, Loader2, Rocket, AlertTriangle, Sparkles, Layers, ScanSearch, Github,
+} from "lucide-react";
+import ChatThread from "./chat/ChatThread";
+import SyncConfirmModal from "./SyncConfirmModal";
 
-const MODES = [
-  {
-    key: "create",
-    label: "신규 기획",
-    desc: "아이디어를 구조화된 요구사항으로 변환",
-    icon: Sparkles,
-    color: "from-blue-500 to-cyan-500",
-    shadowColor: "rgba(59, 130, 246, 0.4)",
-  },
-  {
-    key: "update",
-    label: "기능 확장",
-    desc: "기존 프로젝트에 새 기능 요구사항 추가",
-    icon: Layers,
-    color: "from-emerald-500 to-teal-500",
-    shadowColor: "rgba(16, 185, 129, 0.4)",
-  },
-  {
-    key: "reverse",
-    label: "재분석",
-    desc: "기존 시스템에서 RTM을 역추출",
-    icon: ScanSearch,
-    color: "from-purple-500 to-pink-500",
-    shadowColor: "rgba(168, 85, 247, 0.4)",
-  },
+// 정확히 3개로 고정 — 시각적 부담을 줄이고 미니멀하게 유도
+const EXAMPLE_PILLS = [
+  "쇼핑몰에 포인트 결제 시스템 추가",
+  "기존 결제 모듈에 환불 흐름 보완",
+  "내 GitHub 레포에서 RTM 역추출",
 ];
 
-
+const MODE_LABEL = {
+  create:  { label: "신규 기획",  Icon: Sparkles,   placeholder: "구체화하고 싶은 아이디어를 입력하세요..." },
+  update:  { label: "기능 확장",  Icon: Layers,     placeholder: "추가하거나 변경하고 싶은 기능을 입력하세요..." },
+  reverse: { label: "재분석",    Icon: ScanSearch, placeholder: "(선택사항) 분석 시 참고할 컨텍스트가 있으면 입력하세요..." },
+};
 
 export default function HomeScreen() {
-  const {
-    startAnalysis,
-    activateOutputTab,
-    apiKey,
-    model,
-    selectedMode,
-    setSelectedMode,
-    projectFolder,
-    setProjectFolder,
-    isDarkMode,
-    authToken,
-    backendPort,
-    githubToken,
-    githubOwner,
-    githubRepo,
-    githubBranch,
-    setGithubSettings,
-    setGithubBranch,
-    currentUser,
-  } = useAppStore();
+  const runSyncUpdate = useAppStore((s) => s.runSyncUpdate);
+  const sendIdeaChat = useAppStore((s) => s.sendIdeaChat);
+  const addChatMessage = useAppStore((s) => s.addChatMessage);
+  const createSession = useAppStore((s) => s.createSession);
+  const currentSessionId = useAppStore((s) => s.currentSessionId);
+  const apiKey = useAppStore((s) => s.apiKey);
+  const model = useAppStore((s) => s.model);
+  const selectedMode = useAppStore((s) => s.selectedMode);
+  const projectFolder = useAppStore((s) => s.projectFolder);
+  const isDarkMode = useAppStore((s) => s.isDarkMode);
+  const chatHistory = useAppStore((s) => s.chatHistory);
+  const chatInput = useAppStore((s) => s.chatInput);
+  const setChatInput = useAppStore((s) => s.setChatInput);
+  const pipelineStatus = useAppStore((s) => s.pipelineStatus);
+  const pipelineType = useAppStore((s) => s.pipelineType);
+  const userComments = useAppStore((s) => s.userComments);
+  const lastIdeaReady = useAppStore((s) => s.lastIdeaReady);
+  const lastIdeaSummary = useAppStore((s) => s.lastIdeaSummary);
+  const currentUser = useAppStore((s) => s.currentUser);
+  const addNotification = useAppStore((s) => s.addNotification);
+  const resultData = useAppStore((s) => s.resultData);
+  const designSnapshotCounter = useAppStore((s) => s.designSnapshotCounter);
 
-  const [inputText, setInputText] = useState("");
-  const [contextText, setContextText] = useState("");
-  const [showContext, setShowContext] = useState(false);
-  const [attachedFiles, setAttachedFiles] = useState([]); // [{ name, text }]
-  const [fileLoading, setFileLoading] = useState(false);
-  const fileInputRef = useRef(null);
   const [projectTitle, setProjectTitle] = useState("새 프로젝트");
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
   const textareaRef = useRef(null);
 
-  const [repoList, setRepoList] = useState([]);
-  const [repoLoading, setRepoLoading] = useState(false);
-  const [repoSearch, setRepoSearch] = useState("");
-  const [showRepoPicker, setShowRepoPicker] = useState(false);
-  const [repoScopeError, setRepoScopeError] = useState(false);
-  const [selectedRepo, setSelectedRepo] = useState(null);
-  const [branchList, setBranchList] = useState([]);
-  const [branchLoading, setBranchLoading] = useState(false);
-
-  // 전역 스토어의 레포 정보와 동기화
-  useEffect(() => {
-    if (githubOwner && githubRepo) {
-      setSelectedRepo({ full_name: `${githubOwner}/${githubRepo}`, owner: githubOwner, name: githubRepo });
-      if (projectFolder !== `${githubOwner}/${githubRepo}`) {
-        setProjectFolder(`${githubOwner}/${githubRepo}`);
-      }
-    }
-  }, [githubOwner, githubRepo, projectFolder, setProjectFolder]);
-
-  // 모달 열릴 때 기존 레포에 대한 브랜치 목록 로드
-  useEffect(() => {
-    if (showContext && githubOwner && githubRepo && branchList.length === 0 && !branchLoading) {
-      loadBranches(githubOwner, githubRepo);
-    }
-  }, [showContext]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const loadRepos = async () => {
-    if (!authToken) return;
-    setRepoLoading(true);
-    setRepoScopeError(false);
-    try {
-      const port = backendPort || 8000;
-      const res = await fetch(`http://127.0.0.1:${port}/auth/github/repos`, {
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      const data = await res.json();
-      if (data.status === "ok") {
-        setRepoList(data.repos);
-        setShowRepoPicker(true);
-      } else {
-        setRepoScopeError(true);
-      }
-    } catch (_) {
-      setRepoScopeError(true);
-    } finally {
-      setRepoLoading(false);
-    }
-  };
-
-  const loadBranches = async (owner, repo) => {
-    setBranchLoading(true);
-    try {
-      const port = backendPort || 8000;
-      const res = await fetch(`http://127.0.0.1:${port}/api/github/branches`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
-        body: JSON.stringify({ owner, repo }),
-      });
-      const data = await res.json();
-      setBranchList(data.data || []);
-    } catch (_) {
-      setBranchList([]);
-    } finally {
-      setBranchLoading(false);
-    }
-  };
-
-  const selectRepo = async (repo) => {
-    setSelectedRepo(repo);
-    setProjectFolder(repo.full_name);
-    setBranchList([]);
-    // 전역 스토어 동기화
-    setGithubSettings(githubToken, repo.owner, repo.name);
-    setShowRepoPicker(false);
-    setRepoSearch("");
-    // 레포 선택 후 브랜치 목록 로드
-    loadBranches(repo.owner, repo.name);
-
-    // 팀 기본 레포지토리로 백엔드에도 즉시 반영 (동기화 요구사항)
-    try {
-      const port = backendPort || 8000;
-      await fetch(`http://127.0.0.1:${port}/api/teams/me/github`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
-        body: JSON.stringify({ github_repo: repo.full_name }),
-      });
-    } catch (_) {}
-  };
+  // hasStarted: 실제 대화(user/assistant)가 있으면 conversation 모드
+  const hasStarted = (chatHistory || []).some(
+    (m) => m && (m.role === "user" || m.role === "assistant")
+  );
 
   const isPm = currentUser?.role === "pm";
   const isReverseMode = selectedMode === "reverse";
-  const trimmedInput = inputText.trim();
-  const canSubmit = isPm && (isReverseMode ? Boolean(projectFolder) : Boolean(trimmedInput));
+  const trimmedInput = (chatInput || "").trim();
+  const isProcessing = pipelineStatus === "running";
+  const activeMemoCount = (userComments || []).filter((m) => !m.applied).length;
+  const modeMeta = MODE_LABEL[selectedMode] || MODE_LABEL.create;
 
-  const extractFileText = async (file) => {
-    const ext = file.name.split(".").pop().toLowerCase();
-    if (ext === "txt" || ext === "md") {
-      return await file.text();
-    }
-    if (ext === "pdf") {
-      const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).href;
-      const buf = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-      const pages = await Promise.all(
-        Array.from({ length: pdf.numPages }, (_, i) =>
-          pdf.getPage(i + 1).then((p) => p.getTextContent()).then((tc) => tc.items.map((it) => it.str).join(" "))
-        )
-      );
-      return pages.join("\n");
-    }
-    if (ext === "docx") {
-      const mammoth = await import("mammoth");
-      const buf = await file.arrayBuffer();
-      const result = await mammoth.extractRawText({ arrayBuffer: buf });
-      return result.value;
-    }
-    return "";
+  // CREATE 모드에서 한 번이라도 Sync 완료(설계서 픽스)되면 GitHub Export 버튼 노출
+  const hasSyncedAtLeastOnce = (chatHistory || []).some(
+    (m) => m && m.role === "system_marker" && m.kind === "sync"
+  );
+  const showExportBanner = selectedMode === "create" && hasSyncedAtLeastOnce && hasStarted;
+
+  const handleGithubExport = () => {
+    addNotification?.(
+      "GitHub Export는 다음 업데이트에서 제공될 예정입니다. (빈 레포 선택 → 스펙 + 스켈레톤 초기 커밋)",
+      "info",
+      4000
+    );
   };
 
-  const handleFileAttach = async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (!files.length) return;
-    setFileLoading(true);
-    try {
-      const extracted = await Promise.all(
-        files.map(async (f) => ({ name: f.name, text: await extractFileText(f) }))
-      );
-      setAttachedFiles((prev) => [...prev, ...extracted.filter((f) => f.text)]);
-    } finally {
-      setFileLoading(false);
-      e.target.value = "";
-    }
-  };
+  const canSendInitial = isPm && !!trimmedInput && (!isReverseMode || !!projectFolder);
+  const canSendFollowUp = isPm && !!trimmedInput && !isProcessing;
+  const canSend = hasStarted ? canSendFollowUp : canSendInitial;
 
-  const handleSubmit = () => {
-    if (!canSubmit) return;
-    activateOutputTab("progress");
-    const fileContext = attachedFiles.map((f) => `[첨부: ${f.name}]\n${f.text}`).join("\n\n");
-    const fullContext = [contextText.trim(), fileContext].filter(Boolean).join("\n\n");
-    startAnalysis(trimmedInput, fullContext, apiKey, model, selectedMode, projectTitle);
-    setInputText("");
-    setContextText("");
-    setAttachedFiles([]);
+  // 모든 전송 → idea_chat (가벼운 대화). 무거운 PM/SA 빌드는 🚀 Sync 버튼에서만 가동.
+  // 첫 발화일 때만 세션을 생성해 메모/스냅샷이 현재 프로젝트에 귀속되도록 한다.
+  const handleSend = () => {
+    if (!canSend) return;
+    const text = trimmedInput;
+    if (!hasStarted && !currentSessionId) {
+      createSession(projectTitle);
+    }
+    addChatMessage("user", text);
+    setChatInput("");
+    sendIdeaChat(text, apiKey, model);
   };
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (canSubmit) handleSubmit();
+      handleSend();
     }
   };
 
-  // Auto-resize textarea
+  // 🚀 Sync 미리보기 — pipelineSlice.runSyncUpdate와 동일한 규칙으로 계산.
+  //    (계산 비용이 가벼워 매 렌더 시 useMemo로만 처리)
+  const syncPreview = useMemo(() => {
+    const isFirstBuild = !resultData;
+    const lastSyncIdx = (() => {
+      for (let i = (chatHistory || []).length - 1; i >= 0; i--) {
+        const m = chatHistory[i];
+        if (m && m.role === "system_marker" && m.kind === "sync") return i;
+      }
+      return -1;
+    })();
+    const chatDiff = (chatHistory || [])
+      .slice(lastSyncIdx + 1)
+      .filter((m) => m && (m.role === "user" || m.role === "assistant"));
+    const activeMemos = (userComments || []).filter((c) => !c.applied);
+    const targetVersion = isFirstBuild
+      ? "v1.0"
+      : `v1.${(designSnapshotCounter || 0) + 1}`;
+    return { isFirstBuild, chatDiff, activeMemos, targetVersion };
+  }, [resultData, chatHistory, userComments, designSnapshotCounter]);
+
+  const handleSync = () => {
+    if (isProcessing) return;
+    setSyncModalOpen(true);
+  };
+
+  // 모달에서 사용자가 검토·편집한 '정제된 요구사항 마크다운'을 받아 그대로 파이프라인에 전달.
+  // 빈 문자열이면 runSyncUpdate가 fallback으로 날것 합성을 사용한다.
+  const handleSyncConfirm = (finalIdea) => {
+    setSyncModalOpen(false);
+    runSyncUpdate({ ideaOverride: finalIdea || "" });
+  };
+
+  const handleSyncCancel = () => setSyncModalOpen(false);
+
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 150) + 'px';
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height =
+        Math.min(textareaRef.current.scrollHeight, 150) + "px";
     }
-  }, [inputText]);
+  }, [chatInput]);
 
   return (
     <div
-      className={`h-full w-full flex flex-col items-center relative overflow-hidden ${isDarkMode ? "bg-transparent text-slate-200" : "bg-transparent text-slate-800"
-        }`}
+      className={`h-full w-full flex flex-col relative overflow-hidden ${
+        isDarkMode ? "bg-transparent text-slate-200" : "bg-transparent text-slate-800"
+      }`}
     >
-      {/* ── 배경 장식 (Subdued) ─────────────────── */}
+      {/* 배경 글로우 */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <div
-          className="absolute -top-[10%] -left-[5%] w-[50%] h-[50%] bg-blue-500/10 blur-[120px] rounded-full"
-        />
+        <div className="absolute -top-[10%] -left-[5%] w-[50%] h-[50%] bg-blue-500/10 blur-[120px] rounded-full" />
       </div>
 
-      <div className="w-full max-w-5xl flex flex-col items-center flex-1 relative z-10 px-8 h-full">
-        {/* ── 상단/중앙 콘텐츠 (타이틀 및 카드) ────────────────── */}
-        <div className="flex-1 flex flex-col items-center justify-center w-full min-h-0 py-10">
-          <div
-            className="text-center mb-16 shrink-0"
-          >
+      {hasStarted ? (
+        /* ────────────────── Conversation 모드 ────────────────── */
+        <div className="flex-1 min-h-0 flex flex-col relative z-10 animate-fade-in">
+          {showExportBanner && (
+            <div className="px-6 pt-3 shrink-0">
+              <div
+                className={`max-w-3xl mx-auto flex items-center gap-3 px-4 py-2.5 rounded-2xl border ${
+                  isDarkMode
+                    ? "bg-gradient-to-r from-emerald-500/10 to-blue-500/10 border-emerald-500/20"
+                    : "bg-gradient-to-r from-emerald-50 to-blue-50 border-emerald-200"
+                }`}
+              >
+                <Github size={16} className={isDarkMode ? "text-emerald-300" : "text-emerald-700"} />
+                <span className={`text-[12px] font-medium flex-1 ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>
+                  설계서가 픽스되었습니다. 빈 GitHub 레포에 첫 커밋으로 내보낼 수 있습니다.
+                </span>
+                <button
+                  onClick={handleGithubExport}
+                  className="px-3 py-1.5 rounded-lg text-[12px] font-bold bg-gradient-to-r from-emerald-600 to-blue-600 hover:from-emerald-500 hover:to-blue-500 text-white shadow-md shadow-emerald-500/20 transition-all"
+                >
+                  🐙 GitHub에 내보내기
+                </button>
+              </div>
+            </div>
+          )}
+          <ChatThread />
+        </div>
+      ) : (
+        /* ────────────────── Welcome 모드 ────────────────── */
+        <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-8 relative z-10 animate-fade-in">
+          <div className="text-center mb-10 max-w-2xl">
             <h1 className="text-5xl font-black mb-3 tracking-widest drop-shadow-sm">
               <span className="text-gradient">NAVIGATOR</span>
             </h1>
-            <p className={`text-[17px] font-medium opacity-50 ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>
+            <p
+              className={`text-[17px] font-medium opacity-50 ${
+                isDarkMode ? "text-slate-400" : "text-slate-600"
+              }`}
+            >
               아이디어를 구조화된 요구사항 명세서로 변환합니다
             </p>
-          </div>
 
-          {/* ── 모드 선택 (Grid) ───────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 w-full max-w-4xl px-6">
-            {MODES.map((mode, idx) => (
-              <div
-                key={mode.key}
-                onClick={() => {
-                  setSelectedMode(mode.key);
-                  if (mode.key === "reverse" && !projectFolder) {
-                    setShowContext(true);
-                  }
-                }}
-                className={`group flex flex-row lg:flex-col items-center text-left lg:text-center p-4 lg:p-6 rounded-2xl lg:rounded-3xl border cursor-pointer transition-all duration-300 relative overflow-hidden ${selectedMode === mode.key
-                  ? "glass-card border-[var(--accent)] shadow-2xl scale-[1.01] lg:scale-[1.05] bg-[var(--accent)]/5"
-                  : `glass-card border-white/5 hover:border-white/10 ${isDarkMode ? "bg-white/5" : "bg-slate-50 border-slate-100"}`
-                  }`}
+            {/* 프로젝트 제목 — 인라인 칩 */}
+            <div className="mt-6 flex items-center justify-center gap-2">
+              <span
+                className={`text-[10px] font-black uppercase tracking-[0.25em] ${
+                  isDarkMode ? "text-slate-600" : "text-slate-400"
+                }`}
               >
-                <div className={`w-10 h-10 lg:w-14 lg:h-14 rounded-xl lg:rounded-2xl bg-gradient-to-br ${mode.color} flex items-center justify-center mb-0 lg:mb-4 mr-4 lg:mr-0 shadow-lg group-hover:scale-110 transition-transform shrink-0`}>
-                  <mode.icon className="text-white w-5 h-5 lg:w-7 lg:h-7" />
-                </div>
-                <div className="flex flex-col">
-                  <h3 className="text-sm lg:text-lg font-bold mb-0.5 lg:mb-2">
-                    {mode.label}
-                  </h3>
-                  <p className={`text-[10px] lg:text-[13px] leading-relaxed opacity-50 line-clamp-2`}>
-                    {mode.desc}
-                  </p>
-                </div>
-
-                {selectedMode === mode.key && (
-                  <div
-                    className="absolute inset-0 border-2 border-[var(--accent)]/40 rounded-2xl lg:rounded-3xl pointer-events-none"
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* ── 입력 영역 (Bottom Docked - Absolute 모드로 변경하여 레이아웃 고정) ─────────────────────── */}
-        <div className="absolute bottom-12 w-full max-w-4xl px-8 z-50">
-          <div
-            className="flex flex-col gap-4"
-          >
-
-            {!isPm && (
-              <div className="w-full text-center py-2 px-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[13px] font-medium">
-                LLM 분석은 PM 권한이 필요합니다. 팀 PM에게 권한을 요청하세요.
-              </div>
-            )}
-            <div className={`w-full relative rounded-full p-2 px-6 shadow-2xl flex items-center border border-white/5 ${isDarkMode ? "bg-[#161b22]/90 backdrop-blur-2xl" : "bg-white/90 backdrop-blur-xl border-slate-200"
-              } ${!isPm ? "opacity-50 pointer-events-none" : ""}`}>
-              <div className="flex-1">
-                <textarea
-                  ref={textareaRef}
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  rows={1}
-                  placeholder="아이디어를 입력하세요..."
-                  className="w-full bg-transparent border-none focus:outline-none focus:ring-0 text-[16px] py-3 resize-none scrollbar-hide placeholder:text-slate-500"
-                />
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => setShowContext(!showContext)}
-                  className={`p-2 rounded-full transition-all ${showContext ? "bg-[var(--accent)] text-white shadow-lg" : "text-slate-500 hover:bg-white/10"
-                    }`}
-                  title="컨텍스트 추가"
-                >
-                  <Paperclip size={20} />
-                </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={!selectedMode || !canSubmit}
-                  className={`w-11 h-11 flex items-center justify-center rounded-full transition-all ${canSubmit
-                    ? "bg-blue-600 text-white hover:bg-blue-500 shadow-lg"
-                    : "bg-white/5 text-slate-700 cursor-not-allowed"
-                    }`}
-                >
-                  <Send size={20} />
-                </button>
-              </div>
-            </div>
-
-            <footer className="w-full px-6 flex items-center justify-between text-[11px] font-medium text-slate-600/50 uppercase tracking-widest opacity-60">
-              <div className="flex items-center gap-4">
-                <span>NAVIGATOR PM PIPELINE</span>
-                <div className="w-1 h-1 rounded-full bg-slate-800" />
-                <span>STABLE RELEASE</span>
-              </div>
-              <span>PROMPT + ENTER TO PROCESS</span>
-            </footer>
-          </div>
-        </div>
-      </div>
-
-      {/* ── 프로젝트 설정 모달 (showContext) ── */}
-      {showContext && (
-        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-8">
-          <div className="w-[600px] bg-[#1e1e24] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
-              <h2 className="text-[15px] font-bold text-slate-200">"{projectTitle}"의 환경 설정</h2>
-              <button onClick={() => setShowContext(false)} className="p-1.5 hover:bg-white/10 rounded-full transition-colors text-slate-400">
-                <X size={16} />
-              </button>
-            </div>
-
-            {/* Body */}
-            <div className="p-6 flex flex-col gap-6">
-              {/* Repo Picker */}
-              <div className="bg-[#131317] border border-white/5 rounded-xl flex flex-col overflow-hidden">
-                {/* Selected repo display + button */}
-                <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5">
-                  <div className="flex-1 min-w-0">
-                    {selectedRepo ? (
-                      <div className="flex items-center gap-2">
-                        <GitBranch size={15} className="text-slate-400 shrink-0" />
-                        <span className="text-sm font-semibold text-slate-200 truncate">{selectedRepo.full_name}</span>
-                        {selectedRepo.private && <span className="text-[10px] text-amber-400 border border-amber-400/30 px-1.5 py-0.5 rounded shrink-0">private</span>}
-                        {selectedRepo.language && <span className="text-[11px] text-slate-500 shrink-0">{selectedRepo.language}</span>}
-                      </div>
-                    ) : (
-                      <span className="text-sm text-slate-500 opacity-60">선택된 레포지토리 없음</span>
-                    )}
-                  </div>
-                  <button
-                    onClick={loadRepos}
-                    disabled={repoLoading || !authToken}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
-                  >
-                    {repoLoading ? <Loader2 size={14} className="animate-spin" /> : <GitBranch size={14} />}
-                    <span>레포 선택</span>
-                  </button>
-                </div>
-
-                {repoScopeError && (
-                  <p className="text-xs text-amber-400 px-4 py-2 border-b border-white/5">
-                    GitHub 재연결이 필요합니다. 설정에서 연결 해제 후 다시 연결하세요.
-                  </p>
-                )}
-
-                {!authToken && (
-                  <p className="text-xs text-slate-500 px-4 py-2 border-b border-white/5">
-                    GitHub에 로그인하면 레포지토리를 선택할 수 있습니다.
-                  </p>
-                )}
-
-                {/* Inline picker */}
-                {showRepoPicker && repoList.length > 0 && (
-                  <div className="flex flex-col">
-                    <div className="px-3 py-2 border-b border-white/5">
-                      <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-1.5">
-                        <Search size={13} className="text-slate-500 shrink-0" />
-                        <input
-                          autoFocus
-                          value={repoSearch}
-                          onChange={(e) => setRepoSearch(e.target.value)}
-                          placeholder="레포 검색..."
-                          className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-slate-600"
-                        />
-                      </div>
-                    </div>
-                    <ul className="max-h-48 overflow-y-auto divide-y divide-white/5">
-                      {repoList
-                        .filter(r => r.full_name.toLowerCase().includes(repoSearch.toLowerCase()))
-                        .map(repo => (
-                          <li
-                            key={repo.full_name}
-                            onClick={() => selectRepo(repo)}
-                            className="flex items-center gap-2 px-4 py-2.5 hover:bg-white/5 cursor-pointer transition-colors"
-                          >
-                            <GitBranch size={13} className="text-slate-500 shrink-0" />
-                            <span className="text-sm font-medium text-slate-200 truncate flex-1">{repo.name}</span>
-                            <span className="text-xs text-slate-500 shrink-0">{repo.owner}</span>
-                            {repo.private && <span className="text-[10px] text-amber-400 shrink-0">private</span>}
-                            {repo.language && <span className="text-[10px] text-slate-600 shrink-0">{repo.language}</span>}
-                          </li>
-                        ))}
-                    </ul>
-                  </div>
-                )}
-
-                {!showRepoPicker && selectedRepo?.description && (
-                  <p className="text-xs text-slate-500 px-4 py-2">{selectedRepo.description}</p>
-                )}
-              </div>
-
-              {/* Branch Picker — 레포 선택 후에만 표시 */}
-              {selectedRepo && (
-                <div className="bg-[#131317] border border-white/5 rounded-xl overflow-hidden">
-                  <div className="flex items-center gap-3 px-4 py-3">
-                    <GitBranch size={14} className="text-slate-400 shrink-0" />
-                    <span className="text-xs font-semibold text-slate-400 shrink-0">브랜치</span>
-                    {branchLoading ? (
-                      <div className="flex items-center gap-2 flex-1">
-                        <Loader2 size={13} className="animate-spin text-slate-500" />
-                        <span className="text-xs text-slate-500">브랜치 로드 중...</span>
-                      </div>
-                    ) : branchList.length > 0 ? (
-                      <select
-                        value={typeof githubBranch === "object" && githubBranch !== null ? githubBranch.name : githubBranch}
-                        onChange={(e) => setGithubBranch(e.target.value)}
-                        style={{ colorScheme: "dark" }}
-                        className="flex-1 bg-[#1a1a2e] border border-white/10 rounded-lg px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-white/30 transition-colors cursor-pointer"
-                      >
-                        {branchList.map((b) => {
-                          const name = typeof b === "object" && b !== null ? b.name : b;
-                          const isProtected = typeof b === "object" && b !== null ? b.protected : false;
-                          return (
-                            <option 
-                              key={name} 
-                              value={name} 
-                              className="bg-[#1a1a2e] text-white"
-                            >
-                              {name}{isProtected ? " 🔒" : ""}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    ) : (
-                      <div className="flex items-center gap-2 flex-1">
-                        <input
-                          type="text"
-                          value={githubBranch || "main"}
-                          onChange={(e) => setGithubBranch(e.target.value)}
-                          placeholder="브랜치명 입력 (예: main)"
-                          className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-white/30 transition-colors placeholder:text-slate-600"
-                        />
-                        <button
-                          onClick={() => loadBranches(selectedRepo.owner, selectedRepo.name)}
-                          className="px-2 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs text-slate-400 transition-colors"
-                        >
-                          재시도
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Title Input */}
-              <div className="flex flex-col gap-2">
-                <label className="text-xs text-slate-400 font-medium px-1">프로젝트 제목</label>
-                <input
-                  type="text"
-                  value={projectTitle}
-                  onChange={(e) => setProjectTitle(e.target.value)}
-                  className="w-full bg-[#131317] border border-white/10 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[var(--accent)] transition-colors"
-                  placeholder="제목을 입력하세요"
-                />
-              </div>
-
-              {/* File Attach */}
-              <div className="flex flex-col gap-2">
-                <label className="text-xs text-slate-400 font-medium px-1">참고 문서 첨부 (PDF · DOCX · TXT · MD)</label>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  accept=".pdf,.docx,.txt,.md"
-                  onChange={handleFileAttach}
-                  className="hidden"
-                />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={fileLoading}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-[#131317] border border-white/10 rounded-xl text-sm text-slate-400 hover:text-slate-200 hover:border-white/20 transition-colors disabled:opacity-50"
-                >
-                  {fileLoading ? <Loader2 size={14} className="animate-spin" /> : <Paperclip size={14} />}
-                  {fileLoading ? "파일 읽는 중..." : "파일 선택"}
-                </button>
-                {attachedFiles.length > 0 && (
-                  <ul className="flex flex-col gap-1">
-                    {attachedFiles.map((f, i) => (
-                      <li key={i} className="flex items-center gap-2 px-3 py-2 bg-[#131317] border border-white/5 rounded-lg">
-                        <FileText size={13} className="text-slate-500 shrink-0" />
-                        <span className="text-xs text-slate-300 truncate flex-1">{f.name}</span>
-                        <span className="text-[11px] text-slate-600 shrink-0">{(f.text.length / 1000).toFixed(1)}k자</span>
-                        <button onClick={() => setAttachedFiles((prev) => prev.filter((_, j) => j !== i))} className="text-slate-600 hover:text-red-400 transition-colors">
-                          <Trash2 size={12} />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="px-6 py-4 border-t border-white/5 flex justify-end">
-              <button
-                onClick={() => setShowContext(false)}
-                className="px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg text-sm font-bold transition-colors"
-              >
-                완료
-              </button>
+                프로젝트
+              </span>
+              <input
+                value={projectTitle}
+                onChange={(e) => setProjectTitle(e.target.value)}
+                className={`text-sm font-bold px-3 py-1 rounded-full border outline-none transition-colors text-center w-[200px] ${
+                  isDarkMode
+                    ? "bg-white/5 border-white/10 text-slate-200 focus:border-blue-400/40"
+                    : "bg-white border-slate-200 text-slate-700 focus:border-blue-400"
+                }`}
+                placeholder="프로젝트 제목"
+              />
             </div>
           </div>
         </div>
       )}
+
+      {/* ────────────────── 하단 도크 (Input + 🚀 Sync) ────────────────── */}
+      <div
+        className={`shrink-0 px-6 pb-6 relative z-20 ${
+          hasStarted ? "pt-2" : "pt-0 pb-12"
+        }`}
+      >
+        <div className="max-w-3xl mx-auto">
+          {/* PM 권한 가드 */}
+          {!isPm && (
+            <div className="mb-3 w-full text-center py-2 px-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[12px] font-medium">
+              LLM 분석은 PM 권한이 필요합니다. 팀 PM에게 권한을 요청하세요.
+            </div>
+          )}
+
+          {/* reverse 모드 + 레포 미설정 inline 경고 */}
+          {!hasStarted && isReverseMode && !projectFolder && (
+            <div className="mb-3 w-full text-center py-2 px-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[12px] font-medium flex items-center justify-center gap-2">
+              <AlertTriangle size={13} />
+              재분석 모드는 GitHub 레포지토리가 설정되어 있어야 합니다.
+            </div>
+          )}
+
+          {/* 분석 진행 중 배너 */}
+          {isProcessing && hasStarted && (
+            <div
+              className={`mb-3 px-4 py-2.5 rounded-2xl flex items-center gap-3 border animate-fade-in ${
+                isDarkMode
+                  ? "bg-blue-500/10 border-blue-500/30 text-blue-300"
+                  : "bg-blue-50 border-blue-200 text-blue-700"
+              }`}
+            >
+              <Loader2 size={14} className="shrink-0 animate-spin text-blue-500" />
+              <span className="text-[12px] font-medium">
+                {pipelineType === "analysis_update"
+                  ? "메모/대화를 반영해 설계서를 업데이트 중입니다..."
+                  : "분석을 진행 중입니다..."}
+              </span>
+            </div>
+          )}
+
+          {/* 입력 pill */}
+          <div
+            className={`w-full relative rounded-3xl shadow-2xl border ${
+              isDarkMode
+                ? "bg-[#161b22]/90 backdrop-blur-2xl border-white/5"
+                : "bg-white/95 backdrop-blur-xl border-slate-200"
+            } ${!isPm ? "opacity-50 pointer-events-none" : ""}`}
+          >
+            <div className="flex items-end p-3 pl-5 gap-2">
+              <div className="flex-1 min-w-0">
+                <textarea
+                  ref={textareaRef}
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  rows={1}
+                  placeholder={hasStarted ? "메시지를 입력하세요..." : modeMeta.placeholder}
+                  disabled={isProcessing}
+                  className="w-full bg-transparent border-none focus:outline-none focus:ring-0 text-[15px] py-2 resize-none scrollbar-hide placeholder:text-slate-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                {/* 🚀 Sync 버튼 — conversation 모드에서만 노출 */}
+                {hasStarted && (
+                  <SyncButton
+                    onClick={handleSync}
+                    glow={lastIdeaReady}
+                    activeMemoCount={activeMemoCount}
+                    isProcessing={isProcessing}
+                    isDarkMode={isDarkMode}
+                    tooltip={lastIdeaSummary}
+                  />
+                )}
+
+                {/* Send 버튼 */}
+                <button
+                  onClick={handleSend}
+                  disabled={!canSend}
+                  title="메시지 보내기"
+                  className={`w-11 h-11 flex items-center justify-center rounded-2xl transition-all ${
+                    canSend
+                      ? "bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-500/20"
+                      : isDarkMode
+                        ? "bg-white/5 text-slate-700 cursor-not-allowed"
+                        : "bg-slate-100 text-slate-400 cursor-not-allowed"
+                  }`}
+                >
+                  <Send size={18} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Welcome 모드에서만: 예시 알약 + 푸터 */}
+          {!hasStarted && (
+            <>
+              <div className="mt-4 flex items-center justify-center gap-3">
+                {EXAMPLE_PILLS.map((pill) => (
+                  <button
+                    key={pill}
+                    onClick={() => setChatInput(pill)}
+                    className={`px-3 py-1.5 rounded-full text-[12px] font-medium border transition-all hover:scale-[1.02] ${
+                      isDarkMode
+                        ? "bg-white/[0.03] border-white/10 text-slate-400 hover:text-slate-200 hover:border-white/20"
+                        : "bg-white/80 border-slate-200 text-slate-600 hover:text-slate-900 hover:border-slate-300"
+                    }`}
+                  >
+                    💊 {pill}
+                  </button>
+                ))}
+              </div>
+
+              <footer className="mt-6 px-2 flex items-center justify-between text-[10px] font-medium text-slate-600/50 uppercase tracking-widest opacity-60">
+                <div className="flex items-center gap-3">
+                  <span>NAVIGATOR PM PIPELINE</span>
+                  <div className="w-1 h-1 rounded-full bg-slate-600/50" />
+                  <span className="flex items-center gap-1.5">
+                    <modeMeta.Icon size={11} />
+                    {modeMeta.label}
+                  </span>
+                </div>
+                <span>PROMPT + ENTER TO PROCESS</span>
+              </footer>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* 🚀 Sync 확인 모달 — 수락 시에만 실제 파이프라인 가동 */}
+      <SyncConfirmModal
+        open={syncModalOpen}
+        isDarkMode={isDarkMode}
+        isFirstBuild={syncPreview.isFirstBuild}
+        targetVersion={syncPreview.targetVersion}
+        chatDiff={syncPreview.chatDiff}
+        activeMemos={syncPreview.activeMemos}
+        onCancel={handleSyncCancel}
+        onConfirm={handleSyncConfirm}
+      />
     </div>
+  );
+}
+
+/** 🚀 Sync 버튼 — idea_ready 글로우 + 활성 메모 카운트 배지 */
+function SyncButton({ onClick, glow, activeMemoCount, isProcessing, isDarkMode, tooltip }) {
+  const title = (() => {
+    const lines = ["🚀 현재 대화 + 활성 메모로 설계서 업데이트"];
+    if (activeMemoCount > 0) lines.push(`📋 메모 ${activeMemoCount}건 함께 반영`);
+    if (tooltip) lines.push(`💡 ${tooltip}`);
+    return lines.join("\n");
+  })();
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={isProcessing}
+      title={title}
+      className={`relative w-11 h-11 flex items-center justify-center rounded-2xl transition-all ${
+        glow
+          ? "bg-gradient-to-br from-emerald-500 to-teal-600 text-white animate-pulse shadow-[0_0_24px_rgba(52,211,153,0.5)] ring-2 ring-emerald-400/60"
+          : isDarkMode
+            ? "bg-white/[0.06] hover:bg-white/[0.1] text-slate-300 hover:text-white"
+            : "bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900"
+      } ${isProcessing ? "opacity-40 cursor-not-allowed" : ""}`}
+    >
+      <Rocket size={18} />
+      {activeMemoCount > 0 && (
+        <span
+          className={`absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full text-[10px] font-black ${
+            isDarkMode
+              ? "bg-blue-500 text-white border border-[#0F1219]"
+              : "bg-blue-500 text-white border border-white"
+          }`}
+        >
+          {activeMemoCount}
+        </span>
+      )}
+    </button>
   );
 }

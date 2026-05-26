@@ -357,8 +357,9 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
     model = payload.get("model", DEFAULT_MODEL)
 
     # 채팅에서 만들어진 메모를 묶어두는 session_id.
-    # 프론트가 currentSessionId를 보내면 그걸 쓰고, 없으면 chat_global 폴백.
-    chat_session_id = (payload.get("session_id") or "chat_global").strip() or "chat_global"
+    # 프론트가 currentSessionId를 보내면 그것에 묶어 영속화하고,
+    # 비어 있으면(=활성 프로젝트 없음) 메모 영속화 자체를 스킵해 chat_global 누적을 차단.
+    chat_session_id = (payload.get("session_id") or "").strip()
 
     result = await _run_pipeline_base(
         ws,
@@ -389,17 +390,29 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
     # ── 채팅 의도로 만들어진 메모를 SQLite(local.db)에 직접 영속화 ──
     raw_notes = result.get("notes_to_add") or []
     persisted_notes: list = []
-    if raw_notes:
+    # 활성 세션이 없으면 메모를 DB에 쓰지 않는다.
+    # WS 응답은 빈 notes_to_add로 정상 진행 → 프론트는 평소처럼 동작.
+    if raw_notes and chat_session_id:
         try:
             from auth.models import MemoItem
             db = SessionLocal()
             try:
+                # 같은 세션에 이미 저장된 메모 텍스트 — LLM이 chat_history를 보고
+                # 이전 항목까지 누적해 notes_to_add를 반환하는 회귀를 차단한다.
+                # 텍스트 기반 dedupe로 같은 (session_id, text) 페어 중복 insert를 막음.
+                existing_texts = {
+                    (row[0] or "").strip()
+                    for row in db.query(MemoItem.text)
+                    .filter(MemoItem.session_id == chat_session_id)
+                    .all()
+                }
                 for note in raw_notes:
                     if not isinstance(note, dict):
                         continue
                     text = str(note.get("text") or "").strip()
-                    if not text:
+                    if not text or text in existing_texts:
                         continue
+                    existing_texts.add(text)  # 같은 응답 내 중복도 차단
                     item = MemoItem(
                         session_id=chat_session_id,
                         text=text,
@@ -408,7 +421,12 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
                         detail=str(note.get("detail") or "").strip(),
                     )
                     db.add(item)
-                    persisted_notes.append({"id": item.id, "text": text})
+                    persisted_notes.append({
+                        "id": item.id,
+                        "text": text,
+                        "section": item.section,
+                        "detail": item.detail,
+                    })
                 db.commit()
             finally:
                 db.close()
@@ -429,6 +447,7 @@ async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
             "idea_summary": result.get("idea_summary", ""),
             "suggested_mode": result.get("suggested_mode", "create"),
             "notes_to_add": persisted_notes,  # 백엔드가 부여한 진짜 ID 포함
+            "suggested_followups": result.get("suggested_followups", []),
             "pipeline_type": "idea_chat",
         },
     })

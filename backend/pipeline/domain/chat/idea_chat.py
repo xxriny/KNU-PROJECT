@@ -51,6 +51,14 @@ class IdeaChatOutput(BaseModel):
         default_factory=list,
         description="사용자가 명시적으로 메모/노트/기능 추가를 요청했을 때만 채울 메모 목록"
     )
+    suggested_followups: List[str] = Field(
+        default_factory=list,
+        description=(
+            "사용자가 다음에 던질 만한 구체적·논리적 후속 질문 4개. "
+            "방금 한 응답을 자연스럽게 이어가는 한국어 짧은 문장(40자 이내 권장). "
+            "이미 결정된 사실 재확인보다는 '아직 모르는 것·다음에 정해야 할 것'을 묻도록 한다."
+        ),
+    )
 
 
 def _extract_text(response) -> str:
@@ -90,6 +98,7 @@ SYSTEM_PROMPT = """당신은 PM(프로젝트 매니저) AI 어시스턴트입니
 - idea_summary: idea_ready=true일 때 분석에 전달할 구체적 요약, 그 외엔 빈 문자열
 - suggested_mode: "create" (신규) | "update" (기능확장) | "reverse" (역공학)
 - notes_to_add: 메모(노트)로 저장할 항목 배열 (아래 규칙 참조)
+- suggested_followups: 사용자가 이 응답 다음에 자연스럽게 클릭할 만한 한국어 후속 질문 정확히 4개. 짧고 구체적이며 "아직 정해지지 않은 다음 단계"를 묻는 것이 좋다. 일반적인 잡담이나 이미 답한 내용을 다시 묻는 것은 금지. 예시: "주요 사용자 페르소나는?", "어떤 결제 수단을 지원할까?", "MVP 범위는 어디까지?", "기술 스택 후보 추천해줘".
 
 진행 신호:
 - 사용자가 "분석 시작", "개발 시작", "이걸로 해줘" 등을 말하면 idea_ready=true.
@@ -131,6 +140,13 @@ SYSTEM_PROMPT = """당신은 PM(프로젝트 매니저) AI 어시스턴트입니
 
 ### 다중 항목
 사용자가 한 번에 여러 기능/항목을 요청하면 항목별로 분리해 배열에 담으세요.
+
+### 중복 방지 (★중요)
+**notes_to_add에는 이번 사용자 발화로 새로 추가되는 항목만 담으세요.** 이미 같은 대화에서 메모로 추가했다고 안내한 항목은 동일한 텍스트로 다시 포함시키지 마세요.
+
+- 사용자가 "3번도 메모해줘"라고 하면 → notes_to_add는 [{3번}]만. 이전에 추가한 1번을 다시 넣지 마세요.
+- "X도", "이것도", "또한 Y도" 같은 발화의 "도/또한"은 **이전 항목에 더해 새 항목을 추가한다**는 의미이지, **이전 항목까지 다시 적재한다**는 뜻이 아닙니다.
+- reply에서도 새로 추가된 항목만 언급하세요. 이전에 이미 추가된 항목은 "이미 메모돼 있어요" 정도로만 안내하고 notes_to_add에는 포함시키지 마세요.
 
 ## 코드 참조 규칙 (★사용자 프로젝트 파일에 대한 질문)
 - 시스템 메시지 RAG 섹션에 **"### 관련 코드 청크 (사용자 프로젝트)"** 가 포함되어 있다면,
@@ -227,6 +243,7 @@ def idea_chat_node(state: PipelineState) -> dict:
         idea_summary = ""
         suggested_mode = "create"
         notes_to_add: list = []
+        suggested_followups: list = []
 
         try:
             structured_llm = llm.with_structured_output(IdeaChatOutput)
@@ -244,6 +261,7 @@ def idea_chat_node(state: PipelineState) -> dict:
             notes_to_add = _normalize_notes_to_add(
                 [n.model_dump() for n in (out.notes_to_add or [])]
             )
+            suggested_followups = _normalize_followups(out.suggested_followups or [])
 
         except Exception as struct_err:
             # 구조화 출력 실패 시 자유 형식 폴백
@@ -258,12 +276,14 @@ def idea_chat_node(state: PipelineState) -> dict:
                 idea_summary = ""
                 suggested_mode = "create"
                 notes_to_add = []
+                suggested_followups = []
             else:
                 reply = (result.get("reply") or raw.strip()).strip()
                 idea_ready = bool(result.get("idea_ready", False))
                 idea_summary = (result.get("idea_summary") or "").strip()
                 suggested_mode = (result.get("suggested_mode") or "create").strip()
                 notes_to_add = _normalize_notes_to_add(result.get("notes_to_add", []))
+                suggested_followups = _normalize_followups(result.get("suggested_followups", []))
 
         # ── 진단 로그: notes_to_add 누수/누락을 즉시 감지하기 위함 ──
         sample = notes_to_add[0]["text"][:60] if notes_to_add else ""
@@ -299,6 +319,7 @@ def idea_chat_node(state: PipelineState) -> dict:
             "idea_summary": idea_summary,
             "suggested_mode": suggested_mode,
             "notes_to_add": notes_to_add,
+            "suggested_followups": suggested_followups,
             "thinking_log": [],
             "current_step": "idea_chat",
         }
@@ -310,6 +331,28 @@ def idea_chat_node(state: PipelineState) -> dict:
             "thinking_log": [],
             "current_step": "idea_chat",
         }
+
+
+def _normalize_followups(raw) -> list:
+    """후속 질문 리스트를 정규화: 문자열만, 빈/중복 제거, 최대 4개, 100자 컷."""
+    if not isinstance(raw, list):
+        return []
+    seen = set()
+    out: list = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        s = item.strip()
+        if not s:
+            continue
+        key = s.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(s[:100])
+        if len(out) >= 4:
+            break
+    return out
 
 
 def _normalize_notes_to_add(raw_notes) -> list:
