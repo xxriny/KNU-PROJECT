@@ -19,9 +19,11 @@ def task_coordinator(
     pr_context = _as_dict(state.get("pr_context"))
     pm_report = _as_dict(state.get("pm_report"))
     changed_files = _changed_file_set(state)
+    pr_number = pr_context.get("pr_number") or ""
+    team_id = str(state.get("team_id") or "")
     task = create_task(
         task_type="dev_gap_approval",
-        title=f"PR #{pr_context.get('pr_number')} GAP 승인 요청",
+        title=f"PR #{pr_number} GAP 승인 요청",
         description=pm_report.get("summary", "Dev Tracking PM approval requested."),
         area="pm",
         payload={
@@ -43,10 +45,19 @@ def task_coordinator(
             "implementation_profile": _as_dict(state.get("implementation_profile")),
         },
         created_by=str(_as_dict(state.get("actor")).get("github_id") or state.get("created_by") or ""),
-        team_id=str(state.get("team_id") or ""),
+        team_id=team_id,
         status="pending_approval",
-        pr_number=pr_context.get("pr_number") or "",
+        pr_number=pr_number,
     )
+    # create_task returns None when a duplicate is detected — look up the existing task
+    if task is None:
+        from pipeline.domain.agile.task_coordinator import list_tasks
+        existing = [
+            t for t in list_tasks(team_id=team_id)
+            if t.get("task_type") == "dev_gap_approval"
+            and str(t.get("pr_number") or "") == str(pr_number)
+        ]
+        task = existing[0] if existing else {"id": None, "task_type": "dev_gap_approval", "status": "pending_approval"}
     return {
         "status": "PASS",
         "approval_task": {
