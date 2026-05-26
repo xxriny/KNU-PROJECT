@@ -17,7 +17,7 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Team, User, Subscription, TeamInvite
+from models import Team, User, Subscription, TeamInvite, TeamMember
 from schemas import (
     LoginRequest, RegisterRequest, TokenResponse, UserResponse,
     TeamResponse, TeamCreateRequest, TeamUpdateRequest, DevicePollRequest,
@@ -141,6 +141,9 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
         team_id=team.id if team else None,
     )
     db.add(user)
+    db.flush()
+    if team:
+        db.add(TeamMember(user_id=user.id, team_id=team.id, role=req.role))
     db.commit()
     db.refresh(user)
 
@@ -176,6 +179,7 @@ async def create_team(
     db.add(team)
     db.flush()
     db.add(Subscription(team_id=team.id, plan="free", status="active"))
+    db.add(TeamMember(user_id=user.id, team_id=team.id, role="pm"))
     user.team_id = team.id
     db.commit()
     db.refresh(team)
@@ -338,6 +342,27 @@ async def join_team_via_invite(
     return _build_user_response(db, user)
 
 
+@router.patch("/users/{user_id}/role")
+async def update_user_role(
+    user_id: str,
+    req: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "pm":
+        raise HTTPException(status_code=403, detail="PM 권한이 필요합니다.")
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target or target.team_id != current_user.team_id:
+        raise HTTPException(status_code=404, detail="팀원을 찾을 수 없습니다.")
+    new_role = req.get("role")
+    target.role = new_role
+    tm = db.query(TeamMember).filter(TeamMember.user_id == user_id, TeamMember.team_id == current_user.team_id).first()
+    if tm:
+        tm.role = new_role
+    db.commit()
+    return {"status": "ok"}
+
+
 @router.post("/github/disconnect")
 async def github_disconnect(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     user.github_id = None
@@ -350,8 +375,19 @@ async def github_disconnect(user: User = Depends(get_current_user), db: Session 
 
 @router.get("/users/me/teams")
 async def get_my_teams(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    teams = db.query(Team).filter(Team.id == user.team_id).all() if user.team_id else []
-    return {"teams": [{"id": t.id, "name": t.name, "plan": _team_plan(db, t.id)} for t in teams]}
+    memberships = db.query(TeamMember).filter(TeamMember.user_id == user.id).all()
+    teams_data = []
+    for tm in memberships:
+        t = db.query(Team).filter(Team.id == tm.team_id).first()
+        if t:
+            teams_data.append({
+                "id": t.id,
+                "name": t.name,
+                "role": tm.role,
+                "plan": _team_plan(db, t.id),
+                "is_active": t.id == user.team_id,
+            })
+    return {"teams": teams_data}
 
 
 @router.post("/users/me/teams/switch")
@@ -361,10 +397,11 @@ async def switch_team(
     db: Session = Depends(get_db),
 ):
     team_id = req.get("team_id")
-    team = db.query(Team).filter(Team.id == team_id).first()
-    if not team:
-        raise HTTPException(status_code=404, detail="팀을 찾을 수 없습니다.")
+    tm = db.query(TeamMember).filter(TeamMember.user_id == user.id, TeamMember.team_id == team_id).first()
+    if not tm:
+        raise HTTPException(status_code=403, detail="해당 팀의 멤버가 아닙니다.")
     user.team_id = team_id
+    user.role = tm.role
     db.commit()
     db.refresh(user)
     return {"user": _build_user_response(db, user)}

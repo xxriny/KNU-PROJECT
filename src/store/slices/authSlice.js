@@ -122,6 +122,7 @@ export const createAuthSlice = (set, get) => ({
 
   /** 팀 생성 (로그인 후 팀이 없는 사용자) */
   createTeam: async (teamName) => {
+    get()._parkCurrentWorkspace();
     await serverRequest("/auth/teams", {
       method: "POST",
       headers: get().getAuthHeader(),
@@ -129,6 +130,7 @@ export const createAuthSlice = (set, get) => ({
     });
     const me = await serverRequest("/auth/me", { headers: get().getAuthHeader() });
     get().setAuth(get().authToken, me);
+    get()._restoreWorkspace(me.team_id);
     get().loadMyTeams();
     return me;
   },

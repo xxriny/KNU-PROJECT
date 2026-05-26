@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import useAppStore from "../../store/useAppStore";
+import { serverRequest } from "../../api/serverClient";
 import { Plus, Loader2, Check, X, Copy, LogOut, UserPlus, Users, Edit3, Moon, Sun, CreditCard } from "lucide-react";
 
 export default function WorkspaceSwitcher({ onOpenGithub, onOpenPricing, onCreateTeam }) {
@@ -293,10 +294,9 @@ function MiniModal({ type, data, isDarkMode, onClose, authToken, backendPort, cu
   useEffect(() => {
     if (type !== "members") return;
     setMembersLoading(true);
-    fetch(`http://127.0.0.1:${port}/api/teams/me/members`, {
+    serverRequest(`/auth/teams/${currentUser?.team_id}/members`, {
       headers: { Authorization: `Bearer ${authToken}` },
     })
-      .then((r) => r.json())
       .then((d) => setMembers(d.members || []))
       .catch(() => {})
       .finally(() => setMembersLoading(false));
@@ -317,26 +317,22 @@ function MiniModal({ type, data, isDarkMode, onClose, authToken, backendPort, cu
       placeholder: "새 팀 이름",
       submit: "변경",
       action: async () => {
-        const res = await fetch(`http://127.0.0.1:${port}/api/teams/me`, {
+        await serverRequest(`/auth/teams/${currentUser?.team_id}`, {
           method: "PATCH",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+          headers: { Authorization: `Bearer ${authToken}` },
           body: JSON.stringify({ name: value.trim() }),
         });
-        const d = await res.json();
-        if (!res.ok) throw new Error(d.detail || "변경 실패");
       },
     },
     invite: {
       title: "초대 코드 생성",
       submit: "생성",
       action: async () => {
-        const res = await fetch(`http://127.0.0.1:${port}/auth/teams/${currentUser.team_id}/invites`, {
+        const d = await serverRequest(`/auth/teams/${currentUser?.team_id}/invites`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+          headers: { Authorization: `Bearer ${authToken}` },
           body: JSON.stringify({ role: inviteRole, max_uses: 1, expires_in_days: 7 }),
         });
-        const d = await res.json();
-        if (!res.ok) throw new Error(d.detail || "생성 실패");
         setResult(d.code);
       },
       noSuccessClose: true,
@@ -346,12 +342,10 @@ function MiniModal({ type, data, isDarkMode, onClose, authToken, backendPort, cu
       placeholder: "초대 코드 입력",
       submit: "합류",
       action: async () => {
-        const res = await fetch(`http://127.0.0.1:${port}/auth/invites/${value.trim()}/join`, {
+        await serverRequest(`/auth/invites/${value.trim()}/join`, {
           method: "POST",
           headers: { Authorization: `Bearer ${authToken}` },
         });
-        const d = await res.json();
-        if (!res.ok) throw new Error(d.detail || "합류 실패");
         await useAppStore.getState().loadMyTeams();
       },
     },
@@ -459,12 +453,11 @@ function MiniModal({ type, data, isDarkMode, onClose, authToken, backendPort, cu
                       const newRole = e.target.value;
                       setRoleUpdating(m.id);
                       try {
-                        const res = await fetch(`http://127.0.0.1:${port}/api/users/${m.id}/role`, {
+                        await serverRequest(`/auth/users/${m.id}/role`, {
                           method: "PATCH",
-                          headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+                          headers: { Authorization: `Bearer ${authToken}` },
                           body: JSON.stringify({ role: newRole }),
                         });
-                        if (!res.ok) throw new Error();
                         setMembers((prev) => prev.map((x) => x.id === m.id ? { ...x, role: newRole } : x));
                       } catch {
                         setError("역할 변경 실패");

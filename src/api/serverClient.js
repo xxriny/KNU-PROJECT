@@ -14,6 +14,12 @@ export async function serverRequest(path, options = {}) {
     },
   });
 
+  if (response.status === 401) {
+    const { default: useAppStore } = await import("../store/useAppStore.js");
+    useAppStore.getState().clearAuth();
+    throw new Error("세션이 만료되었습니다. 다시 로그인해주세요.");
+  }
+
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({}));
     throw new Error(errorBody.detail || errorBody.message || `Server Error: ${response.status}`);

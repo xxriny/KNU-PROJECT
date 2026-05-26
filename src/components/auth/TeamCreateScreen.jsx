@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import useAppStore from "../../store/useAppStore";
+import { serverRequest } from "../../api/serverClient";
 import { Users, Loader2, ArrowRight } from "lucide-react";
 
 export default function TeamCreateScreen({ onClose } = {}) {
@@ -35,23 +36,19 @@ export default function TeamCreateScreen({ onClose } = {}) {
     setLoading(true);
     setError("");
     try {
-      const port = useAppStore.getState().backendPort || 8000;
       const token = useAppStore.getState().authToken;
-      
-      // 링크가 입력되었을 경우를 대비해 파싱
+
       let code = inviteCode.trim();
       try {
         const url = new URL(code);
         code = url.searchParams.get("invite") || code;
       } catch (_) {}
-      
-      const res = await fetch(`http://127.0.0.1:${port}/auth/invites/${code}/join`, {
+
+      await serverRequest(`/auth/invites/${code}/join`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "팀 합류에 실패했습니다.");
-      
+
       await useAppStore.getState().checkAuthStatus();
       await useAppStore.getState().loadMyTeams();
       onClose?.();

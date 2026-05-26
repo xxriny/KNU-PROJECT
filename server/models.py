@@ -144,6 +144,23 @@ class GeminiApiKey(Base):
     )
 
 
+# ── TeamMember (N:M) ─────────────────────────────────────────
+
+class TeamMember(Base):
+    """사용자-팀 다중 소속 관계."""
+    __tablename__ = "team_members"
+
+    id      = Column(String(36), primary_key=True, default=_new_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    team_id = Column(String(36), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    role    = Column(String(20), nullable=False, default="engineer")
+
+    __table_args__ = (
+        Index("ix_team_members_user_id", "user_id"),
+        Index("ix_team_members_team_id", "team_id"),
+    )
+
+
 # ── TeamInvite ─────────────────────────────────────────────
 
 class TeamInvite(Base):
