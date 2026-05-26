@@ -23,6 +23,7 @@ from auth.models import User
 from pydantic import BaseModel, Field
 from version import APP_VERSION, DEFAULT_MODEL
 from observability.logger import get_logger
+from pipeline.core.utils import active_jwt_token
 # pipeline 관련 임포트는 첫 요청 시 지연 로드 (langgraph 콜드스타트 방지)
 _pipeline_loaded = False
 
@@ -114,6 +115,7 @@ class ExtractFinalIdeaRequest(BaseModel):
     memos: list = []
     api_key: str = ""
     model: str = DEFAULT_MODEL
+    auth_token: str = ""
 
 
 class ScanRequest(BaseModel):
@@ -342,6 +344,8 @@ async def idea_chat(req: IdeaChatRequest):
 @rest_router.post("/api/extract-final-idea")
 async def extract_final_idea_endpoint(req: ExtractFinalIdeaRequest):
     """Sync 빌드 전 Pre-flight 단계. 날것의 대화/메모를 정제해 최종 확정 요구사항 마크다운만 추출."""
+    if req.auth_token:
+        active_jwt_token.set(req.auth_token)
     try:
         from pipeline.domain.chat.idea_extractor import extract_final_idea
         result = extract_final_idea(

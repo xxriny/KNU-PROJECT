@@ -24,7 +24,8 @@ export const createGithubSlice = (set, get) => ({
   githubBranch: stored.branch || "main",
 
   setGithubSettings: (token, owner, repo, branch) => {
-    const br = branch || stored.branch || "main";
+    const currentBranch = get().githubBranch;
+    const br = branch || currentBranch || "main";
     save({ token, owner, repo, branch: br });
     set({ githubToken: token, githubOwner: owner, githubRepo: repo, githubBranch: br });
   },

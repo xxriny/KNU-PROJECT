@@ -23,19 +23,12 @@ LOCAL_DB_URL = f"sqlite:///{LOCAL_DB_PATH}"
 engine = create_engine(LOCAL_DB_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# ── 공유 DB (users, teams, subscriptions — NAVIGATOR-SERVER 소유) ─
-_AUTH_DIR      = os.path.dirname(os.path.abspath(__file__))   # backend/auth/
-_BACKEND_DIR   = os.path.dirname(_AUTH_DIR)                    # backend/
-_NAVIGATOR_DIR = os.path.dirname(_BACKEND_DIR)                 # NAVIGATOR/
+# ── 공유 DB (로컬 환경 통합: local.db와 병합) ─────────────────────
+SHARED_DB_PATH = LOCAL_DB_PATH
+SHARED_DB_URL = LOCAL_DB_URL
 
-SHARED_DB_PATH = os.environ.get(
-    "NAVIGATOR_SHARED_DB_PATH",
-    os.path.join(_NAVIGATOR_DIR, "server", "shared.db"),
-)
-SHARED_DB_URL = f"sqlite:///{SHARED_DB_PATH}"
-
-shared_engine = create_engine(SHARED_DB_URL, connect_args={"check_same_thread": False})
-SharedSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=shared_engine)
+shared_engine = engine
+SharedSessionLocal = SessionLocal
 
 
 class Base(DeclarativeBase):
@@ -44,7 +37,7 @@ class Base(DeclarativeBase):
 
 
 class SharedBase(DeclarativeBase):
-    """공유 DB 전용 Base (users, teams, subscriptions, published_snapshots)."""
+    """공유 DB 전용 Base (통합으로 인해 동일한 engine에 바인딩됩니다)."""
     pass
 
 
@@ -57,7 +50,7 @@ def get_db():
 
 
 def get_shared_db():
-    db = SharedSessionLocal()
+    db = SessionLocal()
     try:
         yield db
     finally:

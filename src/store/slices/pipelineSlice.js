@@ -304,7 +304,7 @@ export const createPipelineSlice = (set, get) => ({
    *   returns { status, summary_markdown, dropped_points, error? }
    */
   extractFinalIdea: async () => {
-    const { backendPort, chatHistory, userComments, apiKey, model } = get();
+    const { backendPort, chatHistory, userComments, apiKey, model, authToken } = get();
     if (!backendPort) {
       return {
         status: "error",
@@ -340,6 +340,7 @@ export const createPipelineSlice = (set, get) => ({
         memos: activeMemos,
         api_key: apiKey || "",
         model: model || "gemini-3.1-flash-lite",
+        auth_token: authToken || "",
       });
     } catch (e) {
       return {

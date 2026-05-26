@@ -56,7 +56,6 @@ export default function App() {
     () => localStorage.getItem("pricing_dismissed") === "1"
   );
   const [isStudioOpen, setIsStudioOpen] = useState(true);
-  const [showProgressOverlay, setShowProgressOverlay] = useState(false);
 
   const activeOutputId = activeViewportTab?.kind === "output" ? activeViewportTab.id : null;
 
@@ -94,7 +93,6 @@ export default function App() {
       setActiveIconPanel(null);
       setShowSessions(false);
       setShowGithubModal(false);
-      setShowProgressOverlay(true);
     }
   }, [pipelineStatus]);
 
@@ -192,22 +190,6 @@ export default function App() {
               {renderCenter()}
             </GlobalErrorBoundary>
           </div>
-          {/* Progress 전체화면 오버레이 */}
-          {hasProgress && showProgressOverlay && (
-            <div className={`absolute inset-0 z-30 flex flex-col ${
-              isDarkMode ? "bg-[#0a0d14]" : "bg-slate-50"
-            }`}>
-              <button
-                onClick={() => setShowProgressOverlay(false)}
-                className={`absolute top-3 right-4 z-10 p-1.5 rounded-lg transition-colors ${isDarkMode ? "hover:bg-white/10 text-slate-500 hover:text-slate-300" : "hover:bg-slate-200 text-slate-400"}`}
-              >
-                <X size={14} />
-              </button>
-              <div className="flex-1 min-h-0 overflow-hidden">
-                <PipelineProgress />
-              </div>
-            </div>
-          )}
         </div>
 
         <div
@@ -246,7 +228,7 @@ export default function App() {
                   hasProgress={hasProgress}
                   pipelineStatus={pipelineStatus}
                   onPanel={handleIconPanel}
-                  onOpenProgress={() => setShowProgressOverlay(true)}
+                  onOpenProgress={() => { setActiveIconPanel(null); setShowSessions(false); setShowGithubModal(false); }}
                 />
               </div>
             ) : (

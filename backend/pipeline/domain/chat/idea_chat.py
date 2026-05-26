@@ -22,7 +22,6 @@ from observability.logger import get_logger
 from version import DEFAULT_MODEL
 
 # RAG Manager (Phase 2)
-from pipeline.core.rag_manager import rag_manager
 
 
 # ── 구조화 출력 스키마 ────────────────────────────────────
@@ -179,39 +178,10 @@ def idea_chat_node(state: PipelineState) -> dict:
         if not user_request:
             return {"error": "메시지가 비어있습니다.", "current_step": "idea_chat"}
 
-        # ── RAG Manager 통합 검색 (Phase 2) ──
-        rag_context = []
-        try:
-            pm_sa_results = rag_manager.adaptive_search(user_request, context_type="pm", n_results=3)
-            if pm_sa_results:
-                rag_context.append("### 관련 산출물 지식 (RTM/Components/API/DB)")
-                for res in pm_sa_results:
-                    rag_context.append(f"- {res['content'][:1000]}")
-
-            stack_results = rag_manager.adaptive_search(user_request, context_type="stack", n_results=2)
-            if stack_results:
-                rag_context.append("### 관련 기술 스택 정보")
-                for s in stack_results:
-                    rag_context.append(f"- {s['package_name']} ({s['version_req']}): {s['content'][:500]}")
-
-            memo_results = rag_manager.adaptive_search(user_request, context_type="memo", n_results=3)
-            if memo_results:
-                rag_context.append("### 사용자 지적사항 및 메모")
-                for res in memo_results:
-                    rag_context.append(f"- {res['content']}")
-        except Exception as rag_err:
-            logger.warning(f"RAG search via RAGManager failed: {rag_err}")
-
-
-        rag_text = "\n".join(rag_context)
-
         # 메시지 구성
         from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
         messages = [SystemMessage(content=SYSTEM_PROMPT)]
-
-        if rag_text:
-            messages.append(SystemMessage(content=f"## 관련 지식 베이스 (RAG)\n{rag_text}"))
 
         if previous_result:
             result_context = {

@@ -56,15 +56,18 @@ export default function SettingsPanel({ onShowPricing }) {
 
   useEffect(() => {
     if (!authToken || !currentUser?.team_id) return;
-    serverRequest(`/auth/teams/${currentUser.team_id}`, {
+    serverRequest(`/api/teams/me`, {
       headers: { Authorization: `Bearer ${authToken}` },
     })
-      .then((d) => {
+      .then((data) => {
+        const d = data.team;
+        if (!d) return;
         setOauthConfig((p) => ({
           ...p,
+          client_id: d.github_client_id || "",
           github_repo: d.github_repo || "",
         }));
-        if (d.github_repo && githubToken) {
+        if (d.github_repo) {
           const parts = d.github_repo.split("/");
           if (parts.length === 2) {
             setGithubSettings(githubToken, parts[0], parts[1]);
@@ -80,10 +83,10 @@ export default function SettingsPanel({ onShowPricing }) {
     setOauthStatus(null);
     try {
       const payload = { github_repo: oauthConfig.github_repo };
-      if (oauthConfig.client_id) payload.github_client_id = oauthConfig.client_id;
-      if (oauthConfig.client_secret) payload.github_client_secret = oauthConfig.client_secret;
+      if (oauthConfig.client_id) payload.client_id = oauthConfig.client_id;
+      if (oauthConfig.client_secret) payload.client_secret = oauthConfig.client_secret;
 
-      const json = await serverRequest(`/auth/teams/${currentUser.team_id}`, {
+      const json = await serverRequest(`/api/teams/me/github`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
         body: JSON.stringify(payload),

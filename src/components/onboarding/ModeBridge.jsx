@@ -124,7 +124,7 @@ export default function ModeBridge() {
     loadBranches(repo.owner, repo.name);
     if (currentUser?.team_id) {
       try {
-        await serverRequest(`/auth/teams/${currentUser.team_id}`, {
+        await serverRequest(`/api/teams/me/github`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
           body: JSON.stringify({ github_repo: repo.full_name }),

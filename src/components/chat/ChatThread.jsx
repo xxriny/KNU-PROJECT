@@ -3,6 +3,7 @@ import { CheckCircle2, Undo2, RotateCcw, MessageCircleQuestion } from "lucide-re
 import useAppStore from "../../store/useAppStore";
 import ScrollArea from "../ui/ScrollArea";
 import ChatMessage from "./ChatMessage";
+import PipelineProgress from "../PipelineProgress";
 
 /**
  * ChatThread — chatHistory를 렌더하면서 system_marker(sync/rollback) 칩과
@@ -24,7 +25,7 @@ export default function ChatThread() {
   const bottomRef = useRef(null);
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatHistory, lastFollowups]);
+  }, [chatHistory, lastFollowups, pipelineStatus]);
 
   // 후속 질문 칩 클릭 → 즉시 사용자 메시지로 전송
   const handleFollowupClick = (text) => {
@@ -71,6 +72,12 @@ export default function ChatThread() {
             isDarkMode={isDarkMode}
             onPick={handleFollowupClick}
           />
+        )}
+
+        {(pipelineStatus === "running" || pipelineStatus === "error") && (
+          <div className="w-full h-[320px] rounded-2xl overflow-hidden border shadow-lg mt-4 mb-4" style={{ borderColor: isDarkMode ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)" }}>
+             <PipelineProgress />
+          </div>
         )}
 
         <div ref={bottomRef} className="h-1" />
