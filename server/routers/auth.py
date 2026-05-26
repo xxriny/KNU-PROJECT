@@ -95,12 +95,25 @@ def _team_plan(db: Session, team_id: Optional[str]) -> str:
 def _build_user_response(db: Session, user: User) -> UserResponse:
     team_name = user.team.name if user.team else None
     plan = _team_plan(db, user.team_id)
+    # TeamMember role이 users.role과 다르면 TeamMember가 정확한 값 — 동기화
+    effective_role = user.role
+    if user.team_id:
+        tm = db.query(TeamMember).filter(
+            TeamMember.user_id == user.id,
+            TeamMember.team_id == user.team_id,
+        ).first()
+        if tm and tm.role != user.role:
+            user.role = tm.role
+            db.commit()
+            effective_role = tm.role
     return UserResponse(
         id=user.id,
         name=user.name,
         email=user.email,
-        role=user.role,
+        role=effective_role,
         github_username=user.github_username,
+        github_id=user.github_id,
+        github_login=user.github_login,
         team_id=user.team_id,
         team_name=team_name,
         plan=plan,
@@ -181,6 +194,7 @@ async def create_team(
     db.add(Subscription(team_id=team.id, plan="free", status="active"))
     db.add(TeamMember(user_id=user.id, team_id=team.id, role="pm"))
     user.team_id = team.id
+    user.role = "pm"
     db.commit()
     db.refresh(team)
     return TeamResponse(id=team.id, name=team.name, plan="free")
@@ -233,13 +247,19 @@ async def list_members(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if user.team_id != team_id:
+    # 요청자가 해당 팀의 멤버인지 확인
+    requester_tm = db.query(TeamMember).filter(
+        TeamMember.user_id == user.id, TeamMember.team_id == team_id
+    ).first()
+    if not requester_tm:
         raise HTTPException(status_code=403, detail="해당 팀에 접근 권한이 없습니다.")
-    members = db.query(User).filter(User.team_id == team_id).all()
-    return {"members": [
-        {"id": u.id, "name": u.name, "email": u.email, "role": u.role}
-        for u in members
-    ]}
+    memberships = db.query(TeamMember).filter(TeamMember.team_id == team_id).all()
+    result = []
+    for tm in memberships:
+        u = db.query(User).filter(User.id == tm.user_id).first()
+        if u:
+            result.append({"id": u.id, "name": u.name, "email": u.email, "role": tm.role})
+    return {"members": result}
 
 
 # ── Team Invites ─────────────────────────────────────────────
@@ -334,8 +354,14 @@ async def join_team_via_invite(
     # 팀 합류
     user.team_id = invite.team_id
     user.role = invite.role
-    
     invite.used_count += 1
+
+    existing_tm = db.query(TeamMember).filter(
+        TeamMember.user_id == user.id, TeamMember.team_id == invite.team_id
+    ).first()
+    if not existing_tm:
+        db.add(TeamMember(user_id=user.id, team_id=invite.team_id, role=invite.role))
+
     db.commit()
     db.refresh(user)
 
@@ -431,7 +457,11 @@ async def github_device_start(db: Session = Depends(get_db)):
 
 
 @router.post("/github/device/poll")
-async def github_device_poll(req: DevicePollRequest, db: Session = Depends(get_db)):
+async def github_device_poll(
+    req: DevicePollRequest,
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
     client_id = os.environ.get("GITHUB_CLIENT_ID", "")
     payload = {
         "client_id": client_id,
@@ -448,13 +478,13 @@ async def github_device_poll(req: DevicePollRequest, db: Session = Depends(get_d
     if "access_token" not in data:
         return data  # authorization_pending 등
 
-    # GitHub 유저 정보 조회 → DB upsert
-    token = data["access_token"]
+    # GitHub 유저 정보 조회
+    gh_token = data["access_token"]
     with httpx.Client() as c:
         gh = c.get(
             "https://api.github.com/user",
             headers={
-                "Authorization": f"Bearer {token}",
+                "Authorization": f"Bearer {gh_token}",
                 "Accept": "application/vnd.github+json",
                 "User-Agent": "Navigator-Server/1.0",
             },
@@ -463,7 +493,33 @@ async def github_device_poll(req: DevicePollRequest, db: Session = Depends(get_d
     github_id = str(gh.get("id", ""))
     email = gh.get("email") or f"{gh.get('login', 'unknown')}@github.local"
     name  = gh.get("name") or gh.get("login", "GitHub User")
+    login = gh.get("login", "")
 
+    # 이미 로그인된 사용자가 GitHub를 연동하는 경우: 기존 계정에 GitHub를 연결
+    logged_in_user: Optional[User] = None
+    if authorization:
+        parts = authorization.split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            token_payload = decode_token(parts[1])
+            if token_payload:
+                logged_in_user = db.query(User).filter(User.id == token_payload["sub"]).first()
+
+    if logged_in_user:
+        # 기존 로그인 사용자에 GitHub 정보 연결 (계정 전환 없음)
+        logged_in_user.github_id          = github_id
+        logged_in_user.github_login       = login
+        logged_in_user.github_username    = login
+        logged_in_user.github_oauth_token = gh_token
+        db.commit()
+        db.refresh(logged_in_user)
+        jwt_token = _make_token(logged_in_user.id, logged_in_user.email, logged_in_user.role)
+        return {
+            "access_token": jwt_token,
+            "token_type": "bearer",
+            "user": _build_user_response(db, logged_in_user).model_dump(),
+        }
+
+    # 비로그인 상태 — github_id 또는 email로 기존 계정 탐색
     user = db.query(User).filter(User.github_id == github_id).first()
     if not user:
         user = db.query(User).filter(User.email == email).first()
@@ -473,16 +529,16 @@ async def github_device_poll(req: DevicePollRequest, db: Session = Depends(get_d
             name=name, email=email, password_hash="",
             role="engineer",
             github_id=github_id,
-            github_login=gh.get("login"),
-            github_username=gh.get("login"),
-            github_oauth_token=token,
+            github_login=login,
+            github_username=login,
+            github_oauth_token=gh_token,
         )
         db.add(user)
     else:
         user.github_id           = github_id
-        user.github_login        = gh.get("login")
-        user.github_oauth_token  = token
-        user.github_username     = gh.get("login")
+        user.github_login        = login
+        user.github_oauth_token  = gh_token
+        user.github_username     = login
 
     db.commit()
     db.refresh(user)

@@ -266,6 +266,7 @@ export const createAuthSlice = (set, get) => ({
     try {
       const data = await serverRequest("/auth/github/device/poll", {
         method: "POST",
+        headers: get().getAuthHeader(),
         body: JSON.stringify({ device_code }),
       });
       if (data.access_token) {

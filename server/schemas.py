@@ -29,6 +29,8 @@ class UserResponse(BaseModel):
     email: str
     role: str
     github_username: Optional[str] = None
+    github_id: Optional[str] = None
+    github_login: Optional[str] = None
     team_id: Optional[str] = None
     team_name: Optional[str] = None
     plan: str = "free"           # 팀 구독 플랜 (조회 시 합성)

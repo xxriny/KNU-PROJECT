@@ -209,7 +209,7 @@ export default function SettingsPanel({ onShowPricing }) {
       const doPoll = async () => {
         try {
           const result = await pollGithubDeviceFlow(data.device_code);
-          if (result.status === "ok") {
+          if (result.access_token) {
             stopPolling();
           } else if (result.status === "error") {
             stopPolling(GH_ERRORS[result.error] || result.error || "인증 실패");
