@@ -3,6 +3,7 @@
  */
 import React, { useState, useEffect, useRef } from "react";
 import useAppStore from "../store/useAppStore";
+import { serverRequest } from "../api/serverClient";
 import { Github, Check, X, Loader2, ChevronDown } from "lucide-react";
 
 export default function SettingsPanel({ onShowPricing }) {
@@ -119,10 +120,9 @@ export default function SettingsPanel({ onShowPricing }) {
     setRepoScopeError(false);
     setShowRepoPicker(false);
     try {
-      const res = await fetch(`http://127.0.0.1:${backendPort}/auth/github/repos`, {
+      const data = await serverRequest("/auth/github/repos", {
         headers: { Authorization: `Bearer ${authToken}` },
       });
-      const data = await res.json();
       if (data.status === "ok") {
         setRepoList(data.repos);
         setShowRepoPicker(true);

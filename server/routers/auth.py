@@ -389,6 +389,48 @@ async def update_user_role(
     return {"status": "ok"}
 
 
+@router.get("/github/repos")
+async def list_github_repos(user: User = Depends(get_current_user)):
+    """GitHub OAuth 토큰으로 사용자 레포 목록 반환."""
+    if not user.github_oauth_token:
+        raise HTTPException(status_code=400, detail="GitHub 연결이 필요합니다.")
+    try:
+        repos, page = [], 1
+        headers = {
+            "Authorization": f"Bearer {user.github_oauth_token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Navigator-Server/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        with httpx.Client(timeout=15.0) as c:
+            while True:
+                resp = c.get(
+                    "https://api.github.com/user/repos",
+                    headers=headers,
+                    params={"sort": "updated", "per_page": 100, "page": page},
+                )
+                resp.raise_for_status()
+                batch = resp.json()
+                if not batch:
+                    break
+                for r in batch:
+                    repos.append({
+                        "full_name": r["full_name"],
+                        "name": r["name"],
+                        "owner": r["owner"]["login"],
+                        "description": r.get("description") or "",
+                        "private": r["private"],
+                        "language": r.get("language") or "",
+                        "pushed_at": r.get("pushed_at") or "",
+                    })
+                if len(batch) < 100:
+                    break
+                page += 1
+        return {"status": "ok", "repos": repos}
+    except Exception as e:
+        return {"status": "scope_error", "error": str(e)}
+
+
 @router.post("/github/disconnect")
 async def github_disconnect(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     user.github_id = None
