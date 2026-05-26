@@ -499,7 +499,7 @@ async def list_github_pulls(
                     "title": p["title"],
                     "state": p["state"],
                     "user": p["user"]["login"],
-                    "branch": p["head"]["ref"],
+                    "head_branch": p["head"]["ref"],
                     "base_branch": p["base"]["ref"],
                     "head_sha": p["head"]["sha"],
                     "created_at": p.get("created_at", ""),
