@@ -56,6 +56,7 @@ def create_context_cache(api_key: str, model: str, system_instruction: str, cont
 # 각 노드 실행 중 발생하는 모든 LLM 호출의 사용량을 임시 저장합니다.
 active_usage_log: ContextVar[list] = ContextVar("active_usage_log", default=[])
 active_session_id: ContextVar[str] = ContextVar("active_session_id", default="")
+active_jwt_token: ContextVar[str] = ContextVar("active_jwt_token", default="")
 
 
 @dataclass
@@ -78,15 +79,20 @@ def _remember_cache_entry(cache: OrderedDict[str, Any], key: str, value: Any):
         cache.popitem(last=False)
 
 # ── API 키 해석 ────────────────────────────────
+_CLOUD_RUN_SERVER = "https://navigator-server-640700885251.asia-northeast3.run.app"
+
 def _fetch_key_from_server() -> str:
-    """서버(8001)의 /keys/active 엔드포인트에서 Gemini 키를 가져온다."""
-    server_url = os.environ.get("NAVIGATOR_SERVER_URL", "http://127.0.0.1:8001")
+    """Cloud Run /keys/active 엔드포인트에서 Gemini 키를 JWT로 인증하여 가져온다."""
+    server_url = os.environ.get("NAVIGATOR_SERVER_URL", _CLOUD_RUN_SERVER)
+    jwt = active_jwt_token.get("")
+    if not jwt:
+        return ""
     try:
         req = urllib.request.Request(
             f"{server_url}/keys/active",
-            headers={"X-Internal-Secret": os.environ.get("INTERNAL_SECRET", "navigator-internal")},
+            headers={"Authorization": f"Bearer {jwt}"},
         )
-        with urllib.request.urlopen(req, timeout=3) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read())
             return data.get("api_key", "")
     except Exception:

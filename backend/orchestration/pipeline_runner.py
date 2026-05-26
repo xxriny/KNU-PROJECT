@@ -24,7 +24,7 @@ from pipeline.orchestration.facade import (
 from pipeline.core.action_type import normalize_action_type
 from pipeline.core.ast_scanner import extract_functions, summarize_for_llm
 from result_shaping.result_shaper import shape_result
-from pipeline.core.utils import to_serializable
+from pipeline.core.utils import to_serializable, active_jwt_token
 from observability.logger import get_logger
 from observability.metrics import track_node
 from transport.connection_manager import manager
@@ -242,7 +242,10 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
     auth_token = payload.get("auth_token", "")
     # UPDATE 모드에서 이전 RTM/features를 그대로 받아 위치·ID 보존에 사용
     previous_features = payload.get("previous_features") or []
-    
+
+    # Gemini 키 fetch 시 Cloud Run 인증에 사용할 JWT를 ContextVar에 설정
+    active_jwt_token.set(auth_token)
+
     get_logger().info("run_analysis_payload", action_type=action_type, source_dir=source_dir, idea=idea[:50])
 
     # ── 사용자 인증 및 GitHub 토큰 추출 ──
@@ -355,6 +358,7 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
 async def run_idea_chat(ws: WebSocket, payload: dict) -> None:
     api_key = payload.get("api_key", "")
     model = payload.get("model", DEFAULT_MODEL)
+    active_jwt_token.set(payload.get("auth_token", ""))
 
     # 채팅에서 만들어진 메모를 묶어두는 session_id.
     # 프론트가 currentSessionId를 보내면 그것에 묶어 영속화하고,

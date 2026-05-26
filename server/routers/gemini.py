@@ -167,18 +167,12 @@ async def delete_key(
 
 
 @router.get("/active")
-async def get_active_key_internal(
-    request: Request,
+async def get_active_key_endpoint(
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    백엔드(8765) 전용 내부 엔드포인트 — 활성 Gemini 키 반환.
-    X-Internal-Secret 헤더로 내부 호출인지 검증.
-    """
-    secret = os.environ.get("INTERNAL_SECRET", "navigator-internal")
-    if request.headers.get("X-Internal-Secret") != secret:
-        raise HTTPException(status_code=403, detail="내부 전용 엔드포인트입니다.")
-    key = get_active_key(db)
+    """로컬 백엔드가 JWT로 팀의 활성 Gemini 키를 가져오는 엔드포인트."""
+    key = get_active_key(db, user.team_id)
     if not key:
         raise HTTPException(status_code=503, detail="사용 가능한 Gemini API 키가 없습니다.")
     return {"api_key": key}
