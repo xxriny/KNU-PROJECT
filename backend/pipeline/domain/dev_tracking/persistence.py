@@ -1,11 +1,30 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from .artifacts import build_dev_gap_report_artifact, persist_dev_knowledge_artifact
 from .utils import _as_dict, _parse_dt
+
+
+def _cleanup_worktree(state: dict[str, Any]) -> None:
+    """분석 완료 후 PR 전용 worktree를 제거한다. 실패해도 무시."""
+    worktree_path = state.get("worktree_path")
+    main_clone = state.get("worktree_main_clone")
+    if not worktree_path:
+        return
+    wt = Path(worktree_path)
+    try:
+        if main_clone and Path(main_clone, ".git").is_dir():
+            from .repo_ops import _run_git
+            _run_git(["worktree", "remove", "--force", str(wt)], main_clone)
+    except Exception:
+        pass
+    if wt.exists():
+        shutil.rmtree(wt, ignore_errors=True)
 
 
 def _snapshot_to_dict(snapshot: Any) -> dict[str, Any]:
@@ -174,6 +193,7 @@ def analysis_persister(state: dict[str, Any], shared_db: Any = None) -> dict[str
     # author: xxrin
     # 분석 결과와 GAP 분류 결과를 shared.db에 영속 저장합니다.
     if shared_db is None:
+        _cleanup_worktree(state)
         return {
             "status": "SKIPPED",
             "analysis_persistence": {"stored": False, "reason": "shared_db unavailable"},
@@ -241,6 +261,10 @@ def analysis_persister(state: dict[str, Any], shared_db: Any = None) -> dict[str
         gap_count += 1
 
     shared_db.commit()
+
+    # worktree 정리 — 분석이 끝났으므로 PR 전용 worktree를 제거한다.
+    _cleanup_worktree(state)
+
     return {
         "status": "PASS",
         "analysis_persistence": {

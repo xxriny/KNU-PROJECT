@@ -204,6 +204,8 @@ class _DevTrackingFields(TypedDict, total=False):
     pr_comment: dict                 # PR 코멘트 생성 결과
     pr_status_check: dict            # GitHub commit status 업데이트 결과
     checkout: dict                   # branch_fetcher checkout 검증 결과
+    worktree_path: str               # PR 분석 전용 git worktree 경로 (정리에 사용)
+    worktree_main_clone: str         # worktree의 원본 클론 경로
     dev_knowledge: dict              # Dev Tracking 지식 조회 결과
     dev_knowledge_context: str       # intent/SA/Agile 프롬프트에 주입할 지식 텍스트
     approval_task: dict              # task_coordinator가 생성한 PM 승인 태스크

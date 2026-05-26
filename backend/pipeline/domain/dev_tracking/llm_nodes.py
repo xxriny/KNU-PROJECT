@@ -24,6 +24,8 @@ StructuredCall = Callable[..., Any]
 
 
 FORENSIC_PROFILE_PROMPT = (
+    "중요: 모든 텍스트 필드(설명, 요약 등)는 반드시 한국어로 작성하세요.\n"
+    "\n"
     "당신은 PR 분석을 위한 포렌식 코드 프로파일러입니다.\n"
     "\n"
     "목표:\n"
@@ -67,6 +69,8 @@ FORENSIC_PROFILE_PROMPT = (
 
 
 GAP_REPORT_PROMPT = (
+    "중요: 모든 텍스트 필드(설명, 요약, gap 내용 등)는 반드시 한국어로 작성하세요.\n"
+    "\n"
     "당신은 PR 구현 결과가 제품/기획 스펙을 충족하는지 검증하는 Gap Analysis Agent입니다.\n"
     "\n"
     "당신의 임무는 published product/spec snapshot과 PR implementation_profile을 비교하여 "
@@ -147,6 +151,8 @@ GAP_REPORT_PROMPT = (
 
 
 INTENT_CLASSIFICATION_PROMPT = (
+    "중요: 모든 텍스트 필드(이유, 설명 등)는 반드시 한국어로 작성하세요.\n"
+    "\n"
     "당신은 Product Manager를 위한 PR Gap Intent Classification Agent입니다.\n"
     "\n"
     "## 선행 검사\n"
@@ -228,7 +234,7 @@ def _llm_implementation_profile(
     ]
     compressed_msg, compression = _compress_if_available(
         user_msg,
-        enabled=bool(state.get("compress_prompt", True)),
+        enabled=bool(state.get("compress_prompt", False)),
         rate=float(state.get("compression_rate", 0.55) or 0.55),
         preserve=[item for item in preserve if item],
     )
@@ -291,7 +297,7 @@ def _llm_gap_report(
     ]
     compressed_msg, compression = _compress_if_available(
         user_msg,
-        enabled=bool(state.get("compress_prompt", True)),
+        enabled=bool(state.get("compress_prompt", False)),
         rate=float(state.get("compression_rate", 0.55) or 0.55),
         preserve=[item for item in preserve if item],
     )
@@ -347,7 +353,7 @@ def _llm_intent_classification(
     user_msg = json.dumps(context, ensure_ascii=False, default=str)
     compressed_msg, compression = _compress_if_available(
         user_msg,
-        enabled=bool(state.get("compress_prompt", True)),
+        enabled=bool(state.get("compress_prompt", False)),
         rate=float(state.get("compression_rate", 0.55) or 0.55),
         preserve=[item for item in preserve if item],
     )

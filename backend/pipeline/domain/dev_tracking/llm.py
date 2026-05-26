@@ -101,26 +101,33 @@ def _validate_llm_implementation_profile(
 ) -> dict[str, Any]:
     # author:xxrin
     # 자동 오판 방지를 위해 LLM profiler가 실제 inventory 밖의 파일을 발명하지 못하게 막는다.
+    # 알 수 없는 파일은 에러 대신 필터링해 LLM 결과를 최대한 살린다.
     known_files = _inventory_file_set(state)
-    role_map = _as_dict(profile.get("file_role_map"))
-    if known_files:
-        unknown_role_files = sorted(path for path in role_map if path not in known_files)
-        if unknown_role_files:
-            raise ValueError(f"LLM profiler returned unknown file_role_map files: {unknown_role_files[:5]}")
 
+    # file_role_map: 인벤토리에 없는 파일 경로 제거
+    role_map = _as_dict(profile.get("file_role_map"))
+    if known_files and role_map:
+        profile["file_role_map"] = {k: v for k, v in role_map.items() if k in known_files}
+
+    # detected_apis / detected_components: 유효하지 않은 항목 제거
     for field_name in ("detected_apis", "detected_components"):
         items = profile.get(field_name) or []
         if not isinstance(items, list):
-            raise ValueError(f"LLM profiler returned non-list {field_name}")
-        for index, item in enumerate(items):
+            profile[field_name] = []
+            continue
+        filtered = []
+        for item in items:
             if not isinstance(item, dict):
-                raise ValueError(f"LLM profiler returned invalid {field_name}[{index}]")
+                continue
             name = str(item.get("name") or "").strip()
             file_path = str(item.get("file") or "").strip()
             if not name or not file_path:
-                raise ValueError(f"LLM profiler returned {field_name}[{index}] without name/file")
+                continue
             if known_files and file_path not in known_files:
-                raise ValueError(f"LLM profiler returned unknown {field_name}[{index}].file: {file_path}")
+                continue
+            filtered.append(item)
+        profile[field_name] = filtered
+
     return profile
 
 

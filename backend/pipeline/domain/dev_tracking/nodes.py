@@ -206,100 +206,176 @@ def dev_task_planner(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _worktree_path_for(base_cache_dir: str, owner: str, repo: str, pr_number: Any, sha: str) -> Path:
+    """PR 분석 전용 worktree 경로를 반환한다."""
+    safe_sha = (sha or "unknown")[:8]
+    safe_pr = str(pr_number or "nopr")
+    return Path(base_cache_dir) / "worktrees" / owner / repo / f"pr{safe_pr}-{safe_sha}"
+
+
+def _remove_worktree(repo_path: Path, worktree_path: Path) -> None:
+    """worktree를 정리한다. 실패해도 분석 전체에 영향 없음."""
+    import shutil
+    try:
+        _run_git(["worktree", "remove", "--force", str(worktree_path)], str(repo_path))
+    except Exception:
+        pass
+    if worktree_path.exists():
+        shutil.rmtree(worktree_path, ignore_errors=True)
+
+
 def branch_fetcher(state: dict[str, Any]) -> dict[str, Any]:
     # author:xxrin
-    # PR 브랜치를 로컬에 준비하고 webhook의 head SHA와 실제 checkout 결과를 검증한다.
+    # PR 분석용 git worktree를 생성해 메인 클론/작업 디렉토리를 보존한다.
+    # provided_source_dir가 있으면 해당 경로를 그대로 사용(worktree 불필요).
+    from connectors.repo_cache import CACHE_DIR
+
     pr_context = _as_dict(state.get("pr_context"))
     provided_source_dir = str(state.get("source_dir") or "").strip()
     expected_sha = str(pr_context.get("head_sha") or "").strip()
+    owner = str(pr_context.get("owner") or "")
+    repo = str(pr_context.get("repo") or "")
+    branch = str(pr_context.get("branch_name") or "")
+    pr_number = pr_context.get("pr_number")
 
+    checkout = {
+        "branch_name": branch,
+        "head_sha": expected_sha,
+        "head_sha_matched": False,
+        "worktree_used": False,
+    }
+
+    # ── 사용자가 직접 source_dir를 제공한 경우 ──────────────────
     if provided_source_dir:
-        source_dir = provided_source_dir
-    else:
-        from connectors.repo_cache import get_local_repo_path
+        repo_path = Path(provided_source_dir)
+        if not repo_path.is_dir():
+            return {
+                "status": "FAIL",
+                "error_type": "LOCAL_REPO_PATH_MISSING",
+                "errors": [f"source_dir does not exist: {provided_source_dir}"],
+                "dev_tracking_next_action": "blocked",
+                "current_step": "branch_fetcher_failed",
+            }
+        checkout["source_dir"] = str(repo_path)
+        checkout["reset_skipped_reason"] = "provided_source_dir"
+        # HEAD SHA 검증만 수행 (checkout/reset 없음)
+        if (repo_path / ".git").is_dir():
+            code, out, _ = _run_git(["rev-parse", "HEAD"], str(repo_path))
+            actual_sha = out.strip() if code == 0 else ""
+            checkout["actual_sha"] = actual_sha
+            checkout["head_sha_matched"] = bool(
+                not expected_sha or actual_sha.lower().startswith(expected_sha.lower())
+            )
+            changed_files = pr_context.get("changed_files") if isinstance(pr_context.get("changed_files"), list) else []
+            if not changed_files:
+                changed_files = _changed_files_from_git(repo_path, str(pr_context.get("base_branch") or ""))
+            checkout["changed_files"] = changed_files
+        else:
+            checkout["head_sha_matched"] = True
+            checkout["warning"] = "source_dir is not a git repository; verification skipped"
+            checkout["changed_files"] = pr_context.get("changed_files") if isinstance(pr_context.get("changed_files"), list) else []
 
-        source_dir = get_local_repo_path(
-            str(pr_context.get("owner") or ""),
-            str(pr_context.get("repo") or ""),
-            state.get("github_oauth_token") or state.get("github_token") or None,
-        )
+        return {
+            "status": "PASS",
+            "source_dir": str(repo_path),
+            "worktree_path": None,
+            "checkout": checkout,
+            "changed_files": checkout.get("changed_files", []),
+            "dev_tracking_next_action": "reverse_analyzer",
+            "current_step": "branch_fetcher_done",
+        }
 
-    repo_path = Path(source_dir)
-    if not repo_path.is_dir():
+    # ── source_dir 미제공: repo_cache 메인 클론 + worktree 생성 ──
+    token = state.get("github_oauth_token") or state.get("github_token") or None
+    from connectors.repo_cache import get_local_repo_path
+    try:
+        main_clone = Path(get_local_repo_path(owner, repo, token))
+    except ValueError as e:
         return {
             "status": "FAIL",
-            "error_type": "LOCAL_REPO_PATH_MISSING",
-            "errors": [f"source_dir does not exist: {source_dir}"],
+            "error_type": "REPO_CLONE_FAILED",
+            "errors": [str(e)],
             "dev_tracking_next_action": "blocked",
             "current_step": "branch_fetcher_failed",
         }
 
-    checkout = {
-        "branch_name": pr_context.get("branch_name", ""),
-        "head_sha": expected_sha,
-        "head_sha_matched": False,
-        "source_dir": str(repo_path),
-    }
+    if not (main_clone / ".git").is_dir():
+        return {
+            "status": "FAIL",
+            "error_type": "LOCAL_REPO_PATH_MISSING",
+            "errors": [f"cloned repo has no .git: {main_clone}"],
+            "dev_tracking_next_action": "blocked",
+            "current_step": "branch_fetcher_failed",
+        }
 
-    if (repo_path / ".git").is_dir():
-        branch = str(pr_context.get("branch_name") or "")
-        if branch and not provided_source_dir:
-            _run_git(["fetch", "origin", branch], str(repo_path))
-            _run_git(["checkout", branch], str(repo_path))
-        if expected_sha and not provided_source_dir:
-            code, out, err = _run_git(["reset", "--hard", expected_sha], str(repo_path))
-            checkout["reset_to_head_sha"] = code == 0
-            if code != 0:
-                return {
-                    "status": "FAIL",
-                    "error_type": "HEAD_SHA_RESET_FAILED",
-                    "errors": [err or out],
-                    "checkout": checkout,
-                    "dev_tracking_next_action": "blocked",
-                    "current_step": "branch_fetcher_failed",
-                }
-        elif expected_sha:
-            # author: xxrin
-            # 사용자가 직접 넘긴 source_dir는 로컬 작업물이 있을 수 있어 reset하지 않고 검증 실패로만 막는다.
-            checkout["reset_to_head_sha"] = False
-            checkout["reset_skipped_reason"] = "provided_source_dir"
-        code, out, err = _run_git(["rev-parse", "HEAD"], str(repo_path))
-        if code != 0:
-            return {
-                "status": "FAIL",
-                "error_type": "HEAD_SHA_READ_FAILED",
-                "errors": [err or out],
-                "checkout": checkout,
-                "dev_tracking_next_action": "blocked",
-                "current_step": "branch_fetcher_failed",
-            }
-        actual_sha = out.strip()
-        checkout["actual_sha"] = actual_sha
-        checkout["head_sha_matched"] = bool(
-            expected_sha and actual_sha.lower().startswith(expected_sha.lower())
-        )
-        if expected_sha and not checkout["head_sha_matched"]:
-            return {
-                "status": "FAIL",
-                "error_type": "HEAD_SHA_MISMATCH",
-                "checkout": checkout,
-                "dev_tracking_next_action": "blocked",
-                "current_step": "branch_fetcher_failed",
-            }
-        changed_files = pr_context.get("changed_files") if isinstance(pr_context.get("changed_files"), list) else []
-        if not changed_files:
-            changed_files = _changed_files_from_git(repo_path, str(pr_context.get("base_branch") or ""))
-        checkout["changed_files"] = changed_files
-    else:
-        checkout["head_sha_matched"] = not expected_sha
-        checkout["warning"] = "source_dir is not a git repository; checkout verification skipped"
-        checkout["changed_files"] = pr_context.get("changed_files") if isinstance(pr_context.get("changed_files"), list) else []
+    # fetch the branch into main clone (read-only side effect on main clone)
+    if branch:
+        _run_git(["fetch", "origin", branch], str(main_clone))
+
+    # worktree 경로 결정 및 기존 잔여 worktree 정리
+    worktree_path = _worktree_path_for(CACHE_DIR, owner, repo, pr_number, expected_sha)
+    if worktree_path.exists():
+        _remove_worktree(main_clone, worktree_path)
+
+    # worktree 생성: 지정 SHA 또는 브랜치로
+    wt_ref = expected_sha or (f"origin/{branch}" if branch else "HEAD")
+    wt_code, wt_out, wt_err = _run_git(
+        ["worktree", "add", "--detach", str(worktree_path), wt_ref],
+        str(main_clone),
+    )
+    if wt_code != 0:
+        return {
+            "status": "FAIL",
+            "error_type": "WORKTREE_CREATE_FAILED",
+            "errors": [wt_err or wt_out],
+            "checkout": checkout,
+            "dev_tracking_next_action": "blocked",
+            "current_step": "branch_fetcher_failed",
+        }
+
+    checkout["worktree_used"] = True
+    checkout["source_dir"] = str(worktree_path)
+
+    # HEAD SHA 검증
+    code, out, err = _run_git(["rev-parse", "HEAD"], str(worktree_path))
+    if code != 0:
+        _remove_worktree(main_clone, worktree_path)
+        return {
+            "status": "FAIL",
+            "error_type": "HEAD_SHA_READ_FAILED",
+            "errors": [err or out],
+            "checkout": checkout,
+            "dev_tracking_next_action": "blocked",
+            "current_step": "branch_fetcher_failed",
+        }
+    actual_sha = out.strip()
+    checkout["actual_sha"] = actual_sha
+    checkout["head_sha_matched"] = bool(
+        not expected_sha or actual_sha.lower().startswith(expected_sha.lower())
+    )
+    if expected_sha and not checkout["head_sha_matched"]:
+        _remove_worktree(main_clone, worktree_path)
+        return {
+            "status": "FAIL",
+            "error_type": "HEAD_SHA_MISMATCH",
+            "checkout": checkout,
+            "dev_tracking_next_action": "blocked",
+            "current_step": "branch_fetcher_failed",
+        }
+
+    changed_files = pr_context.get("changed_files") if isinstance(pr_context.get("changed_files"), list) else []
+    if not changed_files:
+        changed_files = _changed_files_from_git(worktree_path, str(pr_context.get("base_branch") or ""))
+    checkout["changed_files"] = changed_files
 
     return {
         "status": "PASS",
-        "source_dir": str(repo_path),
+        "source_dir": str(worktree_path),
+        # 정리에 필요한 경로를 state에 저장
+        "worktree_path": str(worktree_path),
+        "worktree_main_clone": str(main_clone),
         "checkout": checkout,
-        "changed_files": checkout.get("changed_files", []),
+        "changed_files": changed_files,
         "dev_tracking_next_action": "reverse_analyzer",
         "current_step": "branch_fetcher_done",
     }

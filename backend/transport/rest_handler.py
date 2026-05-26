@@ -1100,7 +1100,7 @@ class DevTrackingRequest(BaseModel):
     use_llm_forensic_profiler: Optional[bool] = None
     use_llm_gap_analyzer: Optional[bool] = None
     use_llm_intent_classifier: Optional[bool] = None
-    compress_prompt: bool = True
+    compress_prompt: bool = False
     notify_pr: bool = False
     team_id: Optional[str] = None
     created_by: str = ""
