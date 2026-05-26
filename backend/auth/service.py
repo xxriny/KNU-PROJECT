@@ -72,10 +72,15 @@ def create_user(
     name: str,
     email: str,
     password: str,
-    role: str = "engineer",
+    role: str = "software_engineer",
     github_username: Optional[str] = None,
     team_name: Optional[str] = None,
 ) -> User:
+    #author: xxrin
+    # shared DB role 제약과 호환되도록 구버전 role 값(engineer)을 표준값으로 정규화한다.
+    if role == "engineer":
+        role = "software_engineer"
+
     team: Optional[Team] = None
     if team_name:
         team = db.query(Team).filter(Team.name == team_name).first()
@@ -123,14 +128,16 @@ def count_users(db: Session) -> int:
 
 REDIRECT_URI = "navigator://auth/callback"
 
-def exchange_github_code(client_id: str, client_secret: str, code: str) -> dict:
+def exchange_github_code(client_id: str, client_secret: str, code: str, redirect_uri: str) -> dict:
     """Authorization Code를 access_token으로 교환."""
     url = "https://github.com/login/oauth/access_token"
+    #author: xxrin
+    # authorize 요청과 token 교환 요청의 redirect_uri를 동일하게 맞춰 OAuth 검증 실패를 방지한다.
     payload = {
         "client_id": client_id,
         "client_secret": client_secret,
         "code": code,
-        "redirect_uri": REDIRECT_URI,
+        "redirect_uri": redirect_uri,
     }
     headers = {"Accept": "application/json", "User-Agent": "Navigator-App/2.0"}
     with httpx.Client(follow_redirects=True) as client:
@@ -253,7 +260,9 @@ def create_or_update_github_user(
             name=name,
             email=email,
             password_hash=hash_password(str(uuid.uuid4())),
-            role="engineer",
+            #author: xxrin
+            # GitHub OAuth 신규 유저 생성 시 role CHECK 제약 오류를 피하기 위해 허용된 role만 저장한다.
+            role="software_engineer",
             github_username=github_login,
             github_id=github_id,
             github_login=github_login,

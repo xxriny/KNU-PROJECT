@@ -1,6 +1,6 @@
 import {
   Table2, Layers, Globe, Database,
-  ShieldCheck, FolderTree, GitBranch, ClipboardCheck, Github, ClipboardList, Share2,
+  ShieldCheck, FolderTree, GitBranch, ClipboardCheck, Github, ClipboardList, Share2, GitPullRequest,
 } from "lucide-react";
 
 export const ICON_PANELS = [
@@ -15,6 +15,9 @@ export const ICON_PANELS = [
   { id: "agile_impact", label: "Impact Analysis", Icon: GitBranch, group: "agile", color: "text-blue-400", bg: "bg-blue-500/10" },
   { id: "github_dashboard", label: "GitHub", Icon: Github, group: "github", color: "text-slate-400", bg: "bg-slate-500/10" },
   { id: "task_approval", label: "Tasks", Icon: ClipboardList, group: "github", color: "text-amber-400", bg: "bg-amber-500/10" },
+  // author: xxrin
+  // PR 기반 Dev Tracking을 UI에서 직접 실행하고 결과를 볼 수 있는 운영 탭이다.
+  { id: "dev_tracking", label: "Dev Tracking", Icon: GitPullRequest, group: "github", color: "text-emerald-400", bg: "bg-emerald-500/10" },
   { id: "shared", label: "Shared", Icon: Share2, group: "shared", color: "text-purple-400", bg: "bg-purple-500/10" },
 ];
 

@@ -3,7 +3,11 @@ from __future__ import annotations
 import os
 from typing import Any, Callable
 
-from .artifacts import build_dev_gap_decision_artifact, persist_dev_knowledge_artifact
+from .artifacts import (
+    build_approved_code_chunk_artifacts,
+    build_dev_gap_decision_artifact,
+    persist_dev_knowledge_artifact,
+)
 from .doc_updater import run_doc_updater_for_dev_gap_decision
 
 
@@ -90,6 +94,21 @@ def run_dev_gap_decision_followup(
 
         run_gh = _missing_gh
 
+    code_chunk_artifacts = build_approved_code_chunk_artifacts(
+        task,
+        decision_status,
+        reviewed_by,
+        result_payload,
+    )
+    code_chunk_results = [
+        persist_dev_knowledge_artifact(code_artifact, shared_db)
+        for code_artifact in code_chunk_artifacts
+    ]
+    stored_code_chunks = [
+        result for result in code_chunk_results
+        if result.get("stored")
+    ]
+
     return {
         "status": "PASS",
         "artifact": artifact,
@@ -99,6 +118,25 @@ def run_dev_gap_decision_followup(
             "artifact_type": artifact["artifact_type"],
             "task_id": artifact.get("task_id"),
             "decision_status": decision_status,
+        },
+        "code_chunk_upsert": {
+            # author: xxrin
+            # 실제 벡터 DB가 제거된 현재 구조에서는 승인된 코드 청크만 append-only artifact로 남겨 후속 RAG 어댑터 입력으로 사용한다.
+            "write_enabled": decision_status == "APPROVED_INTENTIONAL_CHANGE",
+            "code_chunks_upserted": bool(stored_code_chunks),
+            "stored_count": len(stored_code_chunks),
+            "attempted_count": len(code_chunk_artifacts),
+            "artifact_type": "APPROVED_CODE_CHUNK",
+            "policy": (
+                "approved_pm_decision_only"
+                if decision_status == "APPROVED_INTENTIONAL_CHANGE"
+                else "blocked_non_approved_decision"
+            ),
+            "errors": [
+                result.get("error")
+                for result in code_chunk_results
+                if result.get("error")
+            ],
         },
         "doc_sync": doc_sync_result,
         "pr_comment": _post_dev_gap_decision_comment(task, decision_status, reviewed_by, run_gh),

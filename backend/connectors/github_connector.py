@@ -35,6 +35,19 @@ class IssueInfo:
 
 
 @dataclass
+class PullRequestInfo:
+    number: int
+    title: str
+    state: str
+    author: str
+    head_branch: str
+    base_branch: str
+    head_sha: str
+    updated_at: str
+    url: str = ""
+
+
+@dataclass
 class ContributorInfo:
     login: str
     contributions: int
@@ -121,9 +134,47 @@ class GitHubConnector:
             branches = self._gh.rest.repos.list_branches(
                 owner=owner, repo=repo, per_page=limit
             ).parsed_data
-            return [{"name": b.name, "protected": getattr(b, "protected", False)} for b in branches]
+            # author: xxrin
+            # 수동 Dev Tracking 실행에서도 branch 선택만으로 HEAD SHA를 채울 수 있게 commit sha를 함께 내려준다.
+            return [
+                {
+                    "name": b.name,
+                    "protected": getattr(b, "protected", False),
+                    "sha": getattr(getattr(b, "commit", None), "sha", "") or "",
+                }
+                for b in branches
+            ]
         except Exception as e:
             logger.error(f"[GitHubConnector] list_branches failed: {e}")
+            return []
+
+    def list_pull_requests(self, owner: str, repo: str, state: str = "open", limit: int = 30) -> list[PullRequestInfo]:
+        """GitHub PR 목록 조회."""
+        try:
+            pulls = self._gh.rest.pulls.list(
+                owner=owner, repo=repo, state=state, per_page=limit
+            ).parsed_data
+            results = []
+            for pr in pulls:
+                # author: xxrin
+                # PR 선택 UI가 수동 입력 없이 branch/head/base 값을 채울 수 있도록 필요한 필드만 정규화한다.
+                head = getattr(pr, "head", None)
+                base = getattr(pr, "base", None)
+                user = getattr(pr, "user", None)
+                results.append(PullRequestInfo(
+                    number=pr.number,
+                    title=pr.title or "",
+                    state=pr.state or state,
+                    author=getattr(user, "login", "") or "Unknown",
+                    head_branch=getattr(head, "ref", "") or "",
+                    base_branch=getattr(base, "ref", "") or "",
+                    head_sha=getattr(head, "sha", "") or "",
+                    updated_at=pr.updated_at.isoformat() if getattr(pr, "updated_at", None) else "",
+                    url=getattr(pr, "html_url", "") or "",
+                ))
+            return results
+        except Exception as e:
+            logger.error(f"[GitHubConnector] list_pull_requests failed: {e}")
             return []
 
     def _ensure_label(self, owner: str, repo: str, label_name: str) -> None:

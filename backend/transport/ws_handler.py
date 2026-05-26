@@ -26,6 +26,19 @@ def _ensure_ws_pipeline():
     _run_idea_chat = run_idea_chat
 
 
+async def _safe_send_error(websocket: WebSocket, message: str) -> None:
+    """
+    소켓이 이미 끊겼을 수도 있으므로 별도 try/except로 감싼 에러 프레임 전송.
+    """
+    try:
+        await manager.send_json(websocket, {
+            "type": "error",
+            "data": {"message": message},
+        })
+    except Exception as send_err:  # noqa: BLE001 - 마지막 보호선
+        get_logger().warning(f"[WS] failed to send error frame: {send_err}")
+
+
 async def websocket_pipeline(websocket: WebSocket):
     """
     WebSocket 파이프라인 엔드포인트.
@@ -55,10 +68,20 @@ async def websocket_pipeline(websocket: WebSocket):
             payload = msg.get("payload", {})
 
             if msg_type == "analyze":
-                _ensure_ws_pipeline()
+                try:
+                    _ensure_ws_pipeline()
+                except Exception as e:  # noqa: BLE001 - ImportError 등을 사용자에게 노출
+                    get_logger().error(f"[WS] _ensure_ws_pipeline failed (analyze): {e}")
+                    await _safe_send_error(websocket, f"Backend init failed: {e}")
+                    continue
                 await _run_analysis(websocket, payload)
             elif msg_type == "idea_chat":
-                _ensure_ws_pipeline()
+                try:
+                    _ensure_ws_pipeline()
+                except Exception as e:  # noqa: BLE001 - ImportError 등을 사용자에게 노출
+                    get_logger().error(f"[WS] _ensure_ws_pipeline failed (idea_chat): {e}")
+                    await _safe_send_error(websocket, f"Backend init failed: {e}")
+                    continue
                 await _run_idea_chat(websocket, payload)
             elif msg_type == "ping":
                 await manager.send_json(websocket, {"type": "pong"})
@@ -72,5 +95,7 @@ async def websocket_pipeline(websocket: WebSocket):
         manager.disconnect(websocket)
         get_logger().info(f"[WS] Client disconnected. Active: {len(manager.active_connections)}")
     except Exception as e:
-        manager.disconnect(websocket)
         get_logger().error(f"[WS Error] {e}")
+        # disconnect 전에 사용자에게 에러 프레임 전송 시도 (S2 영구 해소)
+        await _safe_send_error(websocket, f"Internal error: {e}")
+        manager.disconnect(websocket)

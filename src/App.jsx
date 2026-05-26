@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import useAppStore from "./store/useAppStore";
 import GlobalErrorBoundary from "./components/GlobalErrorBoundary";
-import ChatPanel from "./components/ChatPanel";
 import ResultViewer from "./components/ResultViewer";
 import HomeScreen from "./components/HomeScreen";
 import PipelineProgress from "./components/PipelineProgress";
@@ -11,6 +10,7 @@ import SettingsPanel from "./components/SettingsPanel";
 import LoginScreen from "./components/auth/LoginScreen";
 import TeamCreateScreen from "./components/auth/TeamCreateScreen";
 import PricingScreen from "./components/billing/PricingScreen";
+import ModeBridge from "./components/onboarding/ModeBridge";
 
 import TopBar from "./components/layout/TopBar";
 import StudioCard from "./components/layout/StudioCard";
@@ -21,7 +21,7 @@ import ToastContainer from "./components/ui/ToastContainer";
 import { ICON_PANELS } from "./constants/uiConstants";
 
 import {
-  X, Bot, PanelRightClose, PanelRightOpen
+  X, PanelRightClose, PanelRightOpen
 } from "lucide-react";
 
 export default function App() {
@@ -45,6 +45,9 @@ export default function App() {
   const checkAuthStatus = useAppStore((state) => state.checkAuthStatus);
   const activeIconPanel = useAppStore((state) => state.activeIconPanel);
   const setActiveIconPanel = useAppStore((state) => state.setActiveIconPanel);
+  const showOnboardingBridge = useAppStore((state) => state.showOnboardingBridge);
+  const currentSessionId = useAppStore((state) => state.currentSessionId);
+  const chatHistory = useAppStore((state) => state.chatHistory);
 
   const [showSessions, setShowSessions] = useState(false);
   const [showGithubModal, setShowGithubModal] = useState(false);
@@ -53,7 +56,6 @@ export default function App() {
     () => localStorage.getItem("pricing_dismissed") === "1"
   );
   const [isStudioOpen, setIsStudioOpen] = useState(true);
-  const [showSidebarChat, setShowSidebarChat] = useState(false);
   const [showProgressOverlay, setShowProgressOverlay] = useState(false);
 
   const activeOutputId = activeViewportTab?.kind === "output" ? activeViewportTab.id : null;
@@ -267,53 +269,8 @@ export default function App() {
               </div>
             )}
 
-            {!showSidebarChat && (
-              <div className="absolute bottom-10 left-0 right-0 flex justify-center pointer-events-none z-50 animate-fade-in">
-                <button
-                  onClick={() => setShowSidebarChat(true)}
-                  className="pointer-events-auto flex items-center justify-center w-12 h-12 rounded-full transition-all hover:scale-110 shadow-[0_10px_30_rgba(0,0,0,0.5)] bg-gradient-to-tr from-blue-600 to-indigo-500 text-white"
-                  title="AI 어시스턴트"
-                >
-                  <Bot size={24} className="drop-shadow-md" />
-                </button>
-              </div>
-            )}
           </div>
         </div>
-
-        {showSidebarChat && (
-          <div
-            className={`fixed bottom-16 right-6 z-[60] flex flex-col rounded-2xl border overflow-hidden animate-fade-in
-              w-[340px] h-[500px] max-h-[calc(100vh-7rem)]
-              ${isDarkMode
-                ? "bg-[#0F1219] border-white/10 shadow-[0_20px_60px_rgba(0,0,0,0.55)]"
-                : "bg-white border-[var(--border)] shadow-[0_20px_60px_rgba(15,23,42,0.18)]"}`}
-            role="dialog"
-            aria-label="AI 어시스턴트"
-          >
-            <div className={`h-12 shrink-0 flex items-center justify-between px-4 border-b ${isDarkMode ? "border-white/5" : "border-[var(--border)]"}`}>
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center">
-                  <Bot size={15} className="text-white" />
-                </div>
-                <div className="flex flex-col leading-tight">
-                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.25em]">Assistant</span>
-                  <span className={`text-[13px] font-bold ${isDarkMode ? "text-white" : "text-slate-800"}`}>AI Navigator</span>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowSidebarChat(false)}
-                className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${isDarkMode ? "hover:bg-white/5 text-slate-400 hover:text-white" : "hover:bg-black/5 text-slate-500 hover:text-slate-800"}`}
-                title="닫기"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="flex-1 min-h-0 flex flex-col">
-              <ChatPanel />
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="app-no-drag shrink-0">
@@ -381,6 +338,11 @@ export default function App() {
       )}
 
       <ToastContainer />
+
+      {/* 온보딩 모드 브릿지 — 활성 세션이 없고 아직 dismiss 안 된 경우에만 노출 */}
+      {showOnboardingBridge && !currentSessionId && (chatHistory || []).length === 0 && (
+        <ModeBridge />
+      )}
 
     </div>
   );

@@ -22,6 +22,21 @@ from observability.logger import get_logger
 
 logger = get_logger()
 
+ROLE_AREA_COMPAT: dict[str, set[str]] = {
+    "engineer":  {"backend", "frontend", "fullstack", "devops"},
+    "backend":   {"backend", "fullstack"},
+    "frontend":  {"frontend", "fullstack"},
+    "devops":    {"devops"},
+}
+
+
+def _is_compatible(member_role: str, task_area: str) -> bool:
+    allowed = ROLE_AREA_COMPAT.get(member_role)
+    if allowed is None:
+        return False
+    return not task_area or task_area in allowed
+
+
 SYSTEM_PROMPT = """# Role: Agile Workload Balancing Specialist
 
 ## Goal
@@ -154,12 +169,23 @@ def run_task_distributor(
         return {"assigned": 0, "message": "LLM 배분 실패"}
 
     output = res.parsed
-    name_to_id = {m["name"]: m["id"] for m in members}
+    name_to_id   = {m["name"]: m["id"] for m in members}
+    name_to_role = {m["name"]: m["role"] for m in members}
+    task_area    = {t["id"]: t.get("area", "") for t in unassigned}
     assigned_count = 0
 
     for assignment in output.assignments:
-        member_name = assignment.assignee_name
-        member_id = name_to_id.get(member_name, member_name)
+        member_name  = assignment.assignee_name
+        member_role  = name_to_role.get(member_name, "")
+        area         = task_area.get(assignment.task_id, "")
+
+        if not _is_compatible(member_role, area):
+            logger.warning(
+                f"[task_distributor] 역할-영역 불일치 스킵: "
+                f"{member_name}({member_role}) ← {assignment.task_id}(area={area})"
+            )
+            continue
+
         result = assign_task(
             task_id=assignment.task_id,
             assignee=member_name,

@@ -15,6 +15,7 @@ from typing import Optional
 from sqlalchemy import Column, String, Text, DateTime, create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 import os
+from observability.logger import get_logger
 
 _STORAGE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
@@ -48,6 +49,9 @@ class AgileTask(_Base):
     created_by = Column(String(36), default="")
     reviewed_by = Column(String(36), default="")
     team_id = Column(String(36), default="")
+    dev_gap_item_id = Column(String(36), default="")
+    pr_number = Column(String(32), default="")
+    analysis_id = Column(String(36), default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -55,8 +59,19 @@ class AgileTask(_Base):
 def init_tasks_db():
     _Base.metadata.create_all(bind=_engine)
     with _engine.connect() as conn:
-        for col_def in ["area TEXT DEFAULT ''", "assignee TEXT DEFAULT ''", "team_id TEXT DEFAULT ''", "feature_ref TEXT DEFAULT ''", "effort TEXT DEFAULT ''"]:
+        for col_def in [
+            "area TEXT DEFAULT ''",
+            "assignee TEXT DEFAULT ''",
+            "team_id TEXT DEFAULT ''",
+            "feature_ref TEXT DEFAULT ''",
+            "effort TEXT DEFAULT ''",
+            "dev_gap_item_id TEXT DEFAULT ''",
+            "pr_number TEXT DEFAULT ''",
+            "analysis_id TEXT DEFAULT ''",
+        ]:
             try:
+                # author: xxrin
+                # 기존 local.db의 agile_tasks에도 Dev GAP 연결 컬럼을 점진적으로 추가한다.
                 conn.execute(text(f"ALTER TABLE agile_tasks ADD COLUMN {col_def}"))
                 conn.commit()
             except Exception:
@@ -77,10 +92,36 @@ def create_task(
     feature_ref: str = "",
     effort: str = "",
     status: str = "unassigned",
+    dev_gap_item_id: str = "",
+    pr_number: str | int = "",
+    analysis_id: str = "",
 ) -> dict:
     import json
+    import re
+
+    def _norm(s: str) -> str:
+        return re.sub(r"[\s\-_()（）]", "", s).lower()
+
     init_tasks_db()
     with _Session() as session:
+        q = session.query(AgileTask).filter(AgileTask.team_id == team_id)
+        if feature_ref:
+            dup = q.filter(AgileTask.feature_ref == feature_ref).first()
+        else:
+            title_norm = _norm(title)
+            dup = q.filter(AgileTask.title == title).first()
+            if dup is None:
+                # 정규화 제목으로도 체크 (SQLite에서 LOWER 사용)
+                from sqlalchemy import func
+                dup = session.query(AgileTask).filter(
+                    AgileTask.team_id == team_id,
+                    func.lower(AgileTask.title) == title.lower(),
+                ).first()
+
+        if dup is not None:
+            get_logger().info(f"[create_task] 중복 차단 (feature_ref={feature_ref!r}, title={title!r})")
+            return None
+
         task = AgileTask(
             id=str(uuid.uuid4()),
             task_type=task_type,
@@ -94,6 +135,9 @@ def create_task(
             payload=json.dumps(payload or {}),
             created_by=created_by,
             team_id=team_id,
+            dev_gap_item_id=str(dev_gap_item_id or ""),
+            pr_number=str(pr_number or ""),
+            analysis_id=str(analysis_id or ""),
         )
         session.add(task)
         session.commit()
@@ -135,6 +179,7 @@ def update_task_status(
     status: str,
     reviewed_by: str = "",
     result: str = "",
+    editable_fields: dict | None = None,
 ) -> dict | None:
     init_tasks_db()
     with _Session() as session:
@@ -147,6 +192,10 @@ def update_task_status(
             task.reviewed_by = reviewed_by
         if result:
             task.result = result
+        if editable_fields:
+            for field in ("title", "description", "area", "effort", "task_type", "assignee"):
+                if field in editable_fields:
+                    setattr(task, field, editable_fields[field])
         session.commit()
         return _task_to_dict(task)
 
@@ -167,6 +216,10 @@ def _task_to_dict(task: AgileTask) -> dict:
         "result": task.result,
         "created_by": task.created_by,
         "reviewed_by": task.reviewed_by,
+        "team_id": task.team_id or "",
+        "dev_gap_item_id": task.dev_gap_item_id or "",
+        "pr_number": task.pr_number or "",
+        "analysis_id": task.analysis_id or "",
         "created_at": task.created_at.isoformat() if task.created_at else "",
         "updated_at": task.updated_at.isoformat() if task.updated_at else "",
     }

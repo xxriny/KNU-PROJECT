@@ -1,0 +1,59 @@
+[
+  {
+    "id": "DVT_SCEN_001",
+    "name": "Missing required API requires PM approval",
+    "description": "A PR changes implementation while the published spec still requires an auth API. Dev Tracking should detect a HIGH missing API gap and route to PM approval.",
+    "payload": {
+      "trigger": "GITHUB_PR_WEBHOOK",
+      "repository": {"owner": "xxrin", "repo": "navigator"},
+      "pull_request": {
+        "pr_number": 101,
+        "branch_name": "feature/auth-gap",
+        "base_branch": "main",
+        "head_sha": "bench-auth-gap",
+        "created_at": "2026-05-24T00:00:00+09:00",
+        "title": "Auth endpoint update",
+        "description": "Updates auth UI without backend API"
+      },
+      "actor": {"github_id": "xxrin", "role": "developer"},
+      "notify_pr": false,
+      "use_llm_forensic_profiler": true,
+      "use_llm_gap_analyzer": true,
+      "use_llm_intent_classifier": true
+    },
+    "expected_quality": {
+      "status": "pending_pm_approval",
+      "must_have_gap": true,
+      "expected_severity": "HIGH",
+      "expected_next_action": "pm_approval_pending"
+    }
+  },
+  {
+    "id": "DVT_SCEN_002",
+    "name": "No gap should complete without intent classifier",
+    "description": "Published spec and implementation profile have no required contracts. Dev Tracking should complete without unnecessary PM approval.",
+    "payload": {
+      "trigger": "GITHUB_PR_WEBHOOK",
+      "repository": {"owner": "xxrin", "repo": "navigator"},
+      "pull_request": {
+        "pr_number": 102,
+        "branch_name": "feature/no-gap",
+        "base_branch": "main",
+        "head_sha": "bench-no-gap",
+        "created_at": "2026-05-24T00:00:00+09:00",
+        "title": "Documentation-only change",
+        "description": "No product contract change"
+      },
+      "actor": {"github_id": "xxrin", "role": "developer"},
+      "notify_pr": false,
+      "use_llm_forensic_profiler": true,
+      "use_llm_gap_analyzer": true,
+      "use_llm_intent_classifier": true
+    },
+    "expected_quality": {
+      "status": "complete",
+      "must_have_gap": false,
+      "expected_next_action": "complete"
+    }
+  }
+]

@@ -10,7 +10,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Column, String, ForeignKey, DateTime, Text, Integer, Boolean,
-    CheckConstraint, Index, UniqueConstraint,
+    CheckConstraint, Index, UniqueConstraint, Float, text,
 )
 from sqlalchemy.orm import relationship
 
@@ -148,6 +148,7 @@ class DevPrAnalysis(SharedBase):
     __tablename__ = "dev_pr_analyses"
 
     id = Column(String(36), primary_key=True, default=_new_uuid)
+    project_id = Column(String(255), nullable=True, default="")
     team_id = Column(String(36), nullable=True)
     owner = Column(String(255), nullable=False, default="")
     repo = Column(String(255), nullable=False, default="")
@@ -155,14 +156,19 @@ class DevPrAnalysis(SharedBase):
     branch_name = Column(String(255), nullable=False, default="")
     base_branch = Column(String(255), nullable=True, default="")
     head_sha = Column(String(255), nullable=True, default="")
+    branch_created_at = Column(String(64), nullable=True, default="")
     source_dir = Column(Text, nullable=True, default="")
     spec_snapshot_id = Column(String(36), nullable=True, default="")
+    spec_outdated = Column(Boolean, nullable=False, default=False)
     approval_status = Column(String(64), nullable=True, default="")
     analysis_status = Column(String(64), nullable=True, default="")
     task_id = Column(String(64), nullable=True, default="")
     pm_report = Column(Text, nullable=True, default="{}")
     timeline = Column(Text, nullable=True, default="[]")
+    gap_count = Column(Integer, nullable=False, default=0)
+    has_high_gap = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     gap_items = relationship("DevGapItem", back_populates="analysis", cascade="all, delete-orphan")
 
@@ -179,12 +185,50 @@ class DevGapItem(SharedBase):
     type = Column(String(64), nullable=True, default="")
     spec_target = Column(Text, nullable=True, default="")
     implementation_target = Column(Text, nullable=True, default="")
+    spec_outdated_related = Column(Boolean, nullable=False, default=False)
     intent = Column(String(32), nullable=True, default="")
+    confidence = Column(Float, nullable=True)
     recommended_action = Column(String(64), nullable=True, default="")
+    approval_status = Column(String(64), nullable=True, default="PENDING_PM_APPROVAL")
+    approved_by = Column(String(36), nullable=True, default="")
+    approved_at = Column(String(64), nullable=True, default="")
     description = Column(Text, nullable=True, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     analysis = relationship("DevPrAnalysis", back_populates="gap_items")
+
+
+def ensure_dev_tracking_schema(bind_or_session) -> None:
+    # author: xxrin
+    # 기존 SQLite 파일에도 Dev Tracking 문서 기준 추가 컬럼이 생기도록 create_all 이후 보강 마이그레이션을 수행한다.
+    bind = bind_or_session.get_bind() if hasattr(bind_or_session, "get_bind") else bind_or_session
+    SharedBase.metadata.create_all(bind=bind, tables=[DevPrAnalysis.__table__, DevGapItem.__table__])
+    additions = {
+        "dev_pr_analyses": {
+            "project_id": "VARCHAR(255) DEFAULT ''",
+            "branch_created_at": "VARCHAR(64) DEFAULT ''",
+            "spec_outdated": "BOOLEAN DEFAULT 0",
+            "gap_count": "INTEGER DEFAULT 0",
+            "has_high_gap": "BOOLEAN DEFAULT 0",
+            "updated_at": "DATETIME",
+        },
+        "dev_gap_items": {
+            "spec_outdated_related": "BOOLEAN DEFAULT 0",
+            "confidence": "FLOAT",
+            "approval_status": "VARCHAR(64) DEFAULT 'PENDING_PM_APPROVAL'",
+            "approved_by": "VARCHAR(36) DEFAULT ''",
+            "approved_at": "VARCHAR(64) DEFAULT ''",
+        },
+    }
+    with bind.begin() as conn:
+        for table_name, columns in additions.items():
+            existing = {
+                row[1]
+                for row in conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
+            }
+            for column_name, column_sql in columns.items():
+                if column_name not in existing:
+                    conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"))
 
 
 class DevKnowledgeArtifact(SharedBase):

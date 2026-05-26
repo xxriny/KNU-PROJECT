@@ -97,15 +97,21 @@ class TestAuthUserCRUD:
 
     @pytest.fixture(autouse=True)
     def setup_db(self, tmp_path, monkeypatch):
-        """각 테스트마다 격리된 임시 DB 사용"""
+        """각 테스트마다 격리된 임시 DB 사용.
+
+        커밋 dcda95e 이후 users/teams/subscriptions가 SharedBase(=shared.db)로 이전됐다.
+        테스트는 단일 SQLite 파일로 묶어 두 metadata를 함께 생성한다.
+        """
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
-        from auth.database import Base
-        import auth.models  # noqa: F401
+        from auth.database import Base, SharedBase
+        import auth.models          # noqa: F401  — local 모델 (sessions, memos, ...)
+        import auth.shared_models   # noqa: F401  — shared 모델 (users, teams, subscriptions, ...)
 
         db_path = tmp_path / "test.db"
         engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
         Base.metadata.create_all(bind=engine)
+        SharedBase.metadata.create_all(bind=engine)
         TestSession = sessionmaker(bind=engine)
         self.db = TestSession()
         yield
@@ -122,15 +128,19 @@ class TestAuthUserCRUD:
         assert fetched is not None
         assert fetched.name == "테스트유저"
 
+    # 커밋 dcda95e 이후 User.role CHECK constraint은
+    # ('pm', 'software_engineer', 'backend', 'frontend', 'devops')만 허용.
+    # 옛 'engineer'/'viewer'는 더 이상 유효하지 않음.
+
     def test_authenticate_success(self):
         from auth.service import create_user, authenticate_user
-        create_user(self.db, "Auth유저", "auth@t.com", "pass1234", "engineer")
+        create_user(self.db, "Auth유저", "auth@t.com", "pass1234", "software_engineer")
         user = authenticate_user(self.db, "auth@t.com", "pass1234")
         assert user is not None
 
     def test_authenticate_wrong_password(self):
         from auth.service import create_user, authenticate_user
-        create_user(self.db, "Auth유저2", "auth2@t.com", "correct", "viewer")
+        create_user(self.db, "Auth유저2", "auth2@t.com", "correct", "frontend")
         user = authenticate_user(self.db, "auth2@t.com", "wrong")
         assert user is None
 
@@ -138,12 +148,12 @@ class TestAuthUserCRUD:
         from auth.service import create_user, count_users
         assert count_users(self.db) == 0
         create_user(self.db, "유저1", "u1@t.com", "pw", "pm")
-        create_user(self.db, "유저2", "u2@t.com", "pw", "engineer")
+        create_user(self.db, "유저2", "u2@t.com", "pw", "software_engineer")
         assert count_users(self.db) == 2
 
     def test_create_user_with_team(self):
         from auth.service import create_user
-        user = create_user(self.db, "팀원", "team@t.com", "pw", "engineer", team_name="NAVIGATOR Team")
+        user = create_user(self.db, "팀원", "team@t.com", "pw", "software_engineer", team_name="NAVIGATOR Team")
         assert user.team_id is not None
         assert user.team.name == "NAVIGATOR Team"
 
@@ -171,8 +181,10 @@ class TestAuthEndpointPaths:
     """FastAPI 라우터 경로 확인"""
 
     def test_auth_routes_exist(self):
+        # 커밋 dcda95e 이후 /api/teams/* 는 transport/team_router.py로 분리됨.
         from auth.router import auth_router
-        paths = [r.path for r in auth_router.routes]
+        from transport.team_router import team_router
+        paths = {r.path for r in auth_router.routes} | {r.path for r in team_router.routes}
         assert "/auth/status" in paths
         assert "/auth/register" in paths
         assert "/auth/login" in paths

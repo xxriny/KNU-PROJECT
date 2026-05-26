@@ -48,6 +48,8 @@ def require_pm(user: User = Depends(get_current_user)) -> User:
 
 
 def require_engineer(user: User = Depends(get_current_user)) -> User:
-    if user.role not in ("pm", "software_engineer", "engineer", "backend", "frontend", "devops"):
+    #author: xxrin
+    # shared DB role 제약과 동일한 허용 목록만 사용해 인증/인가 기준을 일관되게 유지한다.
+    if user.role not in ("pm", "software_engineer", "backend", "frontend", "devops"):
         raise HTTPException(status_code=403, detail="엔지니어 이상 권한이 필요합니다.")
     return user

@@ -1,5 +1,5 @@
 import { sessionService } from "../../api/services/sessionService";
-import { loadSessions, persistSessions, cloneViewportTab, normalizeOutputTabId, extractRunId, spreadResultData } from "../storeHelpers";
+import { loadSessions, persistSessions, cloneViewportTab, normalizeOutputTabId, extractRunId, spreadResultData, EMPTY_RESULT_FIELDS } from "../storeHelpers";
 
 // 활성 세션이 없을 때 채팅/팝오버 메모를 묶어두는 폴백 세션 키.
 // 백엔드 memo_db는 session_id 형식을 강제하지 않으므로 안전한 임의 문자열을 사용.
@@ -11,6 +11,99 @@ export const createSessionSlice = (set, get) => ({
   userComments: [],
   chatHistory: [],
   chatInput: "",
+  designSnapshots: [],
+  designSnapshotCounter: 0,
+  // 온보딩: 첫 진입 / 새 프로젝트 시작 직후에 ModeBridge 모달을 띄움
+  showOnboardingBridge: true,
+  setShowOnboardingBridge: (v) => set({ showOnboardingBridge: !!v }),
+
+  /** Sync 직전에 현재 설계 상태를 스냅샷으로 저장. FIFO로 최근 5개만 유지. */
+  pushDesignSnapshot: () => {
+    const s = get();
+    const counter = s.designSnapshotCounter || 0;
+    const entry = {
+      version: `v1.${counter}`,
+      takenAt: new Date().toISOString(),
+      chatHistoryLength: (s.chatHistory || []).length,
+      resultData: s.resultData ? structuredClone(s.resultData) : null,
+      requirements_rtm: s.requirements_rtm ? structuredClone(s.requirements_rtm) : null,
+      components: s.components ? structuredClone(s.components) : null,
+      apis: s.apis ? structuredClone(s.apis) : null,
+      tables: s.tables ? structuredClone(s.tables) : null,
+      tech_stacks: s.tech_stacks ? structuredClone(s.tech_stacks) : null,
+      project_structure: s.project_structure ? structuredClone(s.project_structure) : null,
+      test_cases: s.test_cases ? structuredClone(s.test_cases) : null,
+      recommendations: s.recommendations ? structuredClone(s.recommendations) : null,
+      sa_artifacts: s.sa_artifacts ? structuredClone(s.sa_artifacts) : null,
+    };
+    set((state) => {
+      const next = [...(state.designSnapshots || []), entry].slice(-5);
+      return { designSnapshots: next, designSnapshotCounter: counter + 1 };
+    });
+    return entry;
+  },
+
+  /** 스냅샷 인덱스로 resultData를 되돌림. chatHistory는 유지하고 rollback 마커를 append.
+   *  추가로, fromVersion에서 새로 추가된 메모(reflectedVersion === fromVersion)는 함께 삭제하여
+   *  설계서와 메모 라이프사이클의 정합성을 맞춘다. 더 과거 버전(v1.0 등) 메모는 보존. */
+  restoreDesignSnapshot: (snapshotIndex) => {
+    const s = get();
+    const snap = (s.designSnapshots || [])[snapshotIndex];
+    if (!snap) {
+      get().addNotification?.("스냅샷을 찾을 수 없습니다.", "error");
+      return;
+    }
+    const currentVersion = (() => {
+      const lastSync = [...(s.chatHistory || [])].reverse().find(
+        (m) => m && m.role === "system_marker" && m.kind === "sync"
+      );
+      return lastSync?.version || `v1.${(s.designSnapshots || []).length}`;
+    })();
+
+    // fromVersion에 새로 반영된 메모만 제거 — 더 과거 버전 메모는 그대로 둔다
+    const memosToDrop = (s.userComments || []).filter(
+      (m) => m.reflectedVersion === currentVersion
+    );
+
+    set({
+      resultData: snap.resultData,
+      requirements_rtm: snap.requirements_rtm || [],
+      components: snap.components || [],
+      apis: snap.apis || [],
+      tables: snap.tables || [],
+      tech_stacks: snap.tech_stacks || [],
+      project_structure: snap.project_structure || null,
+      test_cases: snap.test_cases || null,
+      recommendations: snap.recommendations || [],
+      sa_artifacts: snap.sa_artifacts || null,
+      chatHistory: [
+        ...(s.chatHistory || []),
+        {
+          role: "system_marker",
+          kind: "rollback",
+          fromVersion: currentVersion,
+          toVersion: snap.version,
+          appliedAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    // 메모 삭제는 set() 이후에 비동기로 처리 — removeComment가 백엔드 DELETE도 호출
+    memosToDrop.forEach((m) => {
+      if (m && m.id) get().removeComment?.(m.id);
+    });
+
+    const droppedNote = memosToDrop.length > 0
+      ? ` · 메모 ${memosToDrop.length}건 삭제`
+      : "";
+    get().addNotification?.(
+      `${currentVersion} → ${snap.version} 롤백 완료${droppedNote}`,
+      "success",
+      3000
+    );
+  },
+
+  clearDesignSnapshots: () => set({ designSnapshots: [], designSnapshotCounter: 0 }),
 
   createSession: (initialTitle = null) => {
     const state = get();
@@ -31,6 +124,8 @@ export const createSessionSlice = (set, get) => ({
       pipelineType: state.pipelineType,
       selectedMode: state.selectedMode,
       userComments: [],
+      designSnapshots: [],
+      designSnapshotCounter: 0,
     };
     set((state) => {
       const sessions = [session, ...state.sessions];
@@ -54,6 +149,8 @@ export const createSessionSlice = (set, get) => ({
         pipelineStatus: state.pipelineStatus,
         pipelineType: state.pipelineType,
         userComments: state.userComments,
+        designSnapshots: state.designSnapshots,
+        designSnapshotCounter: state.designSnapshotCounter,
       } : s
     ));
     persistSessions(updated);
@@ -66,7 +163,7 @@ export const createSessionSlice = (set, get) => ({
     const viewport = cloneViewportTab(session.activeViewportTab);
     if (viewport.kind === "output") viewport.id = normalizeOutputTabId(viewport.id);
 
-    // 즉시 세션 상태 반영 (RAG 복구 전 로컬 데이터 우선)
+    // 즉시 세션 상태 반영 (RAG 복구 전 로컬 데이터 우선) + ModeBridge 닫기
     set({
       currentSessionId: id,
       projectFolder: session.projectFolder || null,
@@ -77,6 +174,9 @@ export const createSessionSlice = (set, get) => ({
       chatHistory: session.chatHistory || [],
       pipelineStatus: session.resultData ? "done" : "idle",
       userComments: session.userComments || [],
+      designSnapshots: session.designSnapshots || [],
+      designSnapshotCounter: session.designSnapshotCounter || (session.designSnapshots?.length || 0),
+      showOnboardingBridge: false,
     });
 
     // RAG 복구는 백그라운드에서 조용히 수행 (로딩 인디케이터 없음)
@@ -104,10 +204,13 @@ export const createSessionSlice = (set, get) => ({
   syncMemos: async () => {
     const { backendPort, currentSessionId } = get();
     if (!backendPort) return;
-    // 세션이 없으면 chat_global 폴백으로 조회 (null로 조회하면 모든 세션 메모 반환)
-    const sessionIdForFetch = currentSessionId || CHAT_GLOBAL_SESSION_ID;
+    // 활성 세션이 없으면 다른 세션의 메모를 노출하지 않도록 즉시 비운다.
+    if (!currentSessionId) {
+      set({ userComments: [] });
+      return;
+    }
     try {
-      const data = await sessionService.getMemos(backendPort, sessionIdForFetch);
+      const data = await sessionService.getMemos(backendPort, currentSessionId);
       if (data.status !== "ok") return;
 
       const serverItems = (data.memos || []).map((m) => ({
@@ -118,6 +221,7 @@ export const createSessionSlice = (set, get) => ({
         detail: m.metadata?.detail || "",
         applied: !!m.metadata?.applied,
         appliedAt: m.metadata?.applied_at || null,
+        reflectedVersion: m.metadata?.reflected_version || null,
         createdAt: Date.now(),
       }));
 
@@ -150,8 +254,13 @@ export const createSessionSlice = (set, get) => ({
   addComment: async (comment, opts = {}) => {
     const { silent = false } = opts;
     const { backendPort, currentSessionId } = get();
+    // 활성 프로젝트가 없으면 메모 자체를 저장하지 않는다 (chat_global 누적 차단).
+    if (!currentSessionId) {
+      get().addNotification("활성 프로젝트가 없어 메모를 저장하지 못했습니다.", "warning", 3000);
+      return;
+    }
     const tempId = "temp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
-    const sessionIdForPersist = currentSessionId || CHAT_GLOBAL_SESSION_ID;
+    const sessionIdForPersist = currentSessionId;
 
     console.log(
       `[addComment] 진입 — backendPort=${backendPort} currentSessionId=${currentSessionId} ` +
@@ -163,9 +272,7 @@ export const createSessionSlice = (set, get) => ({
       userComments: [...s.userComments, { id: tempId, ...comment, createdAt: Date.now() }],
     }));
 
-    // 2. 백엔드 영속화 — 활성 세션이 없어도 chat_global 폴백으로 저장한다.
-    //    이전에는 `currentSessionId`가 null이면 영속화를 건너뛰어, MemoManager가
-    //    syncMemos로 로컬 상태를 덮어쓸 때 메모가 증발하는 문제가 있었다.
+    // 2. 백엔드 영속화 (위 가드로 currentSessionId가 보장된 상태).
     if (!backendPort) {
       console.warn("[addComment] backendPort가 없어 백엔드 저장을 건너뜀 (로컬에만 보존)");
       return;
@@ -236,20 +343,28 @@ export const createSessionSlice = (set, get) => ({
    * "지적사항 반영 설계 업데이트" 흐름의 마지막 단계에서 _processResult가 호출.
    * 실패해도 사용자 흐름을 막지 않는다 (백엔드 일시 장애 등).
    */
-  markMemosApplied: async (memoIds) => {
+  markMemosApplied: async (memoIds, opts = {}) => {
     const { backendPort } = get();
     if (!Array.isArray(memoIds) || memoIds.length === 0) return;
+    const reflectedVersion = opts.reflectedVersion || null;
     if (!backendPort) {
       console.warn("[markMemosApplied] backendPort 없어 백엔드 갱신 스킵");
       return;
     }
     try {
-      const res = await sessionService.applyMemos(backendPort, memoIds);
+      const res = await sessionService.applyMemos(backendPort, memoIds, reflectedVersion);
       if (res?.status === "ok") {
         const ts = new Date().toISOString();
         set((s) => ({
           userComments: (s.userComments || []).map((c) =>
-            memoIds.includes(c.id) ? { ...c, applied: true, appliedAt: ts } : c
+            memoIds.includes(c.id)
+              ? {
+                  ...c,
+                  applied: true,
+                  appliedAt: ts,
+                  ...(reflectedVersion ? { reflectedVersion } : {}),
+                }
+              : c
           ),
         }));
       } else {
@@ -269,6 +384,37 @@ export const createSessionSlice = (set, get) => ({
   addChatMessage: (role, content) =>
     set((s) => ({ chatHistory: [...s.chatHistory, { role, content }] })),
   clearChat: () => set({ chatHistory: [], chatInput: "" }),
+
+  /** 모든 작업 상태를 초기화하여 ModeBridge → 빈 프롬프트 흐름으로 돌아간다.
+   *  현재 세션은 sessions 배열에 그대로 남아 라이브러리에서 다시 열 수 있음. */
+  startNewProject: () => {
+    set({
+      currentSessionId: null,
+      chatHistory: [],
+      chatInput: "",
+      userComments: [],
+      designSnapshots: [],
+      designSnapshotCounter: 0,
+      showOnboardingBridge: true,
+      pipelineStatus: "idle",
+      pipelineError: null,
+      pipelineNodes: {},
+      thinkingLog: [],
+      pipelineType: "analysis",
+      agileVerifyResult: null,
+      agileImpactResult: null,
+      lastIdeaReady: false,
+      lastIdeaSummary: "",
+      lastSuggestedMode: null,
+      lastFollowups: [],
+      _syncInFlight: false,
+      _syncMemoIdsForApply: [],
+      _syncTargetVersion: null,
+      activeViewportTab: { kind: "output", id: "home" },
+      lastOutputTab: "home",
+      ...EMPTY_RESULT_FIELDS,
+    });
+  },
 
   updateSessionName: (id, name) => {
     set((state) => {

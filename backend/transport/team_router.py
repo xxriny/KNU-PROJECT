@@ -206,6 +206,16 @@ async def list_my_teams(
     return {"teams": teams_data}
 
 
+# ── Billing / Plan TODO ──────────────────────────────────────
+# author: xxrin
+# TODO: 문서의 Team/Billing 확장 항목은 Dev Tracking MVP와 분리해서 별도 기능 작업으로 구현한다.
+# TODO: 추후 구현 범위:
+# - plan_checker: free/pro/enterprise별 분석 횟수, 팀원 수, GitHub 연동 제한
+# - POST /api/billing/checkout-session: Stripe Checkout 세션 생성
+# - POST /api/billing/stripe/webhook: 결제/구독 상태 수신 후 subscriptions 갱신
+# - PricingScreen: 실제 결제 API 연결 및 결제 완료 후 사용자 plan 갱신
+
+
 class SwitchTeamRequest(BaseModel):
     team_id: str
 
