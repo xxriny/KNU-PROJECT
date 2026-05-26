@@ -1,5 +1,4 @@
 import React from "react";
-import { Activity, Loader2, CheckCircle, AlertCircle } from "lucide-react";
 import useAppStore from "../../store/useAppStore";
 import ModeSegmentedControl from "./ModeSegmentedControl";
 
@@ -24,14 +23,6 @@ export default function StudioSidebar({
     return acc;
   }, {});
 
-  const progressIcon = pipelineStatus === "running"
-    ? <Loader2 size={13} className="animate-spin text-blue-400" />
-    : pipelineStatus === "error"
-      ? <AlertCircle size={13} className="text-red-400" />
-      : pipelineStatus === "done"
-        ? <CheckCircle size={13} className="text-emerald-400" />
-        : <Activity size={13} className="opacity-40" />;
-
   return (
     <div className="flex flex-col gap-0 pt-3 px-3">
 
@@ -42,48 +33,6 @@ export default function StudioSidebar({
         isDarkMode={isDarkMode}
         disabled={pipelineStatus === "running"}
       />
-
-      {/* 파이프라인 Progress 카드 */}
-      <div className="mb-4">
-        <p className={`text-[9px] font-black uppercase tracking-[0.2em] mb-2 px-1 ${isDarkMode ? "text-slate-600" : "text-slate-400"}`}>
-          파이프라인
-        </p>
-        <button
-          onClick={onOpenProgress}
-          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all text-left ${
-            hasProgress
-              ? isDarkMode
-                ? "bg-blue-500/8 border-blue-500/20 hover:bg-blue-500/12"
-                : "bg-blue-50 border-blue-200 hover:bg-blue-100/80"
-              : isDarkMode
-                ? "bg-white/[0.03] border-white/5 hover:bg-white/[0.06]"
-                : "bg-slate-50 border-slate-100 hover:bg-slate-100"
-          }`}
-        >
-          <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-            pipelineStatus === "running" ? "bg-blue-500/15"
-            : pipelineStatus === "error" ? "bg-red-500/15"
-            : pipelineStatus === "done" ? "bg-emerald-500/15"
-            : isDarkMode ? "bg-white/5" : "bg-slate-200/60"
-          }`}>
-            {progressIcon}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className={`text-[11px] font-bold leading-tight ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>
-              Progress
-            </p>
-            <p className={`text-[10px] leading-tight truncate ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
-              {pipelineStatus === "running" ? "분석 진행 중..."
-               : pipelineStatus === "error" ? "오류 발생"
-               : pipelineStatus === "done" ? "완료"
-               : "대기 중"}
-            </p>
-          </div>
-          {pipelineStatus === "running" && (
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
-          )}
-        </button>
-      </div>
 
       {/* 그룹별 섹션 */}
       {groups.map((g) => {

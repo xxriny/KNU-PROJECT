@@ -65,15 +65,16 @@ export default function App() {
   const hasProgress = pipelineStatus === "running" || pipelineStatus === "error" || thinkingLog.length > 0;
 
   useEffect(() => {
+    // Cloud Run 인증 확인은 로컬 백엔드와 무관하므로 즉시 실행
+    checkAuthStatus();
+
     async function initBackend() {
       let port = null;
       if (window.electronAPI) port = await window.electronAPI.getBackendPort();
       if (!port) port = 8765;
       setBackendPort(port);
-      // WebSocket 연결, 설정 fetch, 인증 확인 모두 동시 시작
       connectWebSocket(port);
       fetchConfig(port);
-      checkAuthStatus();
     }
     initBackend();
   }, []);
@@ -132,9 +133,9 @@ export default function App() {
     return (
       <div className="h-screen w-screen flex items-center justify-center"
         style={{ background: "var(--bg-root)" }}>
-        <div className="flex flex-col items-center gap-3 opacity-40">
-          <div className="w-8 h-8 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
-          <span className="text-sm font-medium">초기화 중...</span>
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+          <span className="text-sm font-medium text-slate-400">초기화 중...</span>
         </div>
       </div>
     );
