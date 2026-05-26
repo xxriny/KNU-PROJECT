@@ -484,13 +484,6 @@ async def apply_memos_endpoint(req: MemoApplyRequest):
 
 # ── Agile Layer ───────────────────────────────────────────
 
-class AgileVerifyRequest(BaseModel):
-    sa_data: dict
-    api_key: str = ""
-    model: str = DEFAULT_MODEL
-    use_llm: bool = True
-    use_deep_llm: bool = False  # V-007~V-009 추가 LLM 검증
-
 
 class AgileImpactRequest(BaseModel):
     change_description: str
@@ -506,23 +499,6 @@ class AgileImpactRequest(BaseModel):
     branch_name: str = ""
     dev_knowledge_query: str = ""
 
-
-@rest_router.post("/api/agile/verify")
-async def agile_verify(req: AgileVerifyRequest):
-    """SA 결과물 일관성 검증 (V-001~V-009, 하이브리드)."""
-    try:
-        from pipeline.domain.agile.nodes.verifier import run_verifier
-        result = run_verifier(
-            sa_data=req.sa_data,
-            api_key=req.api_key,
-            model=req.model,
-            use_llm=req.use_llm,
-            use_deep_llm=req.use_deep_llm,
-        )
-        return {"status": "ok", "data": result.model_dump()}
-    except Exception as e:
-        get_logger().exception("agile_verify endpoint failed")
-        return {"status": "error", "error": str(e)}
 
 
 @rest_router.post("/api/agile/impact")

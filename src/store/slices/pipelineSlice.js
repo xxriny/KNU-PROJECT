@@ -14,7 +14,6 @@ export const createPipelineSlice = (set, get) => ({
   thinkingLog: [],
   pipelineType: "analysis",
   resultData: null,
-  agileVerifyResult: null,
   agileImpactResult: null,
   ...EMPTY_RESULT_FIELDS,
 
@@ -33,7 +32,6 @@ export const createPipelineSlice = (set, get) => ({
   devTrackingResult: null,
   devTrackingAnalyses: [],
 
-  setAgileVerifyResult: (result) => set({ agileVerifyResult: result }),
   setAgileImpactResult: (result) => set({ agileImpactResult: result }),
   setDevTrackingResult: (result) => set({ devTrackingResult: result }),
   setDevTrackingAnalyses: (analyses) => set({ devTrackingAnalyses: analyses }),

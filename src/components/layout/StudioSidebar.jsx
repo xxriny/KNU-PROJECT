@@ -3,11 +3,9 @@ import useAppStore from "../../store/useAppStore";
 import ModeSegmentedControl from "./ModeSegmentedControl";
 
 const GROUP_META = {
-  pm:     { label: "요구사항", color: "text-cyan-400",   dot: "bg-cyan-400" },
-  sa:     { label: "아키텍처",  color: "text-teal-400",   dot: "bg-teal-400" },
-  agile:  { label: "Agile",    color: "text-blue-400",   dot: "bg-blue-400" },
-  github: { label: "GitHub",   color: "text-slate-400",  dot: "bg-slate-400" },
-  shared: { label: "공유",     color: "text-purple-400", dot: "bg-purple-400" },
+  pm:     { label: "요구사항",      color: "text-cyan-400",   dot: "bg-cyan-400" },
+  sa:     { label: "아키텍처",      color: "text-teal-400",   dot: "bg-teal-400" },
+  collab: { label: "Collaboration", color: "text-blue-400",   dot: "bg-blue-400" },
 };
 
 export default function StudioSidebar({

@@ -9,7 +9,6 @@ import SAApiTab from "./resultViewer/SAApiTab";
 import SADatabaseTab from "./resultViewer/SADatabaseTab";
 import SATestStrategyTab from "./resultViewer/SATestStrategyTab";
 import ProjectStructureTab from "./resultViewer/ProjectStructureTab";
-import AgileVerifierTab from "./resultViewer/AgileVerifierTab";
 import AgileImpactTab from "./resultViewer/AgileImpactTab";
 import GitHubDashboard from "./github/GitHubDashboard";
 import TaskApprovalPanel from "./resultViewer/TaskApprovalPanel";
@@ -27,7 +26,6 @@ const TAB_COMPONENTS = {
   sa_db: SADatabaseTab,
   sa_test_strategy: SATestStrategyTab,
   project_structure: ProjectStructureTab,
-  agile_verify: AgileVerifierTab,
   agile_impact: AgileImpactTab,
   github_dashboard: GitHubDashboard,
   task_approval: TaskApprovalPanel,

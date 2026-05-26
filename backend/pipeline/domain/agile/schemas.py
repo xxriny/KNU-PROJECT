@@ -1,31 +1,8 @@
-"""Agile Layer Pydantic schemas — verifier, impact analyzer, task generator & distributor."""
+"""Agile Layer Pydantic schemas — impact analyzer, task generator & distributor."""
 from __future__ import annotations
 
-from enum import Enum
 from typing import Optional, List, Dict
 from pydantic import BaseModel, Field, ConfigDict
-
-
-class Severity(str, Enum):
-    critical = "critical"
-    major = "major"
-    minor = "minor"
-
-
-class ViolationItem(BaseModel):
-    rule_id: str
-    rule_name: str
-    severity: Severity
-    description: str
-    location: str = ""
-    suggestion: str = ""
-
-
-class VerifierResult(BaseModel):
-    coherence_score: float = Field(ge=0.0, le=1.0)
-    passed: bool
-    violations: list[ViolationItem] = []
-    summary: str = ""
 
 
 class ImpactedComponent(BaseModel):

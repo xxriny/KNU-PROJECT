@@ -401,7 +401,6 @@ export const createSessionSlice = (set, get) => ({
       pipelineNodes: {},
       thinkingLog: [],
       pipelineType: "analysis",
-      agileVerifyResult: null,
       agileImpactResult: null,
       lastIdeaReady: false,
       lastIdeaSummary: "",

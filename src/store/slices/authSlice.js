@@ -150,7 +150,7 @@ export const createAuthSlice = (set, get) => ({
   // 파킹/복원 대상 필드 목록
   _workspaceFields: [
     "pipelineStatus", "pipelineError", "pipelineNodes", "thinkingLog",
-    "agileVerifyResult", "agileImpactResult",
+    "agileImpactResult",
     "currentSessionId", "userComments", "chatHistory", "chatInput",
     "activeViewportTab", "activeIconPanel",
     "snapshots", "activeSnapshot", "localResults", "publishError",
@@ -178,7 +178,7 @@ export const createAuthSlice = (set, get) => ({
     const parked = get().teamWorkspaces[teamId];
     const BLANK_WORKSPACE = {
       pipelineStatus: "idle", pipelineError: null, pipelineNodes: {}, thinkingLog: [],
-      agileVerifyResult: null, agileImpactResult: null,
+      agileImpactResult: null,
       currentSessionId: null, userComments: [], chatHistory: [], chatInput: "",
       activeViewportTab: { kind: "output", id: "home" }, activeIconPanel: null,
       snapshots: [], activeSnapshot: null, localResults: [], publishError: null,
