@@ -334,8 +334,40 @@ async def join_team_via_invite(
     invite.used_count += 1
     db.commit()
     db.refresh(user)
-    
+
     return _build_user_response(db, user)
+
+
+@router.post("/github/disconnect")
+async def github_disconnect(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    user.github_id = None
+    user.github_login = None
+    user.github_username = None
+    user.github_oauth_token = None
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.get("/users/me/teams")
+async def get_my_teams(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    teams = db.query(Team).filter(Team.id == user.team_id).all() if user.team_id else []
+    return {"teams": [{"id": t.id, "name": t.name, "plan": _team_plan(db, t.id)} for t in teams]}
+
+
+@router.post("/users/me/teams/switch")
+async def switch_team(
+    req: dict,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    team_id = req.get("team_id")
+    team = db.query(Team).filter(Team.id == team_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="팀을 찾을 수 없습니다.")
+    user.team_id = team_id
+    db.commit()
+    db.refresh(user)
+    return {"user": _build_user_response(db, user)}
 
 
 # ── GitHub OAuth Device Flow ──────────────────────────────────

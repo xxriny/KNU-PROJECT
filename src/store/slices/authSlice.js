@@ -4,6 +4,7 @@
  */
 
 import { EMPTY_RESULT_FIELDS } from "../storeHelpers";
+import { serverRequest, SERVER_URL } from "../../api/serverClient";
 
 const AUTH_KEY = "navigator_auth";
 
@@ -68,14 +69,12 @@ export const createAuthSlice = (set, get) => ({
 
   /** 앱 시작 시 서버에서 사용자 존재 여부 확인 */
   checkAuthStatus: async () => {
-    const { backendPort, authToken } = get();
-    if (!backendPort) return;
+    const { authToken } = get();
     try {
-      // /auth/status와 /auth/me를 동시에 요청 (토큰이 있을 때)
       const [statusRes, meRes] = await Promise.all([
-        fetch(`http://127.0.0.1:${backendPort}/auth/status`),
+        fetch(`${SERVER_URL}/auth/status`),
         authToken
-          ? fetch(`http://127.0.0.1:${backendPort}/auth/me`, { headers: get().getAuthHeader() })
+          ? fetch(`${SERVER_URL}/auth/me`, { headers: get().getAuthHeader() })
           : Promise.resolve(null),
       ]);
 
@@ -97,34 +96,20 @@ export const createAuthSlice = (set, get) => ({
 
   /** 로그인 */
   login: async (email, password) => {
-    const { backendPort } = get();
-    const res = await fetch(`http://127.0.0.1:${backendPort}/auth/login`, {
+    const data = await serverRequest("/auth/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
     });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "로그인 실패");
-    }
-    const data = await res.json();
     get().setAuth(data.access_token, data.user);
     return data.user;
   },
 
   /** 회원가입 */
   register: async (payload) => {
-    const { backendPort } = get();
-    const res = await fetch(`http://127.0.0.1:${backendPort}/auth/register`, {
+    const data = await serverRequest("/auth/register", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "회원가입 실패");
-    }
-    const data = await res.json();
     get().setAuth(data.access_token, data.user);
     set({ hasUsers: true });
     return data.user;
@@ -137,36 +122,24 @@ export const createAuthSlice = (set, get) => ({
 
   /** 팀 생성 (로그인 후 팀이 없는 사용자) */
   createTeam: async (teamName) => {
-    const { backendPort } = get();
-    const res = await fetch(`http://127.0.0.1:${backendPort}/api/teams`, {
+    await serverRequest("/auth/teams", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...get().getAuthHeader() },
+      headers: get().getAuthHeader(),
       body: JSON.stringify({ name: teamName }),
     });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "팀 생성 실패");
-    }
-    const data = await res.json();
-    if (data.user) {
-      get().setAuth(get().authToken, data.user);
-    }
+    const me = await serverRequest("/auth/me", { headers: get().getAuthHeader() });
+    get().setAuth(get().authToken, me);
     get().loadMyTeams();
-    return data;
+    return me;
   },
 
   /** 내 팀 목록 불러오기 */
   loadMyTeams: async () => {
-    const { backendPort, isAuthenticated, getAuthHeader } = get();
-    if (!backendPort || !isAuthenticated()) return;
+    const { isAuthenticated, getAuthHeader } = get();
+    if (!isAuthenticated()) return;
     try {
-      const res = await fetch(`http://127.0.0.1:${backendPort}/api/users/me/teams`, {
-        headers: getAuthHeader(),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        set({ myTeams: data.teams || [] });
-      }
+      const data = await serverRequest("/auth/users/me/teams", { headers: getAuthHeader() });
+      set({ myTeams: data.teams || [] });
     } catch (e) {
       console.error("Failed to load my teams", e);
     }
@@ -221,7 +194,7 @@ export const createAuthSlice = (set, get) => ({
 
   /** 팀 전환 (옵티미스틱: UI 즉시 전환 → API 백그라운드 확인 → 실패 시 롤백) */
   switchTeam: async (teamId) => {
-    const { backendPort, getAuthHeader, currentUser } = get();
+    const { getAuthHeader, currentUser } = get();
     if (currentUser?.team_id === teamId) return;
 
     // ── 1. 즉시 UI 전환 (API 기다리지 않음) ──────────────────
@@ -243,13 +216,11 @@ export const createAuthSlice = (set, get) => ({
 
     // ── 2. 백그라운드에서 서버 확인 ──────────────────────────
     try {
-      const res = await fetch(`http://127.0.0.1:${backendPort}/api/users/me/teams/switch`, {
+      const data = await serverRequest("/auth/users/me/teams/switch", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeader() },
+        headers: getAuthHeader(),
         body: JSON.stringify({ team_id: teamId }),
       });
-      if (!res.ok) throw new Error((await res.json()).detail || "팀 전환 실패");
-      const data = await res.json();
       // 서버에서 받은 정확한 유저 정보로 교체 (role 등 반영)
       get().setAuth(get().authToken, data.user);
       return data.user;
@@ -265,63 +236,51 @@ export const createAuthSlice = (set, get) => ({
 
   /** GitHub OAuth Web Flow: 인증 URL + session_id 가져오기 */
   getGithubOAuthUrl: async () => {
-    const { backendPort } = get();
-    const res = await fetch(`http://127.0.0.1:${backendPort}/auth/github/oauth-url`);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "GitHub OAuth URL 조회 실패");
+    const data = await serverRequest("/auth/github/oauth-url");
     return { url: data.url, sessionId: data.session_id };
   },
 
   /** GitHub OAuth Web Flow: 폴링으로 결과 확인 */
   pollGithubOAuthResult: async (sessionId) => {
-    const { backendPort } = get();
-    const res = await fetch(`http://127.0.0.1:${backendPort}/auth/github/callback-poll/${sessionId}`);
-    if (!res.ok) return { status: "error", error: "세션 만료" };
-    const data = await res.json();
-    if (data.status === "done") {
-      get().setAuth(data.access_token, data.user);
-      set({ hasUsers: true });
+    try {
+      const data = await serverRequest(`/auth/github/callback-poll/${sessionId}`);
+      if (data.status === "done") {
+        get().setAuth(data.access_token, data.user);
+        set({ hasUsers: true });
+      }
+      return data;
+    } catch {
+      return { status: "error", error: "세션 만료" };
     }
-    return data;
   },
 
   /** GitHub Device Flow 시작 */
   startGithubDeviceFlow: async () => {
-    const { backendPort } = get();
-    const res = await fetch(`http://127.0.0.1:${backendPort}/auth/github/device-start`, {
-      method: "POST",
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "GitHub 인증 시작 실패");
-    return data;
+    return await serverRequest("/auth/github/device/start", { method: "POST" });
   },
 
   /** GitHub Device Flow 폴링 */
   pollGithubDeviceFlow: async (device_code) => {
-    const { backendPort } = get();
-    const res = await fetch(`http://127.0.0.1:${backendPort}/auth/github/device-poll`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ device_code }),
-    });
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      return { status: "error", error: errBody.detail || `서버 오류 (${res.status})` };
+    try {
+      const data = await serverRequest("/auth/github/device/poll", {
+        method: "POST",
+        body: JSON.stringify({ device_code }),
+      });
+      if (data.access_token) {
+        get().setAuth(data.access_token, data.user);
+        set({ hasUsers: true });
+      }
+      return data;
+    } catch (e) {
+      return { status: "error", error: e.message };
     }
-    const data = await res.json();
-    if (data.status === "ok") {
-      get().setAuth(data.access_token, data.user);
-      set({ hasUsers: true });
-    }
-    return data;
   },
 
   disconnectGithub: async () => {
-    const { backendPort, authToken } = get();
     try {
-      await fetch(`http://127.0.0.1:${backendPort}/auth/github/disconnect`, {
+      await serverRequest("/auth/github/disconnect", {
         method: "POST",
-        headers: { Authorization: `Bearer ${authToken}` },
+        headers: get().getAuthHeader(),
       });
     } catch (_) {}
     set((s) => ({

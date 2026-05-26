@@ -55,7 +55,7 @@ class User(Base):
     email              = Column(String(255), unique=True, nullable=False)
     role               = Column(
         String(20),
-        CheckConstraint("role IN ('pm','engineer','backend','frontend','devops')"),
+        CheckConstraint("role IN ('pm','engineer','backend','frontend','devops','software_engineer','qa')"),
         nullable=False,
         default="engineer",
     )
@@ -156,7 +156,7 @@ class TeamInvite(Base):
     creator_id = Column(String(36),  ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     role       = Column(
         String(20),
-        CheckConstraint("role IN ('pm','engineer','backend','frontend','devops')"),
+        CheckConstraint("role IN ('pm','engineer','backend','frontend','devops','software_engineer','qa')"),
         nullable=False,
         default="engineer",
     )
