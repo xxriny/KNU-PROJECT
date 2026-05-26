@@ -45,9 +45,9 @@ class User(SharedBase):
     email = Column(String(255), unique=True, nullable=False)
     role = Column(
         String(20),
-        CheckConstraint("role IN ('pm', 'software_engineer', 'backend', 'frontend', 'devops')"),
+        CheckConstraint("role IN ('pm', 'engineer', 'software_engineer', 'backend', 'frontend', 'devops')"),
         nullable=False,
-        default="software_engineer",
+        default="engineer",
     )
     github_username = Column(String(255), nullable=True)
     github_id = Column(String(64), unique=True, nullable=True)
@@ -67,9 +67,9 @@ class TeamMember(SharedBase):
     team_id = Column(String(36), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
     role = Column(
         String(20),
-        CheckConstraint("role IN ('pm', 'software_engineer', 'backend', 'frontend', 'devops')"),
+        CheckConstraint("role IN ('pm', 'engineer', 'software_engineer', 'backend', 'frontend', 'devops')"),
         nullable=False,
-        default="software_engineer",
+        default="engineer",
     )
     created_at = Column(DateTime, default=datetime.utcnow)
 

@@ -1,16 +1,18 @@
-"""
-SQLAlchemy SQLite 데이터베이스 설정.
+"""SQLAlchemy database configuration.
 
-local.db  — 개인 데이터: sessions, results, memos, change_requests, agile_tasks
-shared.db — 공유 데이터: users, teams, subscriptions, published_snapshots
-            (NAVIGATOR-SERVER가 owns shared.db; 기본 경로는 ../NAVIGATOR-SERVER/shared.db)
+local.db remains SQLite for per-device data. The shared auth/team database uses
+PostgreSQL when Cloud SQL/Postgres env vars are present, otherwise it falls back
+to the existing server/shared.db SQLite file.
 """
+
+from __future__ import annotations
 
 import os
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-# ── 로컬 DB (개인 산출물) ───────────────────────────────────
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import URL, make_url
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
+
 _STORAGE_DIR = os.environ.get(
     "NAVIGATOR_STORAGE_DIR",
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "storage"),
@@ -18,34 +20,59 @@ _STORAGE_DIR = os.environ.get(
 os.makedirs(_STORAGE_DIR, exist_ok=True)
 
 LOCAL_DB_PATH = os.path.join(_STORAGE_DIR, "local.db")
-LOCAL_DB_URL = f"sqlite:///{LOCAL_DB_PATH}"
+LOCAL_DB_URL = make_url(f"sqlite:///{LOCAL_DB_PATH}")
 
-engine = create_engine(LOCAL_DB_URL, connect_args={"check_same_thread": False})
+engine = create_engine(LOCAL_DB_URL, connect_args={"check_same_thread": False}, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# ── 공유 DB (users, teams, subscriptions — NAVIGATOR-SERVER 소유) ─
-_AUTH_DIR      = os.path.dirname(os.path.abspath(__file__))   # backend/auth/
-_BACKEND_DIR   = os.path.dirname(_AUTH_DIR)                    # backend/
-_NAVIGATOR_DIR = os.path.dirname(_BACKEND_DIR)                 # NAVIGATOR/
+_AUTH_DIR = os.path.dirname(os.path.abspath(__file__))
+_BACKEND_DIR = os.path.dirname(_AUTH_DIR)
+_NAVIGATOR_DIR = os.path.dirname(_BACKEND_DIR)
 
 SHARED_DB_PATH = os.environ.get(
     "NAVIGATOR_SHARED_DB_PATH",
     os.path.join(_NAVIGATOR_DIR, "server", "shared.db"),
 )
-SHARED_DB_URL = f"sqlite:///{SHARED_DB_PATH}"
 
-shared_engine = create_engine(SHARED_DB_URL, connect_args={"check_same_thread": False})
+
+def _build_shared_db_url():
+    explicit_url = os.environ.get("NAVIGATOR_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    if explicit_url:
+        return make_url(explicit_url)
+
+    instance = os.environ.get("NAVIGATOR_CLOUDSQL_INSTANCE", "").strip()
+    host = os.environ.get("NAVIGATOR_DB_HOST", "").strip()
+    if instance or host:
+        password = os.environ.get("NAVIGATOR_DB_PASSWORD")
+        if password is None:
+            raise RuntimeError("NAVIGATOR_DB_PASSWORD is required for PostgreSQL connections")
+
+        return URL.create(
+            "postgresql+psycopg",
+            username=os.environ.get("NAVIGATOR_DB_USER", "navigator_user"),
+            password=password,
+            host=None if instance else host,
+            port=int(os.environ.get("NAVIGATOR_DB_PORT", "5432")) if host else None,
+            database=os.environ.get("NAVIGATOR_DB_NAME", "navigator_shared"),
+            query={"host": f"/cloudsql/{instance}"} if instance else {},
+        )
+
+    return make_url(f"sqlite:///{SHARED_DB_PATH}")
+
+
+SHARED_DB_URL = _build_shared_db_url()
+_SHARED_CONNECT_ARGS = {"check_same_thread": False} if SHARED_DB_URL.get_backend_name() == "sqlite" else {}
+
+shared_engine = create_engine(SHARED_DB_URL, connect_args=_SHARED_CONNECT_ARGS, pool_pre_ping=True)
 SharedSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=shared_engine)
 
 
 class Base(DeclarativeBase):
-    """로컬 DB 전용 Base."""
-    pass
+    """Base for local per-device tables."""
 
 
 class SharedBase(DeclarativeBase):
-    """공유 DB 전용 Base (users, teams, subscriptions, published_snapshots)."""
-    pass
+    """Base for shared auth/team/published artifact tables."""
 
 
 def get_db():
@@ -64,19 +91,22 @@ def get_shared_db():
         db.close()
 
 
-def _add_column_if_missing(conn, table: str, column: str, col_def: str) -> None:
-    rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
-    existing = {row[1] for row in rows}
+def _add_column_if_missing(conn, table: str, column: str, sqlite_def: str, postgres_def: str | None = None) -> None:
+    inspector = inspect(conn)
+    if not inspector.has_table(table):
+        return
+
+    existing = {row["name"] for row in inspector.get_columns(table)}
     if column not in existing:
+        col_def = postgres_def if conn.dialect.name == "postgresql" and postgres_def else sqlite_def
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}"))
 
 
-def _migrate_role_constraint(conn) -> None:
-    """users.role CheckConstraint를 새 역할 포함하도록 확장 (shared.db)."""
+def _migrate_sqlite_role_constraint(conn) -> None:
     schema = conn.execute(
         text("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'")
     ).scalar() or ""
-    if "devops" in schema:
+    if "devops" in schema and "software_engineer" in schema and "engineer" in schema:
         return
 
     conn.execute(text("ALTER TABLE users RENAME TO users_bak"))
@@ -92,43 +122,74 @@ def _migrate_role_constraint(conn) -> None:
             github_login TEXT,
             github_oauth_token TEXT,
             password_hash TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            CHECK (role IN ('pm', 'engineer', 'software_engineer', 'backend', 'frontend', 'devops'))
         )
     """))
     conn.execute(text("INSERT INTO users SELECT * FROM users_bak"))
     conn.execute(text("DROP TABLE users_bak"))
 
 
-def _run_migrations() -> None:
-    """기존 DB에 나중에 추가된 컬럼을 안전하게 추가합니다."""
-    # 공유 DB 마이그레이션 (users, teams)
-    with shared_engine.begin() as conn:
-        _add_column_if_missing(conn, "teams", "github_client_id",     "TEXT")
-        _add_column_if_missing(conn, "teams", "github_client_secret", "TEXT")
-        _add_column_if_missing(conn, "users", "github_username",      "TEXT")
-        _add_column_if_missing(conn, "users", "github_id",            "TEXT")
-        _add_column_if_missing(conn, "users", "github_login",         "TEXT")
-        _add_column_if_missing(conn, "users", "github_oauth_token",   "TEXT")
-        _migrate_role_constraint(conn)
+def _ensure_role_constraints(conn, tables: tuple[str, ...]) -> None:
+    if conn.dialect.name == "sqlite":
+        if "users" in tables and inspect(conn).has_table("users"):
+            _migrate_sqlite_role_constraint(conn)
+        return
+    if conn.dialect.name != "postgresql":
+        return
 
-    # 로컬 DB 마이그레이션 (agile_tasks 등)
+    allowed = "'pm', 'engineer', 'software_engineer', 'backend', 'frontend', 'devops'"
+    inspector = inspect(conn)
+    for table in tables:
+        if not inspector.has_table(table):
+            continue
+        columns = {row["name"] for row in inspector.get_columns(table)}
+        if "role" not in columns:
+            continue
+
+        old_constraints = conn.execute(
+            text(
+                """
+                SELECT con.conname
+                FROM pg_constraint con
+                JOIN pg_class rel ON rel.oid = con.conrelid
+                WHERE rel.relname = :table
+                  AND con.contype = 'c'
+                  AND pg_get_constraintdef(con.oid) ILIKE '%role%'
+                """
+            ),
+            {"table": table},
+        ).fetchall()
+        for (name,) in old_constraints:
+            safe_name = name.replace('"', '""')
+            conn.execute(text(f'ALTER TABLE {table} DROP CONSTRAINT IF EXISTS "{safe_name}"'))
+
+        conn.execute(
+            text(
+                f"ALTER TABLE {table} ADD CONSTRAINT ck_{table}_role "
+                f"CHECK (role IN ({allowed}))"
+            )
+        )
+
+
+def _run_migrations() -> None:
+    with shared_engine.begin() as conn:
+        _add_column_if_missing(conn, "teams", "github_client_id", "TEXT")
+        _add_column_if_missing(conn, "teams", "github_client_secret", "TEXT")
+        _add_column_if_missing(conn, "users", "github_username", "TEXT")
+        _add_column_if_missing(conn, "users", "github_id", "TEXT")
+        _add_column_if_missing(conn, "users", "github_login", "TEXT")
+        _add_column_if_missing(conn, "users", "github_oauth_token", "TEXT")
+        _ensure_role_constraints(conn, ("users", "team_members", "team_invites"))
+
     with engine.begin() as conn:
-        try:
-            _add_column_if_missing(conn, "agile_tasks", "team_id", "TEXT DEFAULT ''")
-        except Exception:
-            pass
+        _add_column_if_missing(conn, "agile_tasks", "team_id", "TEXT DEFAULT ''")
 
 
 def init_db():
-    from auth.shared_models import User, Team, Subscription, PublishedSnapshot  # noqa: F401
-    from auth.models import (  # noqa: F401
-        AnalysisSession, DesignChangeRequest, MemoItem, AnalysisResult,
-    )
+    from auth.shared_models import PublishedSnapshot, Subscription, Team, User  # noqa: F401
+    from auth.models import AnalysisResult, AnalysisSession, DesignChangeRequest, MemoItem  # noqa: F401
 
-    # 공유 테이블 생성 (shared.db)
     SharedBase.metadata.create_all(bind=shared_engine)
-
-    # 로컬 테이블 생성 (local.db)
     Base.metadata.create_all(bind=engine)
-
     _run_migrations()

@@ -132,7 +132,7 @@ async def update_user_role(
     current_user: User = Depends(require_pm),
     db: Session = Depends(get_shared_db),
 ):
-    if req.role not in ("pm", "software_engineer", "backend", "frontend", "devops"):
+    if req.role not in ("pm", "engineer", "software_engineer", "backend", "frontend", "devops"):
         raise HTTPException(status_code=400, detail="유효하지 않은 역할입니다.")
     target = db.query(User).filter(User.id == user_id).first()
     if not target:

@@ -11,7 +11,7 @@ class RegisterRequest(BaseModel):
     name: str
     email: str
     password: str
-    role: str = "software_engineer"
+    role: str = "engineer"
     github_username: Optional[str] = None
     team_name: Optional[str] = None
 
@@ -83,7 +83,7 @@ class DevicePollRequest(BaseModel):
 
 
 class TeamInviteCreateRequest(BaseModel):
-    role: str = "software_engineer"
+    role: str = "engineer"
     max_uses: int = 1
     expires_in_days: int = 7
 
