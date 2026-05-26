@@ -3,9 +3,9 @@
  */
 export const createConfigSlice = (set, get) => ({
   apiKey: localStorage.getItem("pm_api_key") || "",
-  model: localStorage.getItem("pm_model") || "gemini-3.1-flash-lite-preview",
+  model: localStorage.getItem("pm_model") || "gemini-3.1-flash-lite",
   backendHasKey: false,
-  availableModels: ["gemini-3.1-flash-lite-preview"],
+  availableModels: ["gemini-3.1-flash-lite"],
 
   setApiKey: (key) => {
     localStorage.setItem("pm_api_key", key);
@@ -23,7 +23,7 @@ export const createConfigSlice = (set, get) => ({
       const cfg = await res.json();
       const nextAvailableModels = Array.isArray(cfg.available_models) && cfg.available_models.length > 0
         ? cfg.available_models
-        : ["gemini-3.1-flash-lite-preview"];
+        : ["gemini-3.1-flash-lite"];
       
       const currentModel = get().model;
       if (cfg.has_api_key) set({ backendHasKey: true });

@@ -253,7 +253,7 @@ export const createPipelineSlice = (set, get) => ({
     }
   },
 
-  startAnalysis: (idea, context = "", apiKey = "", model = "gemini-3.1-flash-lite-preview", selectedMode = "create", initialTitle = null) => {
+  startAnalysis: (idea, context = "", apiKey = "", model = "gemini-3.1-flash-lite", selectedMode = "create", initialTitle = null) => {
     const { currentUser } = get();
     if (!currentUser?.github_id) {
       get().addNotification("GitHub 로그인이 필요합니다. 설정에서 연결하세요.", "error");
@@ -334,7 +334,7 @@ export const createPipelineSlice = (set, get) => ({
         chat_history: chatDiff,
         memos: activeMemos,
         api_key: apiKey || "",
-        model: model || "gemini-3.1-flash-lite-preview",
+        model: model || "gemini-3.1-flash-lite",
       });
     } catch (e) {
       return {
@@ -507,7 +507,7 @@ export const createPipelineSlice = (set, get) => ({
       idea,
       context: prevContext,
       api_key: apiKey || "",
-      model: model || "gemini-3.1-flash-lite-preview",
+      model: model || "gemini-3.1-flash-lite",
       action_type: actionType,
       source_dir: projectFolder || "",
       auth_token: get().authToken,
@@ -538,7 +538,7 @@ export const createPipelineSlice = (set, get) => ({
       chat_history: history,
       previous_result: get().resultData || {},
       api_key: apiKey || "",
-      model: model || "gemini-3.1-flash-lite-preview",
+      model: model || "gemini-3.1-flash-lite",
       session_id: get().currentSessionId || "",
     });
   },
