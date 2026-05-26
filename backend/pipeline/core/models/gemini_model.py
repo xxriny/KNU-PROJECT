@@ -41,9 +41,9 @@ def get_gemini_client(api_key: str, model: str = DEFAULT_MODEL, temperature: flo
             _llm_cache.move_to_end(cache_key)
             return _llm_cache[cache_key]
 
-        use_vertex = os.environ.get("USE_VERTEX_AI", "true").lower() == "true"
+        use_vertex = os.environ.get("USE_VERTEX_AI", "false").lower() == "true"
         llm = None
-        
+
         if use_vertex:
             try:
                 from langchain_google_vertexai import ChatVertexAI
@@ -83,7 +83,7 @@ def get_raw_genai_client(api_key: str) -> genai.Client:
             _raw_cache.move_to_end(effective_key)
             return _raw_cache[effective_key]
 
-        use_vertex = os.environ.get("USE_VERTEX_AI", "true").lower() == "true"
+        use_vertex = os.environ.get("USE_VERTEX_AI", "false").lower() == "true"
         client = None
 
         if use_vertex:

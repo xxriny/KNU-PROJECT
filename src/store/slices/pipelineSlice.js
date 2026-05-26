@@ -333,16 +333,21 @@ export const createPipelineSlice = (set, get) => ({
         detail: c.detail || "",
       }));
 
+    console.log("[extractFinalIdea] authToken present:", !!authToken, "| chatDiff:", chatDiff.length, "msgs | memos:", activeMemos.length);
+
     try {
       const { ideaService } = await import("../../api/services/ideaService");
-      return await ideaService.extractFinalIdea(backendPort, {
+      const res = await ideaService.extractFinalIdea(backendPort, {
         chat_history: chatDiff,
         memos: activeMemos,
         api_key: apiKey || "",
         model: model || "gemini-3.1-flash-lite",
         auth_token: authToken || "",
       });
+      console.log("[extractFinalIdea] response:", res?.status, "| summary_len:", res?.summary_markdown?.length ?? 0, "| error:", res?.error);
+      return res;
     } catch (e) {
+      console.error("[extractFinalIdea] fetch failed:", e);
       return {
         status: "error",
         summary_markdown: "",

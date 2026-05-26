@@ -17,7 +17,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from pipeline.core.utils import get_llm
+from pipeline.core.utils import get_llm, active_jwt_token
 from observability.logger import get_logger
 from version import DEFAULT_MODEL
 
@@ -113,6 +113,7 @@ def extract_final_idea(
     memos: Optional[list] = None,
     api_key: str = "",
     model: str = DEFAULT_MODEL,
+    auth_token: str = "",
 ) -> dict:
     """
     대화·메모를 LLM 한 번에 정제해서 최종 확정 요구사항 마크다운을 반환한다.
@@ -127,10 +128,19 @@ def extract_final_idea(
     """
     logger = get_logger()
 
+    # threadpool에서 실행되므로 ContextVar를 직접 세팅
+    if auth_token:
+        active_jwt_token.set(auth_token)
+
+    logger.info(f"[extract_final_idea] auth_token={'SET' if auth_token else 'EMPTY'} model={model}")
+
     chat_text = _format_chat(chat_history)
     memo_text = _format_memos(memos or [])
 
+    logger.info(f"[extract_final_idea] chat_len={len(chat_text)} memo_len={len(memo_text)}")
+
     if not chat_text and not memo_text:
+        logger.info("[extract_final_idea] no content → early return")
         return {
             "status": "ok",
             "summary_markdown": "",
@@ -150,8 +160,18 @@ def extract_final_idea(
 
     try:
         from langchain_core.messages import SystemMessage, HumanMessage
+        from pipeline.core.utils import get_effective_key
+
+        # 키 fetch 단계 로깅
+        try:
+            resolved_key = get_effective_key(api_key)
+            logger.info(f"[extract_final_idea] key resolved OK (len={len(resolved_key)})")
+        except ValueError as ve:
+            logger.error(f"[extract_final_idea] key resolve FAILED: {ve}")
+            raise
 
         llm = get_llm(api_key=api_key, model=model)
+        logger.info(f"[extract_final_idea] LLM instance acquired, invoking structured output...")
         structured_llm = llm.with_structured_output(FinalIdeaOutput)
         out = structured_llm.invoke([
             SystemMessage(content=SYSTEM_PROMPT),
@@ -165,7 +185,7 @@ def extract_final_idea(
         dropped = [s.strip() for s in (out.dropped_points or []) if isinstance(s, str) and s.strip()]
 
         logger.info(
-            f"[extract_final_idea] summary_len={len(summary)} dropped={len(dropped)}"
+            f"[extract_final_idea] LLM OK summary_len={len(summary)} dropped={len(dropped)}"
         )
 
         return {

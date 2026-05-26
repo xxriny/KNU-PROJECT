@@ -176,7 +176,7 @@ export default function HomeScreen() {
               </div>
             </div>
           )}
-          <ChatThread />
+          <ChatThread onSync={handleSync} />
         </div>
       ) : (
         /* ────────────────── Welcome 모드 ────────────────── */

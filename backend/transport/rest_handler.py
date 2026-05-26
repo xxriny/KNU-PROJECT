@@ -344,8 +344,6 @@ async def idea_chat(req: IdeaChatRequest):
 @rest_router.post("/api/extract-final-idea")
 async def extract_final_idea_endpoint(req: ExtractFinalIdeaRequest):
     """Sync 빌드 전 Pre-flight 단계. 날것의 대화/메모를 정제해 최종 확정 요구사항 마크다운만 추출."""
-    if req.auth_token:
-        active_jwt_token.set(req.auth_token)
     try:
         from pipeline.domain.chat.idea_extractor import extract_final_idea
         result = extract_final_idea(
@@ -353,6 +351,7 @@ async def extract_final_idea_endpoint(req: ExtractFinalIdeaRequest):
             memos=req.memos or [],
             api_key=req.api_key or "",
             model=req.model or DEFAULT_MODEL,
+            auth_token=req.auth_token or "",
         )
         return result
     except Exception as e:
