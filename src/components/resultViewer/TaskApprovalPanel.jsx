@@ -4,7 +4,7 @@ import {
   ClipboardList, Check, X, Clock, Loader2, RefreshCw,
   ChevronDown, ChevronRight, AlertTriangle, CheckCircle,
   XCircle, Plus, Trash2, Sparkles, Users, GitPullRequest,
-  CircleDot, Inbox,
+  CircleDot, Inbox, Pencil, Save, UserCheck, RotateCcw,
 } from "lucide-react";
 
 const STATUS_CONFIG = {
@@ -43,7 +43,7 @@ const AREA_LABEL = {
   frontend:  "프론트엔드",
   fullstack: "풀스택",
   devops:    "DevOps",
-  sa:         "SA",
+  sa:        "SA",
 };
 
 const TASK_TYPES = ["feature", "bugfix", "refactor", "test", "infra", "doc_sync"];
@@ -82,6 +82,10 @@ export default function TaskApprovalPanel() {
   const [decisionReasons, setDecisionReasons] = useState({});
   const [teamMembers, setTeamMembers]   = useState([]);
 
+  // 선택 삭제
+  const [selectedIds, setSelectedIds]       = useState(() => new Set());
+  const [deleteLoading, setDeleteLoading]   = useState(false);
+
   // 커스텀 태스크 생성 폼
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createForm, setCreateForm] = useState({
@@ -97,6 +101,19 @@ export default function TaskApprovalPanel() {
   // 배분
   const [distLoading, setDistLoading] = useState(false);
   const [distMsg, setDistMsg]         = useState("");
+
+  // 인라인 편집
+  const [editingId, setEditingId]     = useState(null);
+  const [editForm, setEditForm]       = useState({});
+  const [editLoading, setEditLoading] = useState(false);
+
+  // 거절 사유 입력
+  const [rejectingId, setRejectingId]   = useState(null);
+  const [rejectReason, setRejectReason] = useState("");
+
+  // PM 재배분 (rejected → pending_approval + 새 담당자)
+  const [reassignId, setReassignId]       = useState(null);
+  const [reassignTarget, setReassignTarget] = useState("");
 
   const fetchTeamMembers = useCallback(async () => {
     if (!authToken) return;
@@ -115,7 +132,6 @@ export default function TaskApprovalPanel() {
     setLoading(true); setError("");
     try {
       const params = new URLSearchParams();
-      if (filterStatus !== "all") params.set("status", filterStatus);
       if (teamId) params.set("team_id", teamId);
       const query = params.toString() ? `?${params}` : "";
       const res  = await fetch(`http://127.0.0.1:${port}/api/tasks${query}`);
@@ -124,23 +140,21 @@ export default function TaskApprovalPanel() {
       else setError(json.error || "조회 실패");
     } catch (e) { setError("서버 연결 실패: " + e.message); }
     finally { setLoading(false); }
-  }, [port, filterStatus, teamId]);
+  }, [port, teamId]);
 
-  useEffect(() => { fetchTasks(); }, [fetchTasks]);
+  useEffect(() => {
+    fetchTasks();
+    const id = setInterval(fetchTasks, 5000);
+    return () => clearInterval(id);
+  }, [fetchTasks]);
 
   // 상태 전환
-  const handleAction = async (taskId, newStatus, resultPayload = null) => {
+  const handleAction = async (taskId, newStatus) => {
     try {
-      // author: xxrin
-      // 일반 태스크 상태 변경은 기존 PATCH 계약을 유지한다.
-      const headers = { "Content-Type": "application/json" };
-      if (authToken) headers.Authorization = `Bearer ${authToken}`;
-      const body = { status: newStatus, reviewed_by: userId };
-      if (resultPayload) body.result = JSON.stringify(resultPayload);
       const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, {
         method: "PATCH",
-        headers,
-        body: JSON.stringify(body),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus, reviewed_by: userId }),
       });
       const json = await res.json();
       if (json.status === "ok") setTasks((prev) => prev.map((t) => t.id === taskId ? json.data : t));
@@ -148,10 +162,9 @@ export default function TaskApprovalPanel() {
     } catch (e) { setError("서버 연결 실패: " + e.message); }
   };
 
+
   const handleDevGapDecision = async (taskId, action, reason) => {
     try {
-      // author: xxrin
-      // Dev GAP 승인/거절은 상태값 재해석 대신 전용 endpoint를 호출해 PM 결정 계약을 명확히 한다.
       const headers = { "Content-Type": "application/json" };
       if (authToken) headers.Authorization = `Bearer ${authToken}`;
       const endpoint = action === "approve" ? "approve" : "reject";
@@ -163,6 +176,90 @@ export default function TaskApprovalPanel() {
       const json = await res.json();
       if (json.status === "ok") setTasks((prev) => prev.map((t) => t.id === taskId ? json.data : t));
       else setError(json.error || "Dev GAP 결정 처리 실패");
+    } catch (e) { setError("서버 연결 실패: " + e.message); }
+  };
+  const startEdit = (task) => {
+    setEditingId(task.id);
+    setEditForm({
+      title: task.title || "",
+      description: task.description || "",
+      area: task.area || "backend",
+      effort: task.effort || "M",
+      task_type: task.task_type || "feature",
+    });
+  };
+
+  // afterSave: { status, assignee?, clearResult? }
+  const handleSaveEdit = async (taskId, afterSave = {}) => {
+    setEditLoading(true);
+    const currentTask = tasks.find((t) => t.id === taskId);
+    const targetStatus = afterSave.status ?? (currentTask?.status === "rejected" ? "unassigned" : (currentTask?.status || "unassigned"));
+    const patch = { status: targetStatus, result: afterSave.clearResult ? "" : undefined, ...editForm };
+    if ("assignee" in afterSave) patch.assignee = afterSave.assignee;
+    else if (currentTask?.status === "rejected") patch.assignee = "";
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const json = await res.json();
+      if (json.status === "ok") {
+        setTasks((prev) => prev.map((t) => t.id === taskId ? json.data : t));
+        setEditingId(null);
+      } else {
+        setError(json.error || "수정 실패");
+      }
+    } catch (e) { setError("서버 연결 실패: " + e.message); }
+    finally { setEditLoading(false); }
+  };
+
+  // 거절 (사유 포함)
+  const handleRejectWithReason = async (taskId) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "rejected", result: rejectReason, reviewed_by: userId }),
+      });
+      const json = await res.json();
+      if (json.status === "ok") {
+        setTasks((prev) => prev.map((t) => t.id === taskId ? json.data : t));
+        setRejectingId(null);
+        setRejectReason("");
+      } else { setError(json.error || "거절 실패"); }
+    } catch (e) { setError("서버 연결 실패: " + e.message); }
+  };
+
+  // PM: rejected → unassigned (미할당으로 되돌리기)
+  const handleReturnToUnassigned = async (taskId) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "unassigned", assignee: "" }),
+      });
+      const json = await res.json();
+      if (json.status === "ok") setTasks((prev) => prev.map((t) => t.id === taskId ? json.data : t));
+      else setError(json.error || "실패");
+    } catch (e) { setError("서버 연결 실패: " + e.message); }
+  };
+
+  // PM: rejected → pending_approval + 새 담당자 배정
+  const handleReassign = async (taskId) => {
+    if (!reassignTarget) return;
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "pending_approval", assignee: reassignTarget, result: "" }),
+      });
+      const json = await res.json();
+      if (json.status === "ok") {
+        setTasks((prev) => prev.map((t) => t.id === taskId ? json.data : t));
+        setReassignId(null);
+        setReassignTarget("");
+      } else { setError(json.error || "재배분 실패"); }
     } catch (e) { setError("서버 연결 실패: " + e.message); }
   };
 
@@ -180,7 +277,10 @@ export default function TaskApprovalPanel() {
       const json = await res.json();
       if (json.status === "ok") {
         const d = json.data;
-        setGenMsg(`생성 완료: ${d.created}개 추가, ${d.skipped}개 스킵`);
+        const parts = [`${d.created}개 추가`];
+        if (d.updated) parts.push(`${d.updated}개 수정`);
+        if (d.skipped) parts.push(`${d.skipped}개 스킵`);
+        setGenMsg(`생성 완료: ${parts.join(", ")}`);
         fetchTasks();
       } else {
         setGenMsg("실패: " + (json.error || "unknown"));
@@ -252,24 +352,52 @@ export default function TaskApprovalPanel() {
       return next;
     });
 
+  const toggleSelect = (id) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const handleDeleteSelected = async () => {
+    if (!selectedIds.size) return;
+    setDeleteLoading(true);
+    try {
+      await Promise.all([...selectedIds].map((id) =>
+        fetch(`http://127.0.0.1:${port}/api/tasks/${id}`, { method: "DELETE" })
+      ));
+      setTasks((prev) => prev.filter((t) => !selectedIds.has(t.id)));
+      setSelectedIds(new Set());
+    } catch (e) { setError("삭제 실패: " + e.message); }
+    finally { setDeleteLoading(false); }
+  };
+
   const roleAreaFilter = ROLE_AREAS[userRole] ?? null;
   const visibleTasks = tasks
     .filter((t) => filterStatus === "all" || t.status === filterStatus)
     .filter((t) => {
-      // author: xxrin
-      // PM이 일반 태스크, Dev GAP 승인, SA 재검토 요청을 분리해서 볼 수 있도록 타입 필터를 적용한다.
       if (taskTypeFilter === "dev_gap") return t.task_type === "dev_gap_approval";
       if (taskTypeFilter === "sa_review") return t.task_type === "sa_re_review";
       if (taskTypeFilter === "regular") return !["dev_gap_approval", "sa_re_review"].includes(t.task_type);
       return true;
     })
     .filter((t) => {
+      // 본인에게 할당된 태스크는 영역 필터와 무관하게 항상 표시
+      if (t.assignee && t.assignee === currentUser?.name) return true;
       if (!roleAreaFilter) return true;
       if (!t.area) return false;
       return roleAreaFilter.includes(t.area);
     });
 
-  const countOf = (s) => tasks.filter((t) => t.status === s).length;
+  const countOf = (s) => tasks.filter((t) => {
+    if (t.status !== s) return false;
+    if (t.assignee && t.assignee === currentUser?.name) return true;
+    if (!roleAreaFilter) return true;
+    if (!t.area) return false;
+    return roleAreaFilter.includes(t.area);
+  }).length;
+
+
   const countType = (type) => {
     if (type === "dev_gap") return tasks.filter((t) => t.task_type === "dev_gap_approval").length;
     if (type === "sa_review") return tasks.filter((t) => t.task_type === "sa_re_review").length;
@@ -282,8 +410,6 @@ export default function TaskApprovalPanel() {
     return value && value.trim() ? value.trim() : fallback;
   };
 
-  // author: xxrin
-  // PM 승인 이후 저장된 후속 처리 결과를 Dev GAP 카드에서 읽기 위해 result JSON을 안전하게 파싱한다.
   const parseTaskResult = (result) => {
     if (!result) return {};
     if (typeof result === "object") return result;
@@ -294,6 +420,31 @@ export default function TaskApprovalPanel() {
       return { raw_result: result };
     }
   };
+  // 미할당 탭일 때 도메인별 그룹핑
+  const AREA_ORDER = ["backend", "frontend", "devops", "fullstack", ""];
+  const STATUS_ORDER = ["unassigned", "pending_approval", "in_progress", "pr_pending", "completed", "rejected"];
+  const unassignedGroups = React.useMemo(() => {
+    if (filterStatus !== "unassigned") return null;
+    const groups = {};
+    for (const t of visibleTasks) {
+      const key = t.area || "";
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(t);
+    }
+    return AREA_ORDER.filter((a) => groups[a]?.length).map((a) => ({ area: a, tasks: groups[a] }));
+  }, [filterStatus, visibleTasks]);
+
+  // 전체 탭일 때 상태별 그룹핑
+  const allStatusGroups = React.useMemo(() => {
+    if (filterStatus !== "all") return null;
+    const groups = {};
+    for (const t of visibleTasks) {
+      const key = t.status || "unassigned";
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(t);
+    }
+    return STATUS_ORDER.filter((s) => groups[s]?.length).map((s) => ({ status: s, tasks: groups[s] }));
+  }, [filterStatus, visibleTasks]);
 
   const base = isDarkMode
     ? "bg-white/5 border-white/10 hover:bg-white/10"
@@ -308,7 +459,7 @@ export default function TaskApprovalPanel() {
             <ClipboardList size={22} /> 태스크 관리
           </h2>
           <p className="text-sm opacity-60 mt-1">
-            {isPM ? "AI가 생성한 태스크를 배분하고 승인·거절하세요." : "담당 태스크를 확인하고 상태를 업데이트하세요."}
+            {isPM ? "AI가 생성한 태스크를 배분하고 관리하세요." : "배분된 태스크를 수락 또는 거절하고 진행 상태를 업데이트하세요."}
           </p>
         </div>
         <button
@@ -509,6 +660,32 @@ export default function TaskApprovalPanel() {
         </div>
       )}
 
+      {/* 선택 삭제 툴바 — 미할당 탭 + 선택 항목 있을 때 */}
+      {filterStatus === "unassigned" && isPM && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const allIds = new Set(visibleTasks.map((t) => t.id));
+              const allSelected = visibleTasks.every((t) => selectedIds.has(t.id));
+              setSelectedIds(allSelected ? new Set() : allIds);
+            }}
+            className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all ${base}`}
+          >
+            {visibleTasks.length > 0 && visibleTasks.every((t) => selectedIds.has(t.id)) ? "전체 해제" : "전체 선택"}
+          </button>
+          {selectedIds.size > 0 && (
+            <button
+              onClick={handleDeleteSelected}
+              disabled={deleteLoading}
+              className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all"
+            >
+              {deleteLoading ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+              선택 삭제 ({selectedIds.size})
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Task List */}
       <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-1">
         {loading && visibleTasks.length === 0 && (
@@ -523,11 +700,47 @@ export default function TaskApprovalPanel() {
           </div>
         )}
 
-        {visibleTasks.map((task) => {
+        {/* 미할당: 도메인별 그룹 */}
+        {unassignedGroups && unassignedGroups.map(({ area, tasks: groupTasks }) => (
+          <div key={area || "etc"} className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className={`text-xs font-bold px-2.5 py-1 rounded-lg ${isDarkMode ? "bg-white/10 text-slate-300" : "bg-slate-200 text-slate-600"}`}>
+                {AREA_LABEL[area] || "기타"}
+              </span>
+              <span className="text-xs opacity-40">{groupTasks.length}개</span>
+              {isPM && (
+                <button
+                  onClick={() => {
+                    const groupIds = new Set(groupTasks.map((t) => t.id));
+                    const allSelected = groupTasks.every((t) => selectedIds.has(t.id));
+                    setSelectedIds((prev) => {
+                      const next = new Set(prev);
+                      groupIds.forEach((id) => allSelected ? next.delete(id) : next.add(id));
+                      return next;
+                    });
+                  }}
+                  className="text-[11px] opacity-50 hover:opacity-100 transition-opacity"
+                >
+                  {groupTasks.every((t) => selectedIds.has(t.id)) ? "그룹 해제" : "그룹 선택"}
+                </button>
+              )}
+            </div>
+            {groupTasks.map((task) => renderTaskCard(task))}
+          </div>
+        ))}
+
+        {/* 그 외 탭: 기존 방식 */}
+        {!unassignedGroups && visibleTasks.map((task) => renderTaskCard(task))}
+      </div>
+    </div>
+  );
+
+  function renderTaskCard(task) {
           const cfg        = STATUS_CONFIG[task.status] || STATUS_CONFIG.unassigned;
           const isExpanded = expandedIds.has(task.id);
           const isMyTask   = task.assignee && task.assignee === currentUser?.name;
           const isDevGapApproval = task.task_type === "dev_gap_approval";
+          const isSelected = selectedIds.has(task.id);
           const payload = task.payload || {};
           const pmReport = payload.pm_report || {};
           const prContext = payload.pr_context || {};
@@ -556,11 +769,25 @@ export default function TaskApprovalPanel() {
           }));
 
           return (
-            <div key={task.id} className={`rounded-2xl border transition-all ${cfg.bg} ${cfg.border}`}>
+            <div key={task.id} className={`rounded-2xl border transition-all ${isSelected ? "ring-2 ring-blue-500/50" : ""} ${cfg.bg} ${cfg.border}`}>
+              <div className="flex items-center gap-2 pr-4">
+                {/* 체크박스 — 미할당 + PM만 */}
+                {task.status === "unassigned" && isPM && (
+                  <button
+                    onClick={() => toggleSelect(task.id)}
+                    className={`ml-3 shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                      isSelected
+                        ? "bg-blue-500 border-blue-500"
+                        : isDarkMode ? "border-white/20 hover:border-white/40" : "border-slate-300 hover:border-slate-500"
+                    }`}
+                  >
+                    {isSelected && <Check size={10} className="text-white" />}
+                  </button>
+                )}
               <button
                 type="button"
                 onClick={() => toggleExpand(task.id)}
-                className="w-full flex items-center gap-3 p-4 text-left"
+                className="flex-1 flex items-center gap-3 p-4 text-left"
               >
                 <cfg.Icon size={18} className={cfg.color} />
                 <div className="flex-1 min-w-0">
@@ -592,20 +819,114 @@ export default function TaskApprovalPanel() {
                 <span className={`text-xs font-bold shrink-0 ${cfg.color}`}>{cfg.label}</span>
                 {isExpanded ? <ChevronDown size={16} className="opacity-50 shrink-0" /> : <ChevronRight size={16} className="opacity-50 shrink-0" />}
               </button>
+              </div>
 
               {isExpanded && (
                 <div className={`px-4 pb-4 space-y-3 border-t ${isDarkMode ? "border-white/5" : "border-slate-100"}`}>
-                  {task.description && (
-                    <p className="text-sm opacity-70 pt-3 leading-relaxed">{task.description}</p>
+                  {/* 인라인 편집 폼 (unassigned 또는 rejected + PM) */}
+                  {isPM && (task.status === "unassigned" || task.status === "rejected") && editingId === task.id ? (
+                    <div className="pt-3 space-y-2">
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="block text-xs font-bold opacity-50 mb-1">유형</label>
+                          <select
+                            value={editForm.task_type}
+                            onChange={(e) => setEditForm((f) => ({ ...f, task_type: e.target.value }))}
+                            style={{ colorScheme: isDarkMode ? "dark" : "light" }}
+                            className={`w-full px-2 py-1.5 rounded-lg text-xs font-semibold border outline-none ${isDarkMode ? "bg-slate-800 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-800"}`}
+                          >
+                            {TASK_TYPES.map((t) => <option key={t} value={t}>{TASK_TYPE_LABEL[t] || t}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold opacity-50 mb-1">영역</label>
+                          <select
+                            value={editForm.area}
+                            onChange={(e) => setEditForm((f) => ({ ...f, area: e.target.value }))}
+                            style={{ colorScheme: isDarkMode ? "dark" : "light" }}
+                            className={`w-full px-2 py-1.5 rounded-lg text-xs font-semibold border outline-none ${isDarkMode ? "bg-slate-800 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-800"}`}
+                          >
+                            {AREAS.map((a) => <option key={a} value={a}>{AREA_LABEL[a] || a}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold opacity-50 mb-1">노력도</label>
+                          <select
+                            value={editForm.effort}
+                            onChange={(e) => setEditForm((f) => ({ ...f, effort: e.target.value }))}
+                            style={{ colorScheme: isDarkMode ? "dark" : "light" }}
+                            className={`w-full px-2 py-1.5 rounded-lg text-xs font-semibold border outline-none ${isDarkMode ? "bg-slate-800 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-800"}`}
+                          >
+                            {Object.keys(EFFORT_LABEL).map((e) => <option key={e} value={e}>{EFFORT_LABEL[e]}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold opacity-50 mb-1">제목</label>
+                        <input
+                          type="text"
+                          value={editForm.title}
+                          onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))}
+                          className={`w-full px-3 py-2 rounded-lg text-xs border outline-none ${isDarkMode ? "bg-white/5 border-white/10 text-white" : "bg-white border-slate-200 text-slate-800"}`}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold opacity-50 mb-1">설명</label>
+                        <textarea
+                          value={editForm.description}
+                          onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
+                          rows={3}
+                          className={`w-full px-3 py-2 rounded-lg text-xs border outline-none resize-none ${isDarkMode ? "bg-white/5 border-white/10 text-white" : "bg-white border-slate-200 text-slate-800"}`}
+                        />
+                      </div>
+                      <div className="flex gap-2 flex-wrap">
+                        {task.status === "rejected" && task.assignee ? (
+                          <>
+                            <button
+                              onClick={() => handleSaveEdit(task.id, { status: "pending_approval", assignee: task.assignee, clearResult: true })}
+                              disabled={editLoading}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-all"
+                            >
+                              {editLoading ? <Loader2 size={12} className="animate-spin" /> : <UserCheck size={12} />}
+                              수정 후 재할당
+                            </button>
+                            <button
+                              onClick={() => handleSaveEdit(task.id, { status: "unassigned", assignee: "", clearResult: true })}
+                              disabled={editLoading}
+                              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border transition-all ${base}`}
+                            >
+                              {editLoading ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                              수정 후 미할당
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => handleSaveEdit(task.id)}
+                            disabled={editLoading}
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-all"
+                          >
+                            {editLoading ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                            저장
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${base}`}
+                        >
+                          취소
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    task.description && (
+                      <p className="text-sm opacity-70 pt-3 leading-relaxed">{task.description}</p>
+                    )
                   )}
 
                   {/* PM 액션: pending_approval → 승인(in_progress) / 거절(rejected) */}
                   {isDevGapApproval && (
                     <div className={`rounded-xl border p-3 space-y-2 ${isDarkMode ? "bg-black/20 border-white/10" : "bg-white border-slate-200"}`}>
                       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                        <span className={`px-2 py-1 rounded ${isDarkMode ? "bg-white/10 text-slate-200" : "bg-slate-100 text-slate-700"}`}>
-                          {prContext.owner || "-"} / {prContext.repo || "-"}
-                        </span>
                         <span className={`px-2 py-1 rounded ${isDarkMode ? "bg-white/10 text-slate-200" : "bg-slate-100 text-slate-700"}`}>
                           PR #{prContext.pr_number || "-"}
                         </span>
@@ -615,59 +936,30 @@ export default function TaskApprovalPanel() {
                         <span className="px-2 py-1 rounded bg-red-500/10 text-red-400">
                           GAP {gapReport.length}
                         </span>
-                        {payload.approval_status && (
-                          <span className="px-2 py-1 rounded bg-amber-500/10 text-amber-400">
-                            {payload.approval_status}
-                          </span>
-                        )}
                         {highGapCount > 0 && (
                           <span className="px-2 py-1 rounded bg-orange-500/10 text-orange-400">
                             HIGH {highGapCount}
                           </span>
                         )}
+                        {(prContext.owner || prContext.repo) && (
+                          <span className={`px-2 py-1 rounded font-mono ${isDarkMode ? "bg-white/5 text-slate-400" : "bg-slate-100 text-slate-500"}`}>
+                            {prContext.owner || "-"} / {prContext.repo || "-"}
+                          </span>
+                        )}
+                        {payload.approval_status && (
+                          <span className={`px-2 py-1 rounded font-bold ${
+                            payload.approval_status === "approved"
+                              ? "bg-emerald-500/10 text-emerald-400"
+                              : payload.approval_status === "rejected"
+                              ? "bg-red-500/10 text-red-400"
+                              : "bg-blue-500/10 text-blue-400"
+                          }`}>
+                            {payload.approval_status}
+                          </span>
+                        )}
                       </div>
                       {pmReport.summary && (
                         <p className="text-xs leading-relaxed opacity-80">{pmReport.summary}</p>
-                      )}
-                      {normalizedGapReport.length > 0 && (
-                        <div className="space-y-2">
-                          <div className={`text-[11px] font-bold uppercase tracking-wider ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-                            Gap Report Details
-                          </div>
-                          <div className="space-y-2">
-                            {normalizedGapReport.map((gap) => (
-                              <div
-                                key={gap.gap_id}
-                                className={`rounded-xl border p-2.5 ${isDarkMode ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200"}`}
-                              >
-                                <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-                                  <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${isDarkMode ? "bg-black/30 text-slate-200" : "bg-white text-slate-700 border border-slate-200"}`}>
-                                    {gap.gap_id}
-                                  </span>
-                                  <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${gap.severity === "HIGH" ? "bg-red-500/15 text-red-400" : (isDarkMode ? "bg-white/10 text-slate-300" : "bg-slate-200 text-slate-700")}`}>
-                                    {gap.severity}
-                                  </span>
-                                  <span className={`text-[10px] px-2 py-0.5 rounded ${isDarkMode ? "bg-white/10 text-slate-300" : "bg-slate-200 text-slate-700"}`}>
-                                    {gap.type}
-                                  </span>
-                                  {gap.preliminary && (
-                                    <span className="text-[10px] px-2 py-0.5 rounded bg-yellow-500/15 text-yellow-400">
-                                      PRELIMINARY
-                                    </span>
-                                  )}
-                                </div>
-                                <p className={`text-[11px] leading-relaxed mb-1 ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>
-                                  {gap.description}
-                                </p>
-                                <div className={`grid grid-cols-1 md:grid-cols-3 gap-1.5 text-[10px] ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>
-                                  <span><strong>Spec:</strong> {gap.spec_target}</span>
-                                  <span><strong>Action:</strong> {gap.recommended_action}</span>
-                                  <span><strong>Intent:</strong> {gap.intent}</span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
                       )}
                       {llmWarnings.length > 0 && (
                         <div className={`rounded-xl border p-3 space-y-2 ${isDarkMode ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-100" : "bg-yellow-50 border-yellow-200 text-yellow-900"}`}>
@@ -694,81 +986,148 @@ export default function TaskApprovalPanel() {
                           ))}
                         </div>
                       )}
-                      {task.status === "pending_approval" && isPM && (
-                        <div className="space-y-1.5">
-                          <label className={`text-[11px] font-bold uppercase tracking-wider ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-                            PM Decision Reason
-                          </label>
-                          <textarea
-                            value={decisionReasons[task.id] || ""}
-                            onChange={(event) => setDecisionReasons((prev) => ({ ...prev, [task.id]: event.target.value }))}
-                            rows={2}
-                            placeholder="승인 또는 거절 사유를 입력하세요."
-                            className={`w-full px-3 py-2 rounded-xl text-xs border outline-none resize-none ${isDarkMode ? "bg-white/5 border-white/10 text-white placeholder:text-slate-500" : "bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400"}`}
-                          />
-                        </div>
-                      )}
-                      {(taskResult.approval_status || taskResult.message || statusCheck.status || docSync.action || prComment.status || saReviewTask.task_id) && (
-                        <div className={`rounded-xl border p-3 space-y-2 text-[11px] ${isDarkMode ? "bg-white/5 border-white/10 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"}`}>
-                          <div className="font-bold uppercase tracking-wider opacity-70">Decision Result</div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                            {taskResult.approval_status && <span><strong>Decision:</strong> {taskResult.approval_status}</span>}
-                            {statusCheck.status && <span><strong>Status Check:</strong> {statusCheck.status}</span>}
-                            {docSync.action && <span><strong>Doc Sync:</strong> {docSync.action}</span>}
-                            {prComment.status && <span><strong>PR Comment:</strong> {prComment.status}</span>}
-                            {typeof ragMetadata.stored !== "undefined" && <span><strong>RAG Stored:</strong> {String(ragMetadata.stored)}</span>}
-                            {typeof codeChunkUpsert.stored_count !== "undefined" && <span><strong>Code Chunks:</strong> {codeChunkUpsert.stored_count}</span>}
-                            {saReviewTask.task_id && <span><strong>SA Review:</strong> {saReviewTask.task_id}</span>}
-                          </div>
-                          {taskResult.message && <p className="leading-relaxed opacity-80">{taskResult.message}</p>}
-                          {docSync.message && <p className="leading-relaxed opacity-80"><strong>Doc Sync Message:</strong> {docSync.message}</p>}
-                          {statusCheck.error && <p className="leading-relaxed text-red-400"><strong>Status Error:</strong> {statusCheck.error}</p>}
-                          {prComment.error && <p className="leading-relaxed text-red-400"><strong>PR Comment Error:</strong> {prComment.error}</p>}
+                      {normalizedGapReport.length > 0 && (
+                        <div className="space-y-1.5 pt-1">
+                          <p className="text-[11px] font-bold opacity-50 uppercase tracking-wide">Gap Report Details</p>
+                          {normalizedGapReport.map((gap) => (
+                            <div key={gap.gap_id} className={`rounded-lg p-2 text-xs space-y-0.5 ${isDarkMode ? "bg-white/5" : "bg-slate-50"}`}>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-mono font-bold opacity-60">{gap.gap_id}</span>
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                  gap.severity === "HIGH" ? "bg-red-500/20 text-red-400" :
+                                  gap.severity === "MEDIUM" ? "bg-orange-500/20 text-orange-400" :
+                                  "bg-slate-500/20 text-slate-400"
+                                }`}>{gap.severity}</span>
+                                <span className="opacity-60">{gap.type}</span>
+                                {gap.preliminary && <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-400">preliminary</span>}
+                              </div>
+                              <p className="opacity-80">{gap.description}</p>
+                              {gap.recommended_action !== "-" && (
+                                <p className="opacity-60"><span className="font-semibold">권장:</span> {gap.recommended_action}</p>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
                   )}
 
-                  {isPM && task.status === "pending_approval" && (
+                  {/* PM 편집: unassigned 상태에서만 (rejected는 해당 패널에서 처리) */}
+                  {isPM && task.status === "unassigned" && editingId !== task.id && (
                     <div className="flex gap-2 pt-1">
-                      {isDevGapApproval ? (
-                        <>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); startEdit(task); }}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${base}`}
+                      >
+                        <Pencil size={12} /> 편집
+                      </button>
+                    </div>
+                  )}
+
+                  {/* 일반 태스크: 담당자가 수락/거절 */}
+                  {!isDevGapApproval && isMyTask && task.status === "pending_approval" && (
+                    rejectingId === task.id ? (
+                      <div className={`pt-2 space-y-2 p-3 rounded-xl border ${isDarkMode ? "bg-red-500/5 border-red-500/20" : "bg-red-50 border-red-200"}`}>
+                        <p className="text-xs font-bold text-red-400">거절 사유를 입력하세요</p>
+                        <textarea
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder="거절 이유를 작성해주세요 (PM이 확인합니다)"
+                          rows={2}
+                          className={`w-full px-3 py-2 rounded-lg text-xs border outline-none resize-none ${isDarkMode ? "bg-white/5 border-white/10 text-white placeholder:text-slate-500" : "bg-white border-slate-200 text-slate-800"}`}
+                        />
+                        <div className="flex gap-2">
                           <button
-                            onClick={() => handleDevGapDecision(
-                              task.id,
-                              "approve",
-                              getDecisionReason(task.id, "PM approved this Dev GAP as an intentional implementation change."),
-                            )}
-                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/10 transition-all"
+                            onClick={() => handleRejectWithReason(task.id)}
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-500 hover:bg-red-400 text-white transition-all"
                           >
-                            <Check size={12} /> 의도된 변경 승인
+                            <X size={12} /> 거절 확인
                           </button>
                           <button
-                            onClick={() => handleDevGapDecision(
-                              task.id,
-                              "reject",
-                              getDecisionReason(task.id, "PM rejected this Dev GAP as an unintended implementation change."),
-                            )}
-                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all"
+                            onClick={() => { setRejectingId(null); setRejectReason(""); }}
+                            className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${base}`}
                           >
-                            <X size={12} /> 비의도 변경 거절
+                            취소
                           </button>
-                        </>
-                      ) : (
-                        <>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          onClick={() => handleAction(task.id, "in_progress")}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/10 transition-all"
+                        >
+                          <Check size={12} /> 수락
+                        </button>
+                        <button
+                          onClick={() => { setRejectingId(task.id); setRejectReason(""); }}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all"
+                        >
+                          <X size={12} /> 거절
+                        </button>
+                      </div>
+                    )
+                  )}
+
+                  {/* Dev GAP 태스크: PM이 승인/거절 */}
+                  {isDevGapApproval && isPM && task.status === "pending_approval" && (
+                    rejectingId === task.id ? (
+                      <div className={`pt-2 space-y-2 p-3 rounded-xl border ${isDarkMode ? "bg-red-500/5 border-red-500/20" : "bg-red-50 border-red-200"}`}>
+                        <p className="text-xs font-bold text-red-400">거절 사유를 입력하세요</p>
+                        <textarea
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder="거절 이유를 작성해주세요"
+                          rows={2}
+                          className={`w-full px-3 py-2 rounded-lg text-xs border outline-none resize-none ${isDarkMode ? "bg-white/5 border-white/10 text-white placeholder:text-slate-500" : "bg-white border-slate-200 text-slate-800"}`}
+                        />
+                        <div className="flex gap-2">
                           <button
-                            onClick={() => handleAction(task.id, "in_progress")}
-                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/10 transition-all"
+                            onClick={() => handleDevGapDecision(task.id, "reject", rejectReason)}
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-500 hover:bg-red-400 text-white transition-all"
                           >
-                            <Check size={12} /> 승인
+                            <X size={12} /> 거절 확인
                           </button>
                           <button
-                            onClick={() => handleAction(task.id, "rejected")}
-                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all"
+                            onClick={() => { setRejectingId(null); setRejectReason(""); }}
+                            className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${base}`}
                           >
-                            <X size={12} /> 거절
+                            취소
                           </button>
-                        </>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          onClick={() => handleDevGapDecision(task.id, "approve", getDecisionReason(task.id))}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/10 transition-all"
+                        >
+                          <Check size={12} /> 승인
+                        </button>
+                        <button
+                          onClick={() => { setRejectingId(task.id); setRejectReason(""); }}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all"
+                        >
+                          <X size={12} /> 거절
+                        </button>
+                      </div>
+                    )
+                  )}
+                  {/* Dev GAP 결정 결과 표시 */}
+                  {isDevGapApproval && (taskResult.approval_status || payload.approval_status) && task.status !== "pending_approval" && (
+                    <div className={`p-3 rounded-xl border text-xs space-y-1 ${
+                      (taskResult.approval_status || payload.approval_status) === "approved"
+                        ? isDarkMode ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-300" : "bg-emerald-50 border-emerald-200 text-emerald-700"
+                        : isDarkMode ? "bg-red-500/10 border-red-500/20 text-red-300" : "bg-red-50 border-red-200 text-red-700"
+                    }`}>
+                      <p className="font-bold">
+                        {(taskResult.approval_status || payload.approval_status) === "approved" ? "✓ 승인됨" : "✗ 거절됨"}
+                        {(taskResult.approved_by || payload.approved_by) && (
+                          <span className="font-normal opacity-70 ml-2">by {taskResult.approved_by || payload.approved_by}</span>
+                        )}
+                      </p>
+                      {(taskResult.rejection_reason || payload.rejection_reason) && (
+                        <p className="opacity-80">사유: {taskResult.rejection_reason || payload.rejection_reason}</p>
                       )}
                     </div>
                   )}
@@ -782,6 +1141,69 @@ export default function TaskApprovalPanel() {
                       >
                         <GitPullRequest size={12} /> PR 제출
                       </button>
+                    </div>
+                  )}
+
+                  {/* PM: rejected 태스크 처리 옵션 */}
+                  {isPM && !isDevGapApproval && task.status === "rejected" && (
+                    <div className={`p-3 rounded-xl border space-y-2 ${isDarkMode ? "bg-orange-500/5 border-orange-500/20" : "bg-orange-50 border-orange-200"}`}>
+                      {task.result && (
+                        <div className="text-xs text-orange-400 font-semibold">
+                          거절 사유: <span className="font-normal opacity-80">{task.result}</span>
+                        </div>
+                      )}
+                      <p className="text-xs font-bold opacity-60">이 태스크를 어떻게 처리할까요?</p>
+                      {reassignId === task.id ? (
+                        <div className="space-y-2">
+                          <select
+                            value={reassignTarget}
+                            onChange={(e) => setReassignTarget(e.target.value)}
+                            style={{ colorScheme: isDarkMode ? "dark" : "light" }}
+                            className={`w-full px-3 py-2 rounded-lg text-xs font-semibold border outline-none ${isDarkMode ? "bg-slate-800 border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-800"}`}
+                          >
+                            <option value="">담당자 선택</option>
+                            {teamMembers.filter((m) => m.role !== "pm" && m.name !== task.assignee).map((m) => (
+                              <option key={m.id} value={m.name}>{m.name} — {m.role}</option>
+                            ))}
+                          </select>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleReassign(task.id)}
+                              disabled={!reassignTarget}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white transition-all disabled:opacity-40"
+                            >
+                              <UserCheck size={12} /> 배정
+                            </button>
+                            <button
+                              onClick={() => { setReassignId(null); setReassignTarget(""); }}
+                              className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${base}`}
+                            >
+                              취소
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => handleReturnToUnassigned(task.id)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${base}`}
+                          >
+                            <RotateCcw size={12} /> 미할당으로
+                          </button>
+                          <button
+                            onClick={() => startEdit(task)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${base}`}
+                          >
+                            <Pencil size={12} /> 내용 수정
+                          </button>
+                          <button
+                            onClick={() => { setReassignId(task.id); setReassignTarget(""); }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white transition-all"
+                          >
+                            <UserCheck size={12} /> 다른 팀원에게
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -800,8 +1222,5 @@ export default function TaskApprovalPanel() {
               )}
             </div>
           );
-        })}
-      </div>
-    </div>
-  );
+  }
 }
