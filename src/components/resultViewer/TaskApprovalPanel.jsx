@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { serverRequest } from "../../api/serverClient";
 import useAppStore from "../../store/useAppStore";
 import {
   ClipboardList, Check, X, Clock, Loader2, RefreshCw,
@@ -116,15 +117,14 @@ export default function TaskApprovalPanel() {
   const [reassignTarget, setReassignTarget] = useState("");
 
   const fetchTeamMembers = useCallback(async () => {
-    if (!authToken) return;
+    if (!authToken || !currentUser?.team_id) return;
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/teams/me/members`, {
+      const data = await serverRequest(`/auth/teams/${currentUser.team_id}/members`, {
         headers: { Authorization: `Bearer ${authToken}` },
       });
-      const data = await res.json();
       setTeamMembers(data.members || []);
     } catch (_) {}
-  }, [port, authToken]);
+  }, [authToken, currentUser?.team_id]);
 
   useEffect(() => { fetchTeamMembers(); }, [fetchTeamMembers]);
 

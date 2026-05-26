@@ -431,6 +431,230 @@ async def list_github_repos(user: User = Depends(get_current_user)):
         return {"status": "scope_error", "error": str(e)}
 
 
+@router.get("/github/branches")
+async def list_github_branches(
+    owner: str,
+    repo: str,
+    user: User = Depends(get_current_user),
+):
+    """GitHub OAuth 토큰으로 브랜치 목록 반환."""
+    if not user.github_oauth_token:
+        raise HTTPException(status_code=400, detail="GitHub 연결이 필요합니다.")
+    try:
+        headers = {
+            "Authorization": f"Bearer {user.github_oauth_token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Navigator-Server/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        with httpx.Client(timeout=15.0) as c:
+            resp = c.get(
+                f"https://api.github.com/repos/{owner}/{repo}/branches",
+                headers=headers,
+                params={"per_page": 100},
+            )
+            resp.raise_for_status()
+            branches = [{"name": b["name"], "protected": b.get("protected", False)} for b in resp.json()]
+        return {"status": "ok", "data": branches}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/github/token")
+async def get_github_token(user: User = Depends(get_current_user)):
+    """로컬 백엔드가 GitHub API 호출에 사용할 OAuth 토큰 반환."""
+    if not user.github_oauth_token:
+        raise HTTPException(status_code=404, detail="GitHub 연결이 필요합니다.")
+    return {"github_oauth_token": user.github_oauth_token}
+
+
+@router.get("/github/pulls")
+async def list_github_pulls(
+    owner: str,
+    repo: str,
+    state: str = "open",
+    limit: int = 30,
+    user: User = Depends(get_current_user),
+):
+    """GitHub OAuth 토큰으로 PR 목록 반환."""
+    if not user.github_oauth_token:
+        raise HTTPException(status_code=400, detail="GitHub 연결이 필요합니다.")
+    try:
+        headers = {
+            "Authorization": f"Bearer {user.github_oauth_token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Navigator-Server/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        with httpx.Client(timeout=15.0) as c:
+            resp = c.get(
+                f"https://api.github.com/repos/{owner}/{repo}/pulls",
+                headers=headers,
+                params={"state": state, "per_page": min(limit, 100)},
+            )
+            resp.raise_for_status()
+            pulls = [
+                {
+                    "number": p["number"],
+                    "title": p["title"],
+                    "state": p["state"],
+                    "user": p["user"]["login"],
+                    "branch": p["head"]["ref"],
+                    "base_branch": p["base"]["ref"],
+                    "head_sha": p["head"]["sha"],
+                    "created_at": p.get("created_at", ""),
+                    "updated_at": p.get("updated_at", ""),
+                    "html_url": p.get("html_url", ""),
+                }
+                for p in resp.json()
+            ]
+        return {"status": "ok", "data": pulls}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+def _analyze_commits(commits: list) -> dict:
+    """커밋 목록을 분석해 analytics dict 반환 (commit_analyzer.py 이식)."""
+    import re
+    from collections import Counter
+
+    if not commits:
+        return {
+            "total_commits": 0, "by_author": {}, "by_date": {},
+            "top_keywords": [], "recent_commits": [], "activity_trend": "stable",
+        }
+
+    by_author: Counter = Counter()
+    by_date: Counter = Counter()
+    all_words: Counter = Counter()
+    recent = []
+
+    stop_words = {"the", "add", "fix", "feat", "update", "merge", "and", "for", "with", "this"}
+
+    for c in commits:
+        author = (c.get("commit", {}).get("author") or {}).get("name", "unknown")
+        date_str = (c.get("commit", {}).get("author") or {}).get("date", "")
+        message = (c.get("commit") or {}).get("message", "")
+        sha = c.get("sha", "")
+
+        by_author[author] += 1
+        date_key = date_str[:10] if date_str else "unknown"
+        by_date[date_key] += 1
+
+        words = re.findall(r"[a-zA-Z가-힣]{3,}", message.lower())
+        for w in words:
+            if w not in stop_words:
+                all_words[w] += 1
+
+        recent.append({"sha": sha[:7], "message": message[:80], "author": author, "date": date_key})
+
+    sorted_dates = sorted(by_date.keys())
+    half = len(sorted_dates) // 2
+    if half > 0:
+        first_half = sum(by_date[d] for d in sorted_dates[:half])
+        second_half = sum(by_date[d] for d in sorted_dates[half:])
+        trend = "increasing" if second_half > first_half * 1.3 else ("decreasing" if second_half < first_half * 0.7 else "stable")
+    else:
+        trend = "stable"
+
+    return {
+        "total_commits": len(commits),
+        "by_author": dict(by_author.most_common(10)),
+        "by_date": dict(sorted(by_date.items())),
+        "top_keywords": all_words.most_common(10),
+        "recent_commits": recent[:10],
+        "activity_trend": trend,
+    }
+
+
+@router.get("/github/analytics")
+async def github_analytics(
+    owner: str,
+    repo: str,
+    branch: str = "main",
+    limit: int = 100,
+    user: User = Depends(get_current_user),
+):
+    """GitHub OAuth 토큰으로 커밋 분석 및 기여자 목록 반환."""
+    if not user.github_oauth_token:
+        raise HTTPException(status_code=400, detail="GitHub 연결이 필요합니다.")
+    try:
+        headers = {
+            "Authorization": f"Bearer {user.github_oauth_token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Navigator-Server/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        with httpx.Client(timeout=20.0) as c:
+            commit_resp = c.get(
+                f"https://api.github.com/repos/{owner}/{repo}/commits",
+                headers=headers,
+                params={"sha": branch, "per_page": min(limit, 100)},
+            )
+            commit_resp.raise_for_status()
+            raw_commits = commit_resp.json()
+
+            contrib_resp = c.get(
+                f"https://api.github.com/repos/{owner}/{repo}/contributors",
+                headers=headers,
+                params={"per_page": 50},
+            )
+            contributors = []
+            if contrib_resp.status_code == 200:
+                contributors = [
+                    {"login": u["login"], "contributions": u["contributions"], "avatar_url": u.get("avatar_url", "")}
+                    for u in contrib_resp.json()
+                ]
+
+        analytics = _analyze_commits(raw_commits)
+        analytics["contributors"] = contributors
+        return {"status": "ok", "data": analytics}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/github/issues")
+async def list_github_issues(
+    owner: str,
+    repo: str,
+    state: str = "open",
+    user: User = Depends(get_current_user),
+):
+    """GitHub OAuth 토큰으로 이슈 목록 반환."""
+    if not user.github_oauth_token:
+        raise HTTPException(status_code=400, detail="GitHub 연결이 필요합니다.")
+    try:
+        headers = {
+            "Authorization": f"Bearer {user.github_oauth_token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Navigator-Server/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        with httpx.Client(timeout=15.0) as c:
+            resp = c.get(
+                f"https://api.github.com/repos/{owner}/{repo}/issues",
+                headers=headers,
+                params={"state": state, "per_page": 50},
+            )
+            resp.raise_for_status()
+            issues = [
+                {
+                    "number": i["number"],
+                    "title": i["title"],
+                    "state": i["state"],
+                    "user": i["user"]["login"],
+                    "labels": [lb["name"] for lb in i.get("labels", [])],
+                    "created_at": i.get("created_at", ""),
+                    "html_url": i.get("html_url", ""),
+                }
+                for i in resp.json()
+                if "pull_request" not in i  # PR은 제외
+            ]
+        return {"status": "ok", "data": issues}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
 @router.post("/github/disconnect")
 async def github_disconnect(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     user.github_id = None

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import useAppStore from "../../store/useAppStore";
+import { serverRequest } from "../../api/serverClient";
 import {
   Sparkles, Layers, ScanSearch, GitBranch, Search,
   Loader2, ArrowLeft, X,
@@ -49,8 +50,8 @@ export default function ModeBridge() {
   const setGithubSettings = useAppStore((s) => s.setGithubSettings);
   const setGithubBranch = useAppStore((s) => s.setGithubBranch);
   const setProjectFolder = useAppStore((s) => s.setProjectFolder);
-  const backendPort = useAppStore((s) => s.backendPort);
   const authToken = useAppStore((s) => s.authToken);
+  const currentUser = useAppStore((s) => s.currentUser);
 
   const [step, setStep] = useState(1);
   const [pickedMode, setPickedMode] = useState(null);
@@ -85,11 +86,9 @@ export default function ModeBridge() {
     setRepoLoading(true);
     setRepoScopeError(false);
     try {
-      const port = backendPort || 8765;
-      const res = await fetch(`http://127.0.0.1:${port}/auth/github/repos`, {
+      const data = await serverRequest("/auth/github/repos", {
         headers: { Authorization: `Bearer ${authToken}` },
       });
-      const data = await res.json();
       if (data.status === "ok") {
         setRepoList(data.repos);
       } else {
@@ -105,13 +104,10 @@ export default function ModeBridge() {
   const loadBranches = async (owner, repo) => {
     setBranchLoading(true);
     try {
-      const port = backendPort || 8765;
-      const res = await fetch(`http://127.0.0.1:${port}/api/github/branches`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
-        body: JSON.stringify({ owner, repo }),
-      });
-      const data = await res.json();
+      const data = await serverRequest(
+        `/auth/github/branches?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`,
+        { headers: { Authorization: `Bearer ${authToken}` } },
+      );
       setBranchList(data.data || []);
     } catch {
       setBranchList([]);
@@ -126,14 +122,15 @@ export default function ModeBridge() {
     setBranchList([]);
     setGithubSettings(githubToken, repo.owner, repo.name);
     loadBranches(repo.owner, repo.name);
-    try {
-      const port = backendPort || 8765;
-      await fetch(`http://127.0.0.1:${port}/api/teams/me/github`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
-        body: JSON.stringify({ github_repo: repo.full_name }),
-      });
-    } catch { /* ignore */ }
+    if (currentUser?.team_id) {
+      try {
+        await serverRequest(`/auth/teams/${currentUser.team_id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+          body: JSON.stringify({ github_repo: repo.full_name }),
+        });
+      } catch { /* ignore */ }
+    }
   };
 
   // 모드 진입 후 자동으로 레포 목록 시도 (사용자 클릭 줄이기 위해)

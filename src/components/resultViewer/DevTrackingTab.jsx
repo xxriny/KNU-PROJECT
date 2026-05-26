@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -13,6 +13,7 @@ import {
   XCircle,
 } from "lucide-react";
 import useAppStore from "../../store/useAppStore";
+import { serverRequest } from "../../api/serverClient";
 
 const DEFAULT_FORM = {
   owner: "",
@@ -74,6 +75,19 @@ export default function DevTrackingTab() {
   const setDevTrackingAnalyses = useAppStore((state) => state.setDevTrackingAnalyses);
 
   const port = backendPort || 8000;
+
+  const ghTokenRef = useRef(null);
+  const getGhToken = async () => {
+    if (ghTokenRef.current) return ghTokenRef.current;
+    try {
+      const data = await serverRequest("/auth/github/token", {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      ghTokenRef.current = data.github_oauth_token;
+    } catch (_) {}
+    return ghTokenRef.current || "";
+  };
+
   const [form, setForm] = useState(DEFAULT_FORM);
   const [connectedRepo, setConnectedRepo] = useState(null);
   const [pullRequests, setPullRequests] = useState([]);
@@ -150,15 +164,14 @@ export default function DevTrackingTab() {
   }, [applyConnectedRepo, githubBranch, githubOwner, githubRepo]);
 
   useEffect(() => {
-    if ((githubOwner && githubRepo) || !authToken) return;
+    if ((githubOwner && githubRepo) || !authToken || !currentUser?.team_id) return;
     let cancelled = false;
     const fetchTeamRepo = async () => {
       try {
-        const response = await fetch(`http://127.0.0.1:${port}/api/teams/me`, {
+        const json = await serverRequest(`/auth/teams/${currentUser.team_id}`, {
           headers: { Authorization: `Bearer ${authToken}` },
         });
-        const json = await response.json();
-        const fullName = json?.team?.github_repo || "";
+        const fullName = json?.github_repo || "";
         const [owner, repo] = fullName.split("/");
         if (!cancelled && owner && repo) {
           const repoConfig = { owner, repo, branch: "main", source: "team" };
@@ -169,7 +182,7 @@ export default function DevTrackingTab() {
     };
     fetchTeamRepo();
     return () => { cancelled = true; };
-  }, [applyConnectedRepo, authToken, githubOwner, githubRepo, port]);
+  }, [applyConnectedRepo, authToken, currentUser?.team_id, githubOwner, githubRepo]);
 
   const openAnalysisDetail = async (analysis) => {
     setDetailLoadingId(analysis.id);
@@ -282,14 +295,10 @@ export default function DevTrackingTab() {
     setBranchLoading(true);
     setBranchError("");
     try {
-      const headers = { "Content-Type": "application/json" };
-      if (authToken) headers.Authorization = `Bearer ${authToken}`;
-      const response = await fetch(`http://127.0.0.1:${port}/api/github/branches`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ owner, repo, branch: form.base_branch || "main", limit: 100 }),
-      });
-      const json = await response.json();
+      const json = await serverRequest(
+        `/auth/github/branches?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`,
+        { headers: { Authorization: `Bearer ${authToken}` } },
+      );
       if (json.status !== "ok") {
         setBranchError(json.error || "브랜치 목록 조회에 실패했습니다.");
         setBranches([]);
@@ -302,7 +311,7 @@ export default function DevTrackingTab() {
     } finally {
       setBranchLoading(false);
     }
-  }, [authToken, connectedRepo, form.base_branch, form.owner, form.repo, port]);
+  }, [authToken, connectedRepo, form.owner, form.repo]);
 
   const fetchPullRequests = useCallback(async () => {
     const owner = (connectedRepo?.owner || form.owner || "").trim();
@@ -314,14 +323,10 @@ export default function DevTrackingTab() {
     setPullLoading(true);
     setPullError("");
     try {
-      const headers = { "Content-Type": "application/json" };
-      if (authToken) headers.Authorization = `Bearer ${authToken}`;
-      const response = await fetch(`http://127.0.0.1:${port}/api/github/pulls`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ owner, repo, state: "open", limit: 30 }),
-      });
-      const json = await response.json();
+      const json = await serverRequest(
+        `/auth/github/pulls?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&state=open&limit=30`,
+        { headers: { Authorization: `Bearer ${authToken}` } },
+      );
       if (json.status !== "ok") {
         setPullError(json.error || "PR 목록 조회에 실패했습니다.");
         setPullRequests([]);
@@ -334,7 +339,7 @@ export default function DevTrackingTab() {
     } finally {
       setPullLoading(false);
     }
-  }, [authToken, connectedRepo, form.owner, form.repo, port]);
+  }, [authToken, connectedRepo, form.owner, form.repo]);
 
   useEffect(() => {
     if (!connectedRepo?.owner || !connectedRepo?.repo || !authToken) return;

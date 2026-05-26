@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import useAppStore from "../../store/useAppStore";
+import { serverRequest } from "../../api/serverClient";
 import {
   LogIn, UserPlus, Eye, EyeOff, Loader2, Github,
   AlertCircle, Settings, ExternalLink, ChevronUp, ChevronDown, CheckCircle2,
@@ -147,12 +148,11 @@ export default function LoginScreen({ isFirstRun = false }) {
           
       if (inviteCode) {
         try {
-          const port = useAppStore.getState().backendPort || 8000;
           const token = useAppStore.getState().authToken;
           if (token) {
-            await fetch(`http://127.0.0.1:${port}/auth/invites/${inviteCode}/join`, {
+            await serverRequest(`/auth/invites/${inviteCode}/join`, {
               method: "POST",
-              headers: { Authorization: `Bearer ${token}` }
+              headers: { Authorization: `Bearer ${token}` },
             });
             window.history.replaceState({}, document.title, window.location.pathname);
             await checkAuthStatus();

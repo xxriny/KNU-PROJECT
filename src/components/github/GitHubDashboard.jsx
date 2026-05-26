@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import useAppStore from "../../store/useAppStore";
+import { serverRequest } from "../../api/serverClient";
 import {
   Github, GitCommit, Users, AlertCircle, BookOpen,
   Loader2, RefreshCw, TrendingUp, TrendingDown, Minus,
@@ -25,7 +26,7 @@ export default function GitHubDashboard() {
   const githubRepo   = useAppStore((s) => s.githubRepo);
   const githubBranch = useAppStore((s) => s.githubBranch) || "main";
   const resultData  = useAppStore((s) => s.resultData);
-  const backendPort = useAppStore((s) => s.backendPort);
+  const backendPort = useAppStore((s) => s.backendPort);  // publish용 로컬 포트
   const authToken   = useAppStore((s) => s.authToken);
   const currentUser = useAppStore((s) => s.currentUser);
   const apiKey      = useAppStore((s) => s.apiKey);
@@ -42,8 +43,6 @@ export default function GitHubDashboard() {
   const [wikiDisabled, setWikiDisabled] = useState(false);
 
   const port = backendPort || 8000;
-  // githubToken은 DB에 저장된 GitHub OAuth 토큰 (backend가 관리)
-  // 클라이언트에서 직접 githubToken 없이 현재 사용자의 github_id로 연결 여부 판단
   const isGithubConnected = !!currentUser?.github_id;
   const hasRepoConfig = githubOwner && githubRepo;
   const hasConfig = isGithubConnected && hasRepoConfig;
@@ -52,12 +51,10 @@ export default function GitHubDashboard() {
   const fetchAnalytics = async () => {
     setLoading(true); setError("");
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/github/analytics`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
-        body: JSON.stringify({ owner: githubOwner, repo: githubRepo, branch: githubBranch }),
-      });
-      const json = await res.json();
+      const json = await serverRequest(
+        `/auth/github/analytics?owner=${encodeURIComponent(githubOwner)}&repo=${encodeURIComponent(githubRepo)}&branch=${encodeURIComponent(githubBranch)}&limit=100`,
+        { headers: authHeader },
+      );
       if (json.status === "ok") setAnalytics(json.data);
       else setError(json.error || "분석 실패");
     } catch (e) { setError("연결 실패: " + e.message); }
@@ -67,12 +64,10 @@ export default function GitHubDashboard() {
   const fetchIssues = async () => {
     setLoading(true); setError("");
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/github/issues`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
-        body: JSON.stringify({ owner: githubOwner, repo: githubRepo }),
-      });
-      const json = await res.json();
+      const json = await serverRequest(
+        `/auth/github/issues?owner=${encodeURIComponent(githubOwner)}&repo=${encodeURIComponent(githubRepo)}&state=open`,
+        { headers: authHeader },
+      );
       if (json.status === "ok") setIssues(json.data);
       else setError(json.error || "조회 실패");
     } catch (e) { setError("연결 실패: " + e.message); }
@@ -104,6 +99,13 @@ export default function GitHubDashboard() {
     setPublishStatus("loading");
     setWikiDisabled(false);
     try {
+      // Cloud Run에서 GitHub 토큰 조회 후 로컬 publish 엔드포인트에 전달
+      let ghToken = "";
+      try {
+        const td = await serverRequest("/auth/github/token", { headers: authHeader });
+        ghToken = td.github_oauth_token || "";
+      } catch (_) {}
+
       const res = await fetch(`http://127.0.0.1:${port}/api/github/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeader },
@@ -115,6 +117,7 @@ export default function GitHubDashboard() {
           publish_mode: publishMode,
           api_key: apiKey || "",
           model: model || "gemini-2.0-flash-lite",
+          token: ghToken,
         }),
       });
       const json = await res.json();

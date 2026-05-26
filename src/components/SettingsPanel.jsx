@@ -55,42 +55,39 @@ export default function SettingsPanel({ onShowPricing }) {
   }, [githubOwner, githubRepo, authToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!backendPort || !authToken) return;
-    fetch(`http://127.0.0.1:${backendPort}/api/teams/me`, {
+    if (!authToken || !currentUser?.team_id) return;
+    serverRequest(`/auth/teams/${currentUser.team_id}`, {
       headers: { Authorization: `Bearer ${authToken}` },
     })
-      .then((r) => r.json())
       .then((d) => {
         setOauthConfig((p) => ({
           ...p,
-          client_id: d.team?.github_client_id || "",
-          github_repo: d.team?.github_repo || "",
+          github_repo: d.github_repo || "",
         }));
-        if (d.team?.github_repo && githubToken) {
-          const parts = d.team.github_repo.split("/");
+        if (d.github_repo && githubToken) {
+          const parts = d.github_repo.split("/");
           if (parts.length === 2) {
-             setGithubSettings(githubToken, parts[0], parts[1]);
+            setGithubSettings(githubToken, parts[0], parts[1]);
           }
         }
       })
       .catch(() => {});
-  }, [backendPort, authToken]);
+  }, [authToken, currentUser?.team_id]);
 
   const saveOauthConfig = async () => {
+    if (!currentUser?.team_id) return;
     setOauthLoading(true);
     setOauthStatus(null);
     try {
-      const port = backendPort || 8000;
       const payload = { github_repo: oauthConfig.github_repo };
-      if (oauthConfig.client_id) payload.client_id = oauthConfig.client_id;
-      if (oauthConfig.client_secret) payload.client_secret = oauthConfig.client_secret;
+      if (oauthConfig.client_id) payload.github_client_id = oauthConfig.client_id;
+      if (oauthConfig.client_secret) payload.github_client_secret = oauthConfig.client_secret;
 
-      const res = await fetch(`http://127.0.0.1:${port}/api/teams/me/github`, {
+      const json = await serverRequest(`/auth/teams/${currentUser.team_id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
         body: JSON.stringify(payload),
       });
-      const json = await res.json();
       if (json.status === "ok") setOauthStatus("ok");
       else throw new Error(json.detail || "저장 실패");
     } catch (e) {
@@ -140,12 +137,9 @@ export default function SettingsPanel({ onShowPricing }) {
     if (!owner || !repo || !authToken) return;
     setBranchLoading(true);
     try {
-      const res = await fetch(`http://127.0.0.1:${backendPort}/api/github/branches`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
-        body: JSON.stringify({ owner, repo }),
+      const data = await serverRequest(`/auth/github/branches?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`, {
+        headers: { Authorization: `Bearer ${authToken}` },
       });
-      const data = await res.json();
       if (data.status === "ok") setBranchList(data.data || []);
     } catch (_) {}
     finally { setBranchLoading(false); }
@@ -158,14 +152,15 @@ export default function SettingsPanel({ onShowPricing }) {
     setRepoSearch("");
     loadBranches(repo.owner, repo.name);
 
-    try {
-      const port = backendPort || 8000;
-      await fetch(`http://127.0.0.1:${port}/api/teams/me/github`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
-        body: JSON.stringify({ github_repo: repo.full_name }),
-      });
-    } catch (_) {}
+    if (currentUser?.team_id) {
+      try {
+        await serverRequest(`/auth/teams/${currentUser.team_id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+          body: JSON.stringify({ github_repo: repo.full_name }),
+        });
+      } catch (_) {}
+    }
   };
 
   const [deviceFlowData, setDeviceFlowData] = useState(null);
