@@ -86,6 +86,7 @@ def _fetch_key_from_server() -> str:
     server_url = os.environ.get("NAVIGATOR_SERVER_URL", _CLOUD_RUN_SERVER)
     jwt = active_jwt_token.get("")
     if not jwt:
+        logger.warning("[Gemini] JWT 없음 — Cloud Run 키 fetch 스킵")
         return ""
     try:
         req = urllib.request.Request(
@@ -94,8 +95,12 @@ def _fetch_key_from_server() -> str:
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read())
-            return data.get("api_key", "")
-    except Exception:
+            key = data.get("api_key", "")
+            if key:
+                logger.info("[Gemini] Cloud Run에서 키 fetch 성공")
+            return key
+    except Exception as e:
+        logger.warning(f"[Gemini] Cloud Run 키 fetch 실패: {e}")
         return ""
 
 

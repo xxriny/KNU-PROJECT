@@ -545,6 +545,7 @@ export const createPipelineSlice = (set, get) => ({
       api_key: apiKey || "",
       model: model || "gemini-3.1-flash-lite",
       session_id: get().currentSessionId || "",
+      auth_token: get().authToken,
     });
   },
 
