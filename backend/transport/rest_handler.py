@@ -519,6 +519,7 @@ async def apply_memos_endpoint(req: MemoApplyRequest):
 class AgileImpactRequest(BaseModel):
     change_description: str
     sa_data: dict
+    auth_token: str = ""
     api_key: str = ""
     model: str = DEFAULT_MODEL
     session_id: Optional[str] = None
@@ -535,6 +536,7 @@ class AgileImpactRequest(BaseModel):
 @rest_router.post("/api/agile/impact")
 async def agile_impact(req: AgileImpactRequest, shared_db: Session = Depends(get_shared_db)):
     """변경 영향 분석 (RAG + LLM 2-stage)."""
+    active_jwt_token.set(req.auth_token)
     if not req.change_description.strip():
         return {"status": "error", "error": "change_description이 비어있습니다."}
     try:
@@ -1103,6 +1105,7 @@ class DevTrackingRequest(BaseModel):
     actor: dict = Field(default_factory=dict)
     source_dir: Optional[str] = None
     github_token: Optional[str] = None
+    auth_token: str = ""
     api_key: str = ""
     model: str = DEFAULT_MODEL
     # author:xxrin
@@ -1562,6 +1565,7 @@ async def dev_tracking_pr_endpoint(
     shared_db: Session = Depends(get_shared_db),
 ):
     """PR 기반 Dev Tracking MVP 실행"""
+    active_jwt_token.set(req.auth_token)
     try:
         # author:xxrin
         # 이 endpoint는 분리된 dev_tracking service를 호출하는 어댑터 역할만 함
@@ -1888,6 +1892,7 @@ async def delete_task_endpoint(task_id: str):
 class GenerateTasksRequest(BaseModel):
     run_id: str
     team_id: str
+    auth_token: str = ""
     api_key: str = ""
     model: str = ""
     created_by: str = ""
@@ -1895,6 +1900,7 @@ class GenerateTasksRequest(BaseModel):
 
 class DistributeTasksRequest(BaseModel):
     team_id: str
+    auth_token: str = ""
     api_key: str = ""
     model: str = ""
     distributed_by: str = ""
@@ -1903,6 +1909,7 @@ class DistributeTasksRequest(BaseModel):
 @rest_router.post("/api/agile/generate-tasks")
 async def generate_tasks_endpoint(req: GenerateTasksRequest):
     """SA/PM 산출물 → unassigned 태스크 자동 생성 (파이프라인 완료 후 호출)."""
+    active_jwt_token.set(req.auth_token)
     try:
         from auth.database import SessionLocal
         from auth.models import AnalysisResult
@@ -1939,6 +1946,7 @@ async def generate_tasks_endpoint(req: GenerateTasksRequest):
 @rest_router.post("/api/agile/distribute-tasks")
 async def distribute_tasks_endpoint(req: DistributeTasksRequest):
     """unassigned 태스크를 팀 멤버에게 배분 (PM이 '배분' 버튼 클릭 시 호출)."""
+    active_jwt_token.set(req.auth_token)
     try:
         from pipeline.domain.agile.nodes.task_distributor import run_task_distributor
         from version import DEFAULT_MODEL

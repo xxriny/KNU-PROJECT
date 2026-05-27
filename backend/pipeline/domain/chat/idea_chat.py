@@ -41,6 +41,17 @@ class NoteToAddItem(BaseModel):
     )
 
 
+class FollowupItem(BaseModel):
+    question: str = Field(description="후속 질문 텍스트 (30자 이내)")
+    domain: str = Field(
+        default="general",
+        description=(
+            "이 질문을 가장 잘 답할 수 있는 역할 도메인. "
+            "backend | frontend | devops | pm | general 중 하나."
+        ),
+    )
+
+
 class IdeaChatOutput(BaseModel):
     reply: str = Field(description="사용자에게 보낼 한국어 응답 (마크다운 가능)")
     idea_ready: bool = Field(default=False, description="분석 시작 가능 여부")
@@ -50,12 +61,22 @@ class IdeaChatOutput(BaseModel):
         default_factory=list,
         description="사용자가 명시적으로 메모/노트/기능 추가를 요청했을 때만 채울 메모 목록"
     )
-    suggested_followups: List[str] = Field(
+    suggested_followups: List[FollowupItem] = Field(
         default_factory=list,
         description=(
-            "사용자가 다음에 던질 만한 구체적·논리적 후속 질문 4개. "
-            "방금 한 응답을 자연스럽게 이어가는 한국어 짧은 문장(40자 이내 권장). "
-            "이미 결정된 사실 재확인보다는 '아직 모르는 것·다음에 정해야 할 것'을 묻도록 한다."
+            "사용자가 다음에 클릭할 만한 한국어 후속 질문 정확히 4개 (FollowupItem 객체).\n"
+            "각 항목: {question: str, domain: 'backend'|'frontend'|'devops'|'pm'|'general'}\n"
+            "domain 선택 기준:\n"
+            "  pm       — 비즈니스·사용자·기획·우선순위 질문\n"
+            "  backend  — DB·API·서버·인증·성능 질문\n"
+            "  frontend — UI·UX·화면·컴포넌트·반응형 질문\n"
+            "  devops   — 배포·인프라·CI/CD·모니터링 질문\n"
+            "  general  — 위 어디에도 속하지 않는 경우\n"
+            "question 규칙:\n"
+            "  1) 4가지 각도(사용자/비즈니스, 기능/범위, 기술/구현, 다음 액션)에서 하나씩\n"
+            "  2) YES/NO 질문 금지 — '어떤·어떻게·왜·무엇을·누가·얼마나' 로 시작\n"
+            "  3) 이미 결정된 사항 재확인 금지\n"
+            "  4) 30자 이내"
         ),
     )
 
@@ -97,7 +118,23 @@ SYSTEM_PROMPT = """당신은 PM(프로젝트 매니저) AI 어시스턴트입니
 - idea_summary: idea_ready=true일 때 분석에 전달할 구체적 요약, 그 외엔 빈 문자열
 - suggested_mode: "create" (신규) | "update" (기능확장) | "reverse" (역공학)
 - notes_to_add: 메모(노트)로 저장할 항목 배열 (아래 규칙 참조)
-- suggested_followups: 사용자가 이 응답 다음에 자연스럽게 클릭할 만한 한국어 후속 질문 정확히 4개. 짧고 구체적이며 "아직 정해지지 않은 다음 단계"를 묻는 것이 좋다. 일반적인 잡담이나 이미 답한 내용을 다시 묻는 것은 금지. 예시: "주요 사용자 페르소나는?", "어떤 결제 수단을 지원할까?", "MVP 범위는 어디까지?", "기술 스택 후보 추천해줘".
+- suggested_followups: 사용자가 이 응답 다음에 자연스럽게 클릭할 한국어 후속 질문 정확히 4개.
+
+  ★ 질문 생성 전략 (매번 이 순서로 각도를 하나씩 커버한다):
+  ① [사용자/비즈니스] 타깃 사용자·수익 모델·KPI·경쟁 차별점
+  ② [기능/범위] MVP 경계·핵심 기능 우선순위·빠진 시나리오
+  ③ [기술/구현] 기술 스택·성능·보안·인프라·데이터 모델
+  ④ [다음 액션] 분석 시작 조건·레포 연결·팀 구성·일정
+
+  ★ 금지 사항:
+  - "~가 필요한가요?", "~를 포함할까요?" 같은 YES/NO 질문 절대 금지
+  - 이미 이번 대화에서 결정된 사항 재확인 금지
+  - "어떻게 생각하세요?" 같은 막연한 감상 질문 금지
+
+  ★ 형식: 각 질문은 30자 이내, "어떤/어떻게/왜/무엇을/누가/얼마나" 로 시작하는 개방형.
+  ★ 맥락: 대화 초반(1~2턴)은 ①② 비중↑, 후반(5턴+)은 ③④ 비중↑.
+  예시 (좋음): "핵심 타깃 사용자는 어떤 페르소나?", "MVP에서 제외할 기능은 무엇?", "어떤 DB 구조로 확장성을 확보할까?", "분석 시작할 레포가 있어?"
+  예시 (나쁨): "로그인 기능이 필요한가요?", "댓글 기능도 포함할까요?"
 
 진행 신호:
 - 사용자가 "분석 시작", "개발 시작", "이걸로 해줘" 등을 말하면 idea_ready=true.
@@ -231,7 +268,9 @@ def idea_chat_node(state: PipelineState) -> dict:
             notes_to_add = _normalize_notes_to_add(
                 [n.model_dump() for n in (out.notes_to_add or [])]
             )
-            suggested_followups = _normalize_followups(out.suggested_followups or [])
+            suggested_followups = _normalize_followups(
+                [f.model_dump() for f in (out.suggested_followups or [])]
+            )
 
         except Exception as struct_err:
             # 구조화 출력 실패 시 자유 형식 폴백
@@ -303,23 +342,37 @@ def idea_chat_node(state: PipelineState) -> dict:
         }
 
 
+_VALID_DOMAINS = {"backend", "frontend", "devops", "pm", "general"}
+
+
 def _normalize_followups(raw) -> list:
-    """후속 질문 리스트를 정규화: 문자열만, 빈/중복 제거, 최대 4개, 100자 컷."""
+    """후속 질문 리스트를 정규화.
+
+    입력: List[str] (하위 호환) 또는 List[dict {question, domain}]
+    출력: List[dict {question: str, domain: str}], 최대 4개
+    """
     if not isinstance(raw, list):
         return []
-    seen = set()
+    seen: set = set()
     out: list = []
     for item in raw:
-        if not isinstance(item, str):
+        if isinstance(item, str):
+            q, domain = item.strip(), "general"
+        elif isinstance(item, dict):
+            q = str(item.get("question") or item.get("text") or "").strip()
+            domain = str(item.get("domain") or "general").strip().lower()
+        else:
             continue
-        s = item.strip()
-        if not s:
+        if not q:
             continue
-        key = s.lower()
+        key = q.lower()
         if key in seen:
             continue
         seen.add(key)
-        out.append(s[:100])
+        out.append({
+            "question": q[:100],
+            "domain": domain if domain in _VALID_DOMAINS else "general",
+        })
         if len(out) >= 4:
             break
     return out

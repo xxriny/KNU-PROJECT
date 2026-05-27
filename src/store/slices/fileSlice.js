@@ -1,4 +1,5 @@
 import { fileService } from "../../api/services/fileService";
+import { platform } from "../../platform/index.js";
 
 export const createFileSlice = (set, get) => ({
   openFiles: [],
@@ -77,8 +78,7 @@ export const createFileSlice = (set, get) => ({
   },
 
   selectAndScanFolder: async () => {
-    if (!window.electronAPI?.selectFolder) return;
-    const folderPath = await window.electronAPI.selectFolder();
+    const folderPath = await platform.selectFolder();
     if (!folderPath) return;
     get().ensureProjectFolderAccess(folderPath);
   },

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import useAppStore from "../../store/useAppStore";
+import { platform } from "../../platform/index.js";
 import { serverRequest } from "../../api/serverClient";
 import {
   LogIn, UserPlus, Eye, EyeOff, Loader2, Github,
@@ -72,9 +73,7 @@ export default function LoginScreen({ isFirstRun = false }) {
       const interval = Math.max(data.interval || 5, 5);
       setDeviceState(DEVICE_WAITING);
       const uri = data.verification_uri || "https://github.com/login/device";
-      window.electronAPI?.openGithubAuth
-        ? window.electronAPI.openGithubAuth(uri)
-        : window.open(uri, "_blank");
+      platform.openExternal(uri);
 
       const schedulePoll = (sec, dc) => {
         pollRef.current = setTimeout(async () => {
@@ -107,10 +106,7 @@ export default function LoginScreen({ isFirstRun = false }) {
     }
   };
 
-  const openBrowser = () =>
-    window.electronAPI?.openGithubAuth
-      ? window.electronAPI.openGithubAuth(verificationUri)
-      : window.open(verificationUri, "_blank");
+  const openBrowser = () => platform.openExternal(verificationUri);
 
   const cancelDeviceFlow = () => {
     clearTimeout(pollRef.current); pollRef.current = null;

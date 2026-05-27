@@ -40,7 +40,7 @@ def get_db():
 
 def init_db() -> None:
     """앱 시작 시 테이블 생성 + 마이그레이션."""
-    from models import User, Team, Subscription, PublishedSnapshot, GeminiApiKey  # noqa: F401
+    from models import User, Team, Subscription, PublishedSnapshot, GeminiApiKey, DirectMessage  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _run_migrations()

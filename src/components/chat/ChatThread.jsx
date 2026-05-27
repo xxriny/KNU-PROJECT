@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   CheckCircle2, Undo2, RotateCcw, MessageCircleQuestion,
-  Zap, GitCompareArrows, Loader2, RefreshCw, AlertTriangle, X,
+  Zap, GitCompareArrows, Loader2, RefreshCw, AlertTriangle, X, Mail,
 } from "lucide-react";
 import useAppStore from "../../store/useAppStore";
 import ScrollArea from "../ui/ScrollArea";
 import ChatMessage from "./ChatMessage";
 import PipelineProgress from "../PipelineProgress";
+import ContactModal from "./ContactModal";
 
 export default function ChatThread({ onSync }) {
   const chatHistory = useAppStore((s) => s.chatHistory);
@@ -379,50 +380,104 @@ function parseMarkdownList(md) {
   return items;
 }
 
+/* ── 도메인 배지 색상 ─────────────────────────── */
+const DOMAIN_META = {
+  backend:  { label: "Backend",  color: "bg-violet-500/15 text-violet-400 border-violet-500/20" },
+  frontend: { label: "Frontend", color: "bg-cyan-500/15 text-cyan-400 border-cyan-500/20" },
+  devops:   { label: "DevOps",   color: "bg-orange-500/15 text-orange-400 border-orange-500/20" },
+  pm:       { label: "PM",       color: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20" },
+  general:  { label: "General",  color: "bg-slate-500/15 text-slate-400 border-slate-500/20" },
+};
+
 /* ── FollowupChips ────────────────────────────── */
 function FollowupChips({ items, isDarkMode, onPick }) {
+  const [contactTarget, setContactTarget] = useState(null);
+  const currentUser = useAppStore((s) => s.currentUser);
+  const isPm = currentUser?.role === "pm";
+
   return (
-    <div className="mt-8 ml-11 animate-fade-in">
-      {/* 타이틀 */}
-      <div className="flex items-center gap-2 mb-3">
-        <span className={`text-[14px] font-extrabold tracking-tight ${
-          isDarkMode ? "text-slate-300" : "text-slate-800"
+    <>
+      <div className="mt-8 ml-11 animate-fade-in">
+        {/* 타이틀 */}
+        <div className="flex items-center gap-2 mb-3">
+          <span className={`text-[14px] font-extrabold tracking-tight ${
+            isDarkMode ? "text-slate-300" : "text-slate-800"
+          }`}>
+            후속 조치
+          </span>
+        </div>
+
+        {/* 세로 리스트 */}
+        <div className={`flex flex-col border-t ${
+          isDarkMode ? "border-white/[0.06]" : "border-slate-100"
         }`}>
-          후속 조치
-        </span>
+          {items.map((item, idx) => {
+            const { question, domain = "general" } = typeof item === "string"
+              ? { question: item, domain: "general" }
+              : item;
+            const meta = DOMAIN_META[domain] || DOMAIN_META.general;
+
+            return (
+              <div
+                key={idx}
+                className={`w-full flex items-center gap-3 py-3 border-b ${
+                  isDarkMode ? "border-white/[0.06]" : "border-slate-100"
+                }`}
+              >
+                {/* ↳ + 질문 텍스트 (클릭 → 채팅 입력) */}
+                <button
+                  onClick={() => onPick(question)}
+                  className={`flex items-start gap-3 flex-1 text-left group transition-colors`}
+                >
+                  <span className={`text-[15px] leading-none shrink-0 font-bold mt-0.5 ${
+                    isDarkMode ? "text-blue-400 group-hover:text-blue-300" : "text-blue-600 group-hover:text-blue-500"
+                  }`}>
+                    ↳
+                  </span>
+                  <span className={`text-[13px] font-medium leading-relaxed transition-colors ${
+                    isDarkMode
+                      ? "text-slate-300 group-hover:text-white"
+                      : "text-slate-700 group-hover:text-blue-600"
+                  }`}>
+                    {question}
+                  </span>
+                </button>
+
+                {/* 도메인 배지 + 연락하기 버튼 (PM만) */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${meta.color}`}>
+                    {meta.label}
+                  </span>
+                  {isPm && (
+                    <button
+                      onClick={() => setContactTarget({ question, domain })}
+                      title="담당자에게 쪽지 보내기"
+                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all border ${
+                        isDarkMode
+                          ? "border-white/[0.08] text-slate-400 hover:border-blue-500/40 hover:text-blue-400 hover:bg-blue-500/10"
+                          : "border-slate-200 text-slate-400 hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50"
+                      }`}
+                    >
+                      <Mail size={11} />
+                      연락
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      {/* 세로 리스트 */}
-      <div className={`flex flex-col border-t ${
-        isDarkMode ? "border-white/[0.06]" : "border-slate-100"
-      }`}>
-        {items.map((text, idx) => (
-          <button
-            key={idx}
-            onClick={() => onPick(text)}
-            className={`w-full flex items-start gap-3 py-3.5 text-left border-b transition-all duration-150 group ${
-              isDarkMode
-                ? "border-white/[0.06] hover:bg-white/[0.02] text-slate-300"
-                : "border-slate-100 hover:bg-slate-50 text-slate-700"
-            }`}
-          >
-            {/* 파란색 ↳ 화살표 */}
-            <span className={`text-[15px] leading-none shrink-0 font-bold ${
-              isDarkMode ? "text-blue-400 group-hover:text-blue-300" : "text-blue-600 group-hover:text-blue-500"
-            }`}>
-              ↳
-            </span>
-            <span className={`text-[13px] font-medium leading-relaxed transition-colors ${
-              isDarkMode 
-                ? "text-slate-300 group-hover:text-white" 
-                : "text-slate-700 group-hover:text-blue-600"
-            }`}>
-              {text}
-            </span>
-          </button>
-        ))}
-      </div>
-    </div>
+      {/* 쪽지 작성 모달 */}
+      {contactTarget && (
+        <ContactModal
+          followup={contactTarget}
+          isDarkMode={isDarkMode}
+          onClose={() => setContactTarget(null)}
+        />
+      )}
+    </>
   );
 }
 

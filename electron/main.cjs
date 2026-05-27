@@ -22,6 +22,10 @@ const net = require("net");
 const http = require("http");
 const fs = require("fs");
 
+// OS 디스플레이 배율(125%, 150% 등)을 무시하고 항상 1:1 픽셀로 렌더링.
+// zoomFactor만으로는 OS-level DPI 스케일링을 막을 수 없어 commandLine 플래그가 필요.
+app.commandLine.appendSwitch("force-device-scale-factor", "1");
+
 // ── GitHub OAuth 커스텀 프로토콜 ─────────────────────────────
 // Windows에서 navigator:// 콜백을 받으려면 single-instance lock이 필요
 const PROTOCOL = "navigator";
@@ -300,6 +304,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      zoomFactor: 1.0,
     },
   });
 
@@ -314,6 +319,12 @@ function createWindow() {
 
   mainWindow.on("closed", () => {
     mainWindow = null;
+  });
+
+  // 페이지 로드 후 zoom이 리셋되는 경우를 방어 (일부 Electron 버전에서 발생).
+  mainWindow.webContents.on("did-finish-load", () => {
+    mainWindow.webContents.setZoomFactor(1.0);
+    mainWindow.webContents.setVisualZoomLevelLimits(1, 1);
   });
 
   // 최대화

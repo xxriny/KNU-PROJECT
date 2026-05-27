@@ -383,6 +383,7 @@ export default function DevTrackingTab() {
             role: "developer",
           },
           source_dir: form.source_dir.trim(),
+          auth_token: authToken,
           api_key: apiKey,
           notify_pr: form.notify_pr,
           use_llm_forensic_profiler: form.use_llm_forensic_profiler,

@@ -117,7 +117,7 @@ def _run_migrations() -> None:
 
 
 def init_db():
-    from auth.shared_models import User, Team, Subscription, PublishedSnapshot  # noqa: F401
+    from auth.shared_models import User, Team, Subscription, PublishedSnapshot, DirectMessage  # noqa: F401
     from auth.models import (  # noqa: F401
         AnalysisSession, DesignChangeRequest, MemoItem, AnalysisResult,
     )

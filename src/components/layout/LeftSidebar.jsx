@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import useAppStore from "../../store/useAppStore";
-import { Plus, FolderPlus, Clock3, Edit3, Trash2, RefreshCw, Sparkles, Moon, Sun, MoreHorizontal, X } from "lucide-react";
+import { serverRequest } from "../../api/serverClient";
+import { Plus, FolderPlus, Clock3, Edit3, Trash2, RefreshCw, Sparkles, Moon, Sun, MoreHorizontal, X, Inbox } from "lucide-react";
 
 export default function LeftSidebar() {
   const {
@@ -32,6 +33,41 @@ export default function LeftSidebar() {
   const [confirmReset, setConfirmReset] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState(null);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
+  const [showInbox, setShowInbox] = useState(false);
+  const [inboxMessages, setInboxMessages] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const authToken = useAppStore((s) => s.authToken);
+
+  const fetchInbox = useCallback(async () => {
+    if (!authToken) return;
+    try {
+      const data = await serverRequest("/messages/inbox", {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const msgs = data.messages || [];
+      setInboxMessages(msgs);
+      setUnreadCount(msgs.filter((m) => !m.is_read).length);
+    } catch (_) {}
+  }, [authToken]);
+
+  const markRead = useCallback(async (id) => {
+    if (!authToken) return;
+    try {
+      await serverRequest(`/messages/${id}/read`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      setInboxMessages((prev) => prev.map((m) => m.id === id ? { ...m, is_read: true } : m));
+      setUnreadCount((c) => Math.max(0, c - 1));
+    } catch (_) {}
+  }, [authToken]);
+
+  useEffect(() => {
+    fetchInbox();
+    const timer = setInterval(fetchInbox, 30000);
+    return () => clearInterval(timer);
+  }, [fetchInbox]);
 
   useEffect(() => {
     const handleClickOutside = () => setActiveDropdown(null);
@@ -223,10 +259,27 @@ export default function LeftSidebar() {
           })
         )}
       </div>
-      {/* Bottom Actions: New Project */}
-      <div className={`p-4 border-t shrink-0 ${
+      {/* Bottom Actions */}
+      <div className={`p-4 border-t shrink-0 flex flex-col gap-2 ${
         isDarkMode ? "border-white/[0.05]" : "border-slate-200"
       }`}>
+        {/* 수신함 버튼 */}
+        <button
+          onClick={() => { setShowInbox((v) => !v); fetchInbox(); }}
+          className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-[12px] font-semibold transition-all relative ${
+            showInbox
+              ? isDarkMode ? "bg-white/10 text-slate-200" : "bg-slate-100 text-slate-800"
+              : isDarkMode ? "text-slate-400 hover:bg-white/[0.04] hover:text-slate-200" : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+          }`}
+        >
+          <Inbox size={14} />
+          <span>수신함</span>
+          {unreadCount > 0 && (
+            <span className="ml-auto min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-blue-500 text-white text-[10px] font-black px-1">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
+        </button>
         <button
           onClick={handleNewProjectClick}
           className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[13px] font-bold transition-all bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-500/20 active:scale-[0.98]"
@@ -235,6 +288,61 @@ export default function LeftSidebar() {
           <span>신규 분석 시작</span>
         </button>
       </div>
+
+      {/* 수신함 패널 (인라인 슬라이드) */}
+      {showInbox && (
+        <div className={`absolute bottom-[108px] left-0 w-full border-t z-20 max-h-[55vh] overflow-y-auto ${
+          isDarkMode ? "bg-[#0b0e14]/95 border-white/[0.05]" : "bg-slate-50/95 border-slate-200"
+        }`}>
+          <div className={`px-4 py-2.5 flex items-center justify-between border-b ${
+            isDarkMode ? "border-white/[0.05]" : "border-slate-200"
+          }`}>
+            <span className={`text-[11px] font-black uppercase tracking-widest ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+              수신함
+            </span>
+            <button onClick={() => setShowInbox(false)} className="text-slate-500 hover:text-slate-300">
+              <X size={13} />
+            </button>
+          </div>
+          {inboxMessages.length === 0 ? (
+            <p className={`text-center py-6 text-[12px] ${isDarkMode ? "text-slate-600" : "text-slate-400"}`}>
+              받은 쪽지가 없습니다.
+            </p>
+          ) : (
+            inboxMessages.map((msg) => (
+              <div
+                key={msg.id}
+                onClick={() => !msg.is_read && markRead(msg.id)}
+                className={`px-4 py-3 border-b cursor-pointer transition-colors ${
+                  isDarkMode ? "border-white/[0.04]" : "border-slate-100"
+                } ${
+                  msg.is_read
+                    ? isDarkMode ? "opacity-50" : "opacity-60"
+                    : isDarkMode ? "hover:bg-white/[0.03]" : "hover:bg-slate-100"
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  {!msg.is_read && <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />}
+                  <span className={`text-[11px] font-bold ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
+                    {msg.sender_name}
+                  </span>
+                  <span className={`text-[10px] ml-auto ${isDarkMode ? "text-slate-600" : "text-slate-400"}`}>
+                    {msg.created_at ? new Date(msg.created_at).toLocaleDateString("ko", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}
+                  </span>
+                </div>
+                {msg.context_question && (
+                  <p className={`text-[10px] mb-1 px-2 py-1 rounded-md ${isDarkMode ? "bg-white/[0.04] text-slate-500" : "bg-slate-100 text-slate-500"}`}>
+                    ↳ {msg.context_question}
+                  </p>
+                )}
+                <p className={`text-[12px] leading-relaxed ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>
+                  {msg.content}
+                </p>
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {/* Reset Confirmation Modal */}
       {confirmReset && createPortal(

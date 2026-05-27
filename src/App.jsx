@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { platform } from "./platform/index.js";
 import useAppStore from "./store/useAppStore";
 import GlobalErrorBoundary from "./components/GlobalErrorBoundary";
 import ResultViewer from "./components/ResultViewer";
@@ -69,9 +70,7 @@ export default function App() {
     checkAuthStatus();
 
     async function initBackend() {
-      let port = null;
-      if (window.electronAPI) port = await window.electronAPI.getBackendPort();
-      if (!port) port = 8765;
+      const port = await platform.getBackendPort();
       setBackendPort(port);
       connectWebSocket(port);
       fetchConfig(port);
@@ -80,10 +79,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (window.electronAPI?.setTitleBarTheme) {
-      const timer = setTimeout(() => window.electronAPI.setTitleBarTheme(isDarkMode), 100);
-      return () => clearTimeout(timer);
-    }
+    const timer = setTimeout(() => platform.setTitleBarTheme(isDarkMode), 100);
+    return () => clearTimeout(timer);
   }, [isDarkMode]);
 
   // 분석이 시작되면 메모/세션/설정 등 활성 패널을 강제로 닫고 메인 viewport(Progress)를 노출.

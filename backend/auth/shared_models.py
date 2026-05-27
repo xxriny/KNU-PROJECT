@@ -231,6 +231,31 @@ def ensure_dev_tracking_schema(bind_or_session) -> None:
                     conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"))
 
 
+class DirectMessage(SharedBase):
+    """팀 내 앱 내 쪽지 — followup 질문 컨텍스트와 함께 담당자에게 전송."""
+    __tablename__ = "direct_messages"
+
+    id = Column(String(36), primary_key=True, default=_new_uuid)
+    team_id = Column(String(36), nullable=True)
+    sender_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    sender_name = Column(String(255), nullable=False, default="")
+    receiver_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    receiver_name = Column(String(255), nullable=False, default="")
+    content = Column(Text, nullable=False)
+    context_question = Column(Text, nullable=True, default="")  # followup 원문
+    context_domain = Column(String(20), nullable=True, default="general")
+    is_read = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    sender = relationship("User", foreign_keys=[sender_id])
+    receiver = relationship("User", foreign_keys=[receiver_id])
+
+    __table_args__ = (
+        Index("ix_dm_receiver_read", "receiver_id", "is_read"),
+        Index("ix_dm_team_created", "team_id", "created_at"),
+    )
+
+
 class DevKnowledgeArtifact(SharedBase):
     # author: xxrin
     # PM/SA 컨텍스트 로딩에 사용하는 검색 가능한 Dev Tracking 아티팩트 저장용 모델입니다.

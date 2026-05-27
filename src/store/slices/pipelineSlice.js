@@ -146,7 +146,14 @@ export const createPipelineSlice = (set, get) => ({
         lastIdeaSummary: data.idea_summary || "",
         lastSuggestedMode: data.suggested_mode || null,
         lastFollowups: Array.isArray(data.suggested_followups)
-          ? data.suggested_followups.filter((s) => typeof s === "string" && s.trim()).slice(0, 4)
+          ? data.suggested_followups
+              .map((s) =>
+                typeof s === "string"
+                  ? { question: s.trim(), domain: "general" }
+                  : s
+              )
+              .filter((s) => s?.question?.trim())
+              .slice(0, 4)
           : [],
       });
 

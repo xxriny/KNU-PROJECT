@@ -7,6 +7,7 @@ NAVIGATOR-SERVER ORM 모델 — shared.db 전용.
   subscriptions       — 팀별 구독 플랜 (free / pro / enterprise)
   published_snapshots — 팀 공유 SA 스냅샷
   gemini_api_keys     — 서버 관리 Gemini API 키
+  direct_messages     — 팀 내 앱 내 쪽지
 """
 
 from __future__ import annotations
@@ -184,4 +185,31 @@ class TeamInvite(Base):
 
     team    = relationship("Team")
     creator = relationship("User")
+
+
+# ── DirectMessage ───────────────────────────────────────────
+
+class DirectMessage(Base):
+    """팀 내 앱 내 쪽지 — followup 컨텍스트 포함."""
+    __tablename__ = "direct_messages"
+
+    id               = Column(String(36),  primary_key=True, default=_new_uuid)
+    team_id          = Column(String(36),  nullable=True)
+    sender_id        = Column(String(36),  ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    sender_name      = Column(String(255), nullable=False, default="")
+    receiver_id      = Column(String(36),  ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    receiver_name    = Column(String(255), nullable=False, default="")
+    content          = Column(Text,        nullable=False)
+    context_question = Column(Text,        nullable=True,  default="")
+    context_domain   = Column(String(20),  nullable=True,  default="general")
+    is_read          = Column(Boolean,     nullable=False, default=False)
+    created_at       = Column(DateTime,    default=datetime.utcnow)
+
+    sender   = relationship("User", foreign_keys=[sender_id])
+    receiver = relationship("User", foreign_keys=[receiver_id])
+
+    __table_args__ = (
+        Index("ix_dm_receiver_read", "receiver_id", "is_read"),
+        Index("ix_dm_team_created",  "team_id",     "created_at"),
+    )
 

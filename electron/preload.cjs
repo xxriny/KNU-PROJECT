@@ -8,7 +8,12 @@
  *   const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/pipeline`);
  */
 
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webFrame } = require("electron");
+
+// 렌더러 zoom을 1:1로 고정 — OS DPI 배율(125% 등)이 렌더러까지 전파되는 것을 차단.
+// force-device-scale-factor(main)와 함께 써야 완전히 고정됨.
+webFrame.setZoomFactor(1.0);
+webFrame.setVisualZoomLevelLimits(1, 1);
 
 contextBridge.exposeInMainWorld("electronAPI", {
   /**
