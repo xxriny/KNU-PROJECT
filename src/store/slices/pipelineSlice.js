@@ -31,10 +31,18 @@ export const createPipelineSlice = (set, get) => ({
 
   devTrackingResult: null,
   devTrackingAnalyses: [],
+  devTrackingForm: null,
+  devTrackingShowManualRun: false,
+  devTrackingRunning: false,
+  devTrackingRunError: "",
 
   setAgileImpactResult: (result) => set({ agileImpactResult: result }),
   setDevTrackingResult: (result) => set({ devTrackingResult: result }),
   setDevTrackingAnalyses: (analyses) => set({ devTrackingAnalyses: analyses }),
+  setDevTrackingForm: (form) => set({ devTrackingForm: form }),
+  setDevTrackingShowManualRun: (val) => set({ devTrackingShowManualRun: val }),
+  setDevTrackingRunning: (val) => set({ devTrackingRunning: val }),
+  setDevTrackingRunError: (val) => set({ devTrackingRunError: val }),
 
   // 디버그 시스템
   debugLogs: [],

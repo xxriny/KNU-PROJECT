@@ -69,10 +69,18 @@ export default function DevTrackingTab() {
   const githubOwner = useAppStore((state) => state.githubOwner);
   const githubRepo = useAppStore((state) => state.githubRepo);
   const githubBranch = useAppStore((state) => state.githubBranch) || "main";
-  const storedResult = useAppStore((state) => state.devTrackingResult);
-  const setDevTrackingResult = useAppStore((state) => state.setDevTrackingResult);
-  const storedAnalyses = useAppStore((state) => state.devTrackingAnalyses);
-  const setDevTrackingAnalyses = useAppStore((state) => state.setDevTrackingAnalyses);
+  const result = useAppStore((state) => state.devTrackingResult);
+  const setResult = useAppStore((state) => state.setDevTrackingResult);
+  const analyses = useAppStore((state) => state.devTrackingAnalyses);
+  const setAnalyses = useAppStore((state) => state.setDevTrackingAnalyses);
+  const storedForm = useAppStore((state) => state.devTrackingForm);
+  const setDevTrackingForm = useAppStore((state) => state.setDevTrackingForm);
+  const showManualRun = useAppStore((state) => state.devTrackingShowManualRun);
+  const setShowManualRun = useAppStore((state) => state.setDevTrackingShowManualRun);
+  const running = useAppStore((state) => state.devTrackingRunning);
+  const setRunning = useAppStore((state) => state.setDevTrackingRunning);
+  const runError = useAppStore((state) => state.devTrackingRunError);
+  const setRunError = useAppStore((state) => state.setDevTrackingRunError);
 
   const port = backendPort || 8000;
 
@@ -88,7 +96,7 @@ export default function DevTrackingTab() {
     return ghTokenRef.current || "";
   };
 
-  const [form, setForm] = useState(DEFAULT_FORM);
+  const [form, setFormLocal] = useState(storedForm || DEFAULT_FORM);
   const [connectedRepo, setConnectedRepo] = useState(null);
   const [pullRequests, setPullRequests] = useState([]);
   const [pullLoading, setPullLoading] = useState(false);
@@ -96,25 +104,18 @@ export default function DevTrackingTab() {
   const [branches, setBranches] = useState([]);
   const [branchLoading, setBranchLoading] = useState(false);
   const [branchError, setBranchError] = useState("");
-  const [running, setRunning] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [detailLoadingId, setDetailLoadingId] = useState("");
   const [gapDecisionLoadingId, setGapDecisionLoadingId] = useState("");
-  const [error, setError] = useState("");
   const [historyError, setHistoryError] = useState("");
-  const [result, setResultLocal] = useState(storedResult);
-  const [analyses, setAnalysesLocal] = useState(storedAnalyses);
-  const [showManualRun, setShowManualRun] = useState(false);
 
-  const setResult = useCallback((val) => {
-    setResultLocal(val);
-    setDevTrackingResult(val);
-  }, [setDevTrackingResult]);
-
-  const setAnalyses = useCallback((val) => {
-    setAnalysesLocal(val);
-    setDevTrackingAnalyses(val);
-  }, [setDevTrackingAnalyses]);
+  const setForm = useCallback((updater) => {
+    setFormLocal((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      setDevTrackingForm(next);
+      return next;
+    });
+  }, [setDevTrackingForm]);
 
   const data = result?.data || {};
   const state = data?.data || {};
@@ -350,70 +351,70 @@ export default function DevTrackingTab() {
 
   const runAnalysis = async () => {
     setRunning(true);
-    setError("");
+    setRunError("");
     setResult(null);
-    try {
-      const prNumber = Number(form.pr_number);
-      if (!form.owner.trim() || !form.repo.trim() || !prNumber || !form.branch_name.trim() || !form.head_sha.trim()) {
-        setError("owner, repo, PR number, branch name, head sha는 필수입니다.");
-        setRunning(false);
-        return;
-      }
-      const headers = { "Content-Type": "application/json" };
-      if (authToken) headers.Authorization = `Bearer ${authToken}`;
-      const response = await fetch(`http://127.0.0.1:${port}/api/dev-tracking/pr`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          repository: {
-            owner: form.owner.trim(),
-            repo: form.repo.trim(),
-          },
-          pull_request: {
-            pr_number: prNumber,
-            branch_name: form.branch_name.trim(),
-            base_branch: form.base_branch.trim(),
-            head_sha: form.head_sha.trim(),
-            created_at: new Date().toISOString(),
-            title: `Manual Dev Tracking PR #${prNumber}`,
-            description: "Manual Dev Tracking analysis from NAVIGATOR UI.",
-          },
-          actor: {
-            github_id: currentUser?.github_login || currentUser?.github_username || currentUser?.name || "",
-            role: "developer",
-          },
-          source_dir: form.source_dir.trim(),
-          auth_token: authToken,
-          api_key: apiKey,
-          notify_pr: form.notify_pr,
-          use_llm_forensic_profiler: form.use_llm_forensic_profiler,
-          use_llm_gap_analyzer: form.use_llm_gap_analyzer,
-          use_llm_intent_classifier: form.use_llm_intent_classifier,
-          team_id: currentUser?.team_id || "",
-          created_by: currentUser?.id || "",
-        }),
-      });
-      const json = await response.json();
-      if (json.status !== "ok") {
-        setError(json.error || "Dev Tracking 분석 실행에 실패했습니다.");
-      } else {
-        setResult(json);
-        fetchAnalyses();
-      }
-    } catch (runError) {
-      setError(`서버 연결 실패: ${runError.message}`);
-    } finally {
+    const prNumber = Number(form.pr_number);
+    if (!form.owner.trim() || !form.repo.trim() || !prNumber || !form.branch_name.trim() || !form.head_sha.trim()) {
+      setRunError("owner, repo, PR number, branch name, head sha는 필수입니다.");
       setRunning(false);
+      return;
     }
+    // fetch는 컴포넌트 언마운트 후에도 계속 실행됨.
+    // setRunning/setRunError/setResult 모두 Zustand이므로 언마운트 후 결과도 store에 정상 저장됨.
+    const headers = { "Content-Type": "application/json" };
+    if (authToken) headers.Authorization = `Bearer ${authToken}`;
+    fetch(`http://127.0.0.1:${port}/api/dev-tracking/pr`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        repository: { owner: form.owner.trim(), repo: form.repo.trim() },
+        pull_request: {
+          pr_number: prNumber,
+          branch_name: form.branch_name.trim(),
+          base_branch: form.base_branch.trim(),
+          head_sha: form.head_sha.trim(),
+          created_at: new Date().toISOString(),
+          title: `Manual Dev Tracking PR #${prNumber}`,
+          description: "Manual Dev Tracking analysis from NAVIGATOR UI.",
+        },
+        actor: {
+          github_id: currentUser?.github_login || currentUser?.github_username || currentUser?.name || "",
+          role: "developer",
+        },
+        source_dir: form.source_dir.trim(),
+        auth_token: authToken,
+        api_key: apiKey,
+        notify_pr: form.notify_pr,
+        use_llm_forensic_profiler: form.use_llm_forensic_profiler,
+        use_llm_gap_analyzer: form.use_llm_gap_analyzer,
+        use_llm_intent_classifier: form.use_llm_intent_classifier,
+        team_id: currentUser?.team_id || "",
+        created_by: currentUser?.id || "",
+      }),
+    })
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.status !== "ok") {
+          setRunError(json.error || "Dev Tracking 분석 실행에 실패했습니다.");
+        } else {
+          setResult(json);
+        }
+      })
+      .catch((err) => {
+        setRunError(`서버 연결 실패: ${err.message}`);
+      })
+      .finally(() => {
+        setRunning(false);
+      });
   };
 
   const handleGapItemDecision = async (gap, action) => {
     if (!gap?.id) {
-      setError("저장된 GAP 항목만 항목별 승인/거절할 수 있습니다.");
+      setRunError("저장된 GAP 항목만 항목별 승인/거절할 수 있습니다.");
       return;
     }
     setGapDecisionLoadingId(`${gap.id}:${action}`);
-    setError("");
+    setRunError("");
     try {
       const headers = { "Content-Type": "application/json" };
       if (authToken) headers.Authorization = `Bearer ${authToken}`;
@@ -428,15 +429,15 @@ export default function DevTrackingTab() {
       });
       const json = await response.json();
       if (json.status !== "ok") {
-        setError(json.error || "GAP 항목 결정 처리에 실패했습니다.");
+        setRunError(json.error || "GAP 항목 결정 처리에 실패했습니다.");
         return;
       }
       const analysis = json.data?.analysis || {};
       // author: xxrin
       // GAP 항목별 결정 후 상세 카드와 요약 카드가 즉시 같은 analysis 상태를 보도록 local result를 갱신한다.
-      setResult((prev) => {
-        if (!prev?.data?.data) return prev;
-        return {
+      const prev = useAppStore.getState().devTrackingResult;
+      if (prev?.data?.data) {
+        setResult({
           ...prev,
           data: {
             ...prev.data,
@@ -448,11 +449,11 @@ export default function DevTrackingTab() {
               pm_report: analysis.pm_report || prev.data.data.pm_report,
             },
           },
-        };
-      });
+        });
+      }
       fetchAnalyses();
     } catch (decisionError) {
-      setError(`GAP 항목 결정 처리 실패: ${decisionError.message}`);
+      setRunError(`GAP 항목 결정 처리 실패: ${decisionError.message}`);
     } finally {
       setGapDecisionLoadingId("");
     }
@@ -518,7 +519,7 @@ export default function DevTrackingTab() {
         </div>
         <button
           type="button"
-          onClick={() => { setForm(DEFAULT_FORM); setResult(null); setError(""); }}
+          onClick={() => { setForm(DEFAULT_FORM); setResult(null); setRunError(""); }}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border transition-all ${panel}`}
         >
           <RefreshCw size={14} /> 초기화
@@ -716,9 +717,9 @@ export default function DevTrackingTab() {
         )}
       </div>
 
-      {error && (
+      {runError && (
         <div className={`rounded-xl border p-3 text-sm ${isDarkMode ? "bg-red-500/10 border-red-500/25 text-red-300" : "bg-red-50 border-red-200 text-red-700"}`}>
-          {error}
+          {runError}
         </div>
       )}
 

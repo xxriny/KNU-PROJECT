@@ -16,6 +16,7 @@ Usage:
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import sys
+import multiprocessing
 
 import argparse
 from contextlib import asynccontextmanager
@@ -35,8 +36,6 @@ try:
     load_dotenv(os.path.join(ROOT, ".env"), encoding="utf-8")
 except ImportError:
     pass
-
-print(">>> [Python] Loading backend subsystems...", flush=True)
 
 # ── 계층 임포트 ──────────────────────────────────────────
 from transport.rest_handler import rest_router
@@ -91,7 +90,9 @@ if _metrics_app is not None:
 
 # ── Entry Point ──────────────────────────────────────────
 if __name__ == "__main__":
+    multiprocessing.freeze_support()  # Windows spawn 모드에서 자식 프로세스 중복 실행 방지
     import uvicorn
+    print(">>> [Python] Loading backend subsystems...", flush=True)
     # ── 초기화 로그 시작 ──
     print(">>> [Python] Initializing PM Agent Backend subsystems...", flush=True)
     
