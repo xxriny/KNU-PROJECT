@@ -1,6 +1,5 @@
 import re, os
 from typing import List, Optional
-from llmlingua import PromptCompressor as LinguaCompressor
 from observability.logger import get_logger
 
 _logger = get_logger()
@@ -12,9 +11,9 @@ class PromptCompressor:
     LLMLingua-2 기반 프롬프트 압축 매니저 (Phase 3)
     도메인 특화 키워드 보존 로직이 포함된 하이브리드 압축을 수행합니다.
     """
-    
+
     _instance = None
-    
+
     # 보존해야 할 정규식 패턴 (PM/SA 도메인)
     PRESERVE_PATTERNS = [
         r"MUST", r"SHOULD", r"MAY", r"NOT",         # 요구사항 키워드
@@ -34,9 +33,11 @@ class PromptCompressor:
     def __init__(self, model_name: str = "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank", device: str = "cpu"):
         if self._initialized:
             return
-        
+
         _logger.info("compressor_init", model=model_name, device=device)
         try:
+            # llmlingua는 PyTorch/BERT를 포함하므로 첫 인스턴스 생성 시 지연 로드
+            from llmlingua import PromptCompressor as LinguaCompressor
             self.compressor = LinguaCompressor(
                 model_name=model_name,
                 device_map=device,
@@ -89,11 +90,11 @@ class PromptCompressor:
             original_len = len(text)
             compressed_len = len(compressed_text)
             savings = (1 - compressed_len / original_len) * 100 if original_len > 0 else 0
-            print(f"[PromptCompressor] Compressed: {original_len} -> {compressed_len} chars ({savings:.1f}% saved)")
-            
+            _logger.info("compressor_result", original=original_len, compressed=compressed_len, savings_pct=round(savings, 1))
+
             return compressed_text
         except Exception as e:
-            print(f"[PromptCompressor] Compression failed, returning original text: {e}")
+            _logger.warning("compressor_fallback", error=str(e))
             return text
 
 # 싱글톤 인스턴스 지연 생성 함수

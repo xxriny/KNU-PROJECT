@@ -10,18 +10,16 @@ PM Agent Pipeline — 유틸리티 v6.3 (FastAPI 구조 적용)
 
 import json, re, os, threading, time, random, urllib.request
 from pathlib import Path
-from contextvars import ContextVar
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Generic, Type, TypeVar
 from pydantic import BaseModel, ValidationError
 from observability.logger import get_logger
 from pipeline.core.models.gemini_model import get_gemini_client, get_raw_genai_client
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from pipeline.core.cost_manager import calculate_cost
 from pipeline.core.compressor import get_compressor
 from version import DEFAULT_MODEL, DEFAULT_TEMPERATURE, MAX_LLM_RETRIES
+# langchain imports are deferred to first LLM call to avoid startup cost
 
 T = TypeVar("T", bound=BaseModel)
 _CACHE_LIMIT = 32
@@ -54,9 +52,7 @@ def create_context_cache(api_key: str, model: str, system_instruction: str, cont
 
 # ── 비용 및 토큰 추적용 전역 컨텍스트 (Phase 0) ──────
 # 각 노드 실행 중 발생하는 모든 LLM 호출의 사용량을 임시 저장합니다.
-active_usage_log: ContextVar[list] = ContextVar("active_usage_log", default=[])
-active_session_id: ContextVar[str] = ContextVar("active_session_id", default="")
-active_jwt_token: ContextVar[str] = ContextVar("active_jwt_token", default="")
+from pipeline.core.context import active_usage_log, active_session_id, active_jwt_token  # noqa: E402
 
 
 @dataclass
@@ -126,16 +122,17 @@ def get_effective_key(api_key: str) -> str:
     return key
 
 
-def get_llm(api_key: str, model: str = DEFAULT_MODEL, temperature: float = DEFAULT_TEMPERATURE) -> ChatGoogleGenerativeAI:
+def get_llm(api_key: str, model: str = DEFAULT_MODEL, temperature: float = DEFAULT_TEMPERATURE):
     """ChatGoogleGenerativeAI 위임 (core/models/gemini_model 사용)"""
     return get_gemini_client(api_key, model, temperature)
 
 
 def _retry_loop(structured_llm, messages: list, max_retries: int, label: str):
     """공통 Self-Correction 및 Rate-Limit 대응 재시도 루프."""
+    from langchain_core.messages import AIMessage, HumanMessage
     messages = list(messages)
     last_error = None
-    
+
     for attempt in range(max_retries):
         result = None
         try:
@@ -144,14 +141,14 @@ def _retry_loop(structured_llm, messages: list, max_retries: int, label: str):
         except Exception as e:
             last_error = e
             error_msg = str(e)
-            
+
             if attempt < max_retries - 1:
                 # Rate Limit 대응 지수 백오프
                 if "429" in error_msg:
                     wait_time = (10 * (attempt + 1)) + random.uniform(2, 5)
                 else:
                     wait_time = (2 ** (attempt + 1)) + random.uniform(0, 1)
-                
+
                 logger.warning(f"[{label}] Attempt {attempt+1} failed: {error_msg[:100]}. Retrying in {wait_time:.2f}s...")
                 time.sleep(wait_time)
 
@@ -223,6 +220,7 @@ def call_structured(
         except Exception as e:
             logger.error(f"[ContextCache] Call failed, falling back to normal: {e}")
 
+    from langchain_core.messages import SystemMessage, HumanMessage
     llm = get_llm(api_key, model, temperature)
     messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_msg)]
 

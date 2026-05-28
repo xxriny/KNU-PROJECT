@@ -24,7 +24,7 @@ from auth.models import User
 from pydantic import BaseModel, Field
 from version import APP_VERSION, DEFAULT_MODEL
 from observability.logger import get_logger
-from pipeline.core.utils import active_jwt_token
+from pipeline.core.context import active_jwt_token
 # pipeline 관련 임포트는 첫 요청 시 지연 로드 (langgraph 콜드스타트 방지)
 _pipeline_loaded = False
 
