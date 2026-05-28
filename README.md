@@ -2,7 +2,7 @@
 
 # 🧭 NAVIGATOR
 
-### AI-Powered PM · Agile · Code QA Co-Pilot
+### AI-Powered PM · Agile · Dev Tracking Co-Pilot
 
 **Design. Ship. Verify. — All in one AI-native workflow.**
 
@@ -19,8 +19,8 @@
 > NAVIGATOR is a desktop AI agent built around **three core pipelines**:
 >
 > **① Design** — turns ideas or codebases into complete PM + SA documentation in minutes  
-> **② Agile** — auto-generates and distributes task tickets, links them to GitHub, and manages design change approvals  
-> **③ QA** *(coming soon)* — hooks into every PR, reverse-engineers the actual code, compares it against the published design spec, classifies gaps as intentional or not, and routes the result to the PM for sign-off
+> **② Agile** — auto-generates and distributes task tickets, exports to GitHub Wiki/Issues, and manages design change approvals  
+> **③ Dev Tracking** — hooks into every PR, reverse-engineers the actual code, compares it against the published design spec, classifies gaps as intentional or not, and routes the result to the PM for sign-off
 
 <br/>
 
@@ -67,7 +67,7 @@ Close the gap between design documents and what actually gets built.
 </td>
 <td width="33%">
 
-### 🔬 QA *(coming soon)*
+### 🔬 Dev Tracking
 Every PR triggers an automated design conformance check.
 
 - AST-scan the branch → build `code_inventory`
@@ -75,6 +75,7 @@ Every PR triggers an automated design conformance check.
 - Identify gaps: missing APIs, missing components, design mismatches
 - Classify each gap: **INTENTIONAL** or **UNINTENTIONAL**
 - Route to PM for approval or auto-comment on the PR
+- Manual run via Dev Tracking tab in addition to GitHub Webhook
 
 </td>
 </tr>
@@ -128,7 +129,7 @@ flowchart TB
             DCR -->|Reject| PCN_A["pr_comment\nnotifier"]:::agile
         end
 
-        subgraph P3["③ QA Pipeline  ·  coming soon"]
+        subgraph P3["③ Dev Tracking Pipeline"]
             direction LR
             WH(["GitHub\nWebhook"]):::qa --> DTP["dev_task\nplanner"]:::qa --> BF["branch\nfetcher"]:::qa --> RAN["reverse\nanalyzer\nAST scan"]:::qa
             RAN --> FP["forensic\nprofiler\nfile role map"]:::qa --> SL["spec\nloader\nshared.db"]:::qa --> GA["gap\nanalyzer\nHIGH/MED/LOW"]:::qa
@@ -254,16 +255,16 @@ Engineer                PM                    System
 
 ### GitHub Integration
 
-- Publish design documents to **GitHub Issues**
+- Export design documents to **GitHub Issues** or **GitHub Wiki** (dropdown in the Design banner)
 - Sync architecture reports to **GitHub Wiki** via `doc_sync`
 - Analyze commit history via `commit_analyzer`
 - Design gap comments posted directly on PRs via `pr_comment_notifier`
 
 ---
 
-## 🔬 QA Pipeline *(coming soon)*
+## 🔬 Dev Tracking Pipeline
 
-> The QA pipeline closes the loop between design and implementation. It triggers automatically on every GitHub PR/push event and produces a PM-ready conformance report.
+> The Dev Tracking pipeline closes the loop between design and implementation. It triggers automatically on every GitHub PR/push event (or via manual run) and produces a PM-ready conformance report.
 
 ### Pipeline Flow
 
@@ -444,7 +445,9 @@ The launcher:
 | `POST` | `/api/agile/generate-tasks` | Auto-generate tasks from SA artifacts | ✓ |
 | `POST` | `/api/agile/distribute-tasks` | Distribute tasks to team members | ✓ PM |
 | `GET/PATCH` | `/api/change-requests` | Design change request management | ✓ |
-| `POST` | `/api/github/publish` | Publish design to GitHub Issues | ✓ |
+| `POST` | `/api/github/publish` | Export design to GitHub Wiki or Issues (`publish_mode: "wiki"\|"issue"`) | ✓ |
+| `POST` | `/api/webhook/github` | GitHub PR webhook → Dev Tracking pipeline | HMAC |
+| `POST` | `/api/dev-tracking/run` | Manual Dev Tracking run | ✓ |
 | `POST` | `/api/doc-sync` | Sync report to GitHub Wiki | ✓ |
 | `GET/POST` | `/api/tasks` | Task CRUD | ✓ |
 | `GET/POST` | `/api/snapshots` | Publish / restore analysis snapshots | ✓ |
@@ -477,9 +480,10 @@ navigator/
 │   │   │   ├── RTMTab.jsx · SAComponentsTab.jsx · SAApiTab.jsx
 │   │   │   ├── SADatabaseTab.jsx · SATestStrategyTab.jsx
 │   │   │   ├── ProjectStructureTab.jsx
-│   │   │   ├── AgileVerifierTab.jsx   # V-001~V-009 results
-│   │   │   ├── AgileImpactTab.jsx     # change impact analysis
-│   │   │   └── TaskApprovalPanel.jsx  # PM review UI (Agile + QA)
+│   │   │   ├── AgileVerifierTab.jsx      # V-001~V-009 results
+│   │   │   ├── AgileImpactTab.jsx        # change impact analysis
+│   │   │   ├── TaskApprovalPanel.jsx     # PM review UI (Agile + Dev Tracking)
+│   │   │   └── DevTrackingTab.jsx        # manual Dev Tracking run + analysis history
 │   │   └── github/GitHubDashboard.jsx
 │   └── store/slices/
 │       ├── authSlice.js · pipelineSlice.js · wsSlice.js
@@ -493,7 +497,8 @@ navigator/
 │   │   ├── pm/nodes/         # guardian · requirement_analyzer · stack_planner
 │   │   ├── sa/nodes/         # sa_unified_modeler · sa_test_analysis · sa_project_structure
 │   │   ├── agile/nodes/      # verifier · impact · task_generator · task_distributor · doc_sync
-│   │   └── chat/             # idea_chat
+│   │   ├── chat/             # idea_chat
+│   │   └── dev_tracking/     # service · nodes · gap_analyzer · intent_classifier · followup
 │   ├── result_shaping/       # result_shaper.py · sa_artifact_compiler.py
 │   ├── connectors/           # github_connector.py · folder_connector.py · repo_cache.py
 │   ├── storage/              # publish_service.py
@@ -620,8 +625,10 @@ Check `vite.log` (last 40 lines) for errors. Verify no other process is binding 
 
 ## 🗺️ Roadmap
 
-- [ ] QA Pipeline — GitHub Webhook integration (design → implementation conformance)
-- [ ] QA Pipeline — automated test code generation from `code_inventory` + `file_role_map`
+- [x] Dev Tracking Pipeline — GitHub Webhook integration (design → implementation conformance)
+- [x] Dev Tracking Pipeline — manual run via Dev Tracking tab
+- [x] GitHub Wiki / Issue export from Design banner
+- [ ] Dev Tracking — automated test code generation from `code_inventory` + `file_role_map`
 - [ ] Multi-model support: OpenAI / Anthropic Claude
 - [ ] MCP (Model Context Protocol) server mode
 - [ ] Export to Confluence / Notion

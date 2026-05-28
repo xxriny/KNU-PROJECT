@@ -7,15 +7,19 @@ from pathlib import Path
 def _run_git(args: list[str], cwd: str) -> tuple[int, str, str]:
     # author:xxrin
     # 저장소 상태 조회와 브랜치 전환에 쓰는 최소 git 래퍼다.
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return 1, "", "git timeout"
     return completed.returncode, completed.stdout.strip(), completed.stderr.strip()
 
 
@@ -32,11 +36,14 @@ def _run_gh(args: list[str], cwd: str, input_text: str | None = None) -> tuple[i
             errors="replace",
             input=input_text,
             check=False,
+            timeout=15,
         )
     except FileNotFoundError:
         # author: xxrin
         # 운영 PC에 gh CLI가 없으면 분석 흐름은 계속하고 후속 동작만 경고로 낮춘다.
         return 127, "", "gh CLI is not installed or not available on PATH"
+    except subprocess.TimeoutExpired:
+        return 1, "", "gh timeout"
     return completed.returncode, completed.stdout.strip(), completed.stderr.strip()
 
 

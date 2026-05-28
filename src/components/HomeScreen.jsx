@@ -3,7 +3,7 @@ import useAppStore from "../store/useAppStore";
 import {
   Send, Loader2, Rocket, Sparkles, ScanSearch,
   Github as GithubIcon, FileText, X, Plus, GitBranch,
-  FolderGit2, Search, ArrowUp,
+  FolderGit2, Search, ArrowUp, BookOpen, CircleDot, ChevronDown,
 } from "lucide-react";
 import ChatThread from "./chat/ChatThread";
 import SyncConfirmModal from "./SyncConfirmModal";
@@ -40,12 +40,19 @@ export default function HomeScreen() {
   const designSnapshotCounter = useAppStore((s) => s.designSnapshotCounter);
   const setGithubSettings = useAppStore((s) => s.setGithubSettings);
   const githubToken = useAppStore((s) => s.githubToken);
+  const githubOwner = useAppStore((s) => s.githubOwner);
+  const githubRepo = useAppStore((s) => s.githubRepo);
+  const backendPort = useAppStore((s) => s.backendPort);
+  const authToken = useAppStore((s) => s.authToken);
 
   const [projectTitle] = useState("새 프로젝트");
   const [syncModalOpen, setSyncModalOpen] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   const textareaRef = useRef(null);
   const plusMenuRef = useRef(null);
+  const exportMenuRef = useRef(null);
 
   const hasStarted = (chatHistory || []).some(
     (m) => m && (m.role === "user" || m.role === "assistant")
@@ -63,13 +70,67 @@ export default function HomeScreen() {
   );
   const showExportBanner = selectedMode === "create" && hasSyncedAtLeastOnce && hasStarted;
 
-  const handleGithubExport = () => {
-    addNotification?.(
-      "GitHub Export는 다음 업데이트에서 제공될 예정입니다.",
-      "info",
-      4000
-    );
+  const handleGithubExport = async (mode) => {
+    setExportMenuOpen(false);
+    if (!resultData) {
+      addNotification?.("분석 결과가 없습니다. 먼저 분석을 실행하세요.", "error", 4000);
+      return;
+    }
+    if (!githubOwner || !githubRepo) {
+      addNotification?.("GitHub 레포지토리가 연결되어 있지 않습니다. 설정에서 연결해 주세요.", "error", 4000);
+      return;
+    }
+    setExportLoading(true);
+    const authHeader = authToken ? { Authorization: `Bearer ${authToken}` } : {};
+    const port = backendPort || 8000;
+    try {
+      let ghToken = "";
+      try {
+        const td = await fetch(`http://127.0.0.1:${port}/auth/github/token`, { headers: authHeader });
+        const tdJson = await td.json();
+        ghToken = tdJson.github_oauth_token || "";
+      } catch (_) {}
+
+      const res = await fetch(`http://127.0.0.1:${port}/api/github/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({
+          owner: githubOwner,
+          repo: githubRepo,
+          result_data: resultData,
+          page_title: "SA 설계 문서",
+          project_name: resultData?.pm_bundle?.project_name || "Project",
+          publish_mode: mode,
+          api_key: apiKey || "",
+          model: model || "gemini-2.0-flash-lite",
+          token: ghToken,
+        }),
+      });
+      const json = await res.json();
+      if (json.status === "ok") {
+        const label = mode === "wiki" ? "Wiki" : "Issues";
+        addNotification?.(`GitHub ${label}에 성공적으로 내보냈습니다.`, "success", 5000);
+      } else {
+        addNotification?.(`내보내기 실패: ${json.error || "알 수 없는 오류"}`, "error", 6000);
+      }
+    } catch (e) {
+      addNotification?.(`내보내기 오류: ${e.message}`, "error", 5000);
+    } finally {
+      setExportLoading(false);
+    }
   };
+
+  // exportMenu 외부 클릭 닫기
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+    const handler = (e) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target)) {
+        setExportMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [exportMenuOpen]);
 
   const canSendInitial = isPm && !!trimmedInput && (!isReverseMode || !!projectFolder);
   const canSendFollowUp = isPm && !!trimmedInput && !isProcessing;
@@ -181,12 +242,45 @@ export default function HomeScreen() {
                 <span className={`text-[12px] font-medium flex-1 ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>
                   설계서가 픽스되었습니다. 빈 GitHub 레포에 첫 커밋으로 내보낼 수 있습니다.
                 </span>
-                <button
-                  onClick={handleGithubExport}
-                  className="px-3 py-1.5 rounded-lg text-[12px] font-bold bg-gradient-to-r from-emerald-600 to-blue-600 hover:from-emerald-500 hover:to-blue-500 text-white shadow-md shadow-emerald-500/20 transition-all"
-                >
-                  🐙 GitHub에 내보내기
-                </button>
+                <div className="relative" ref={exportMenuRef}>
+                  <button
+                    onClick={() => setExportMenuOpen((v) => !v)}
+                    disabled={exportLoading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-gradient-to-r from-emerald-600 to-blue-600 hover:from-emerald-500 hover:to-blue-500 text-white shadow-md shadow-emerald-500/20 transition-all disabled:opacity-50"
+                  >
+                    {exportLoading
+                      ? <Loader2 size={13} className="animate-spin" />
+                      : <GithubIcon size={13} />}
+                    GitHub에 내보내기
+                    <ChevronDown size={11} className={`transition-transform ${exportMenuOpen ? "rotate-180" : ""}`} />
+                  </button>
+
+                  {exportMenuOpen && (
+                    <div className="absolute right-0 top-full mt-1.5 w-52 rounded-xl border shadow-xl z-50 overflow-hidden bg-[#1c2128] border-white/10">
+                      <button
+                        onClick={() => handleGithubExport("wiki")}
+                        className="w-full flex items-center gap-2.5 px-4 py-3 text-[12px] font-medium text-slate-200 hover:bg-white/5 transition-colors text-left"
+                      >
+                        <BookOpen size={14} className="text-emerald-400 shrink-0" />
+                        <div>
+                          <p className="font-semibold">Wiki로 내보내기</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">설계서를 GitHub Wiki 페이지로</p>
+                        </div>
+                      </button>
+                      <div className="border-t border-white/5" />
+                      <button
+                        onClick={() => handleGithubExport("issue")}
+                        className="w-full flex items-center gap-2.5 px-4 py-3 text-[12px] font-medium text-slate-200 hover:bg-white/5 transition-colors text-left"
+                      >
+                        <CircleDot size={14} className="text-blue-400 shrink-0" />
+                        <div>
+                          <p className="font-semibold">Issues로 내보내기</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">태스크를 GitHub Issues로</p>
+                        </div>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}

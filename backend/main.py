@@ -92,9 +92,8 @@ if _metrics_app is not None:
 if __name__ == "__main__":
     multiprocessing.freeze_support()  # Windows spawn 모드에서 자식 프로세스 중복 실행 방지
     import uvicorn
-    print(">>> [Python] Loading backend subsystems...", flush=True)
-    # ── 초기화 로그 시작 ──
-    print(">>> [Python] Initializing PM Agent Backend subsystems...", flush=True)
+    get_logger().info("backend_loading_subsystems")
+    get_logger().info("backend_subsystems_initializing")
     
     parser = argparse.ArgumentParser(description="PM Agent Pipeline Backend")
     parser.add_argument("--port", type=int, default=8765, help="Server port")

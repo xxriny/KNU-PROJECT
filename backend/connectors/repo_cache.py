@@ -5,6 +5,7 @@ Repo Cache Manager: GitHub 저장소를 로컬 서버에 캐싱하여 RAG 분석
 import os
 import subprocess
 import shutil
+import threading
 from typing import Optional
 from observability.logger import get_logger
 
@@ -13,6 +14,17 @@ logger = get_logger()
 # backend/connectors/repo_cache.py -> 2단계 상위 = backend/
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = os.path.join(_ROOT, "storage", "repo_cache")
+
+_REPO_LOCKS: dict[str, threading.Lock] = {}
+_REPO_LOCKS_MUTEX = threading.Lock()
+
+
+def _get_repo_lock(key: str) -> threading.Lock:
+    with _REPO_LOCKS_MUTEX:
+        if key not in _REPO_LOCKS:
+            _REPO_LOCKS[key] = threading.Lock()
+        return _REPO_LOCKS[key]
+
 
 def get_local_repo_path(owner: str, repo: str, token: Optional[str] = None) -> str:
     """
@@ -23,7 +35,12 @@ def get_local_repo_path(owner: str, repo: str, token: Optional[str] = None) -> s
         return ""
 
     target_dir = os.path.join(CACHE_DIR, owner, repo)
-    
+
+    with _get_repo_lock(f"{owner}/{repo}"):
+        return _clone_or_pull(owner, repo, token, target_dir)
+
+
+def _clone_or_pull(owner: str, repo: str, token: Optional[str], target_dir: str) -> str:
     # 1. 이미 존재하면 업데이트 (git pull)
     if os.path.isdir(os.path.join(target_dir, ".git")):
         try:

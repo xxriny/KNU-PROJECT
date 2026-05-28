@@ -2,7 +2,7 @@
 
 # 🧭 NAVIGATOR
 
-### AI 기반 PM · Agile · 코드 QA 코-파일럿
+### AI 기반 PM · Agile · Dev Tracking 코-파일럿
 
 **설계하고, 개발하고, 검증하라 — 하나의 AI 네이티브 워크플로우로.**
 
@@ -19,12 +19,12 @@
 > NAVIGATOR는 **세 개의 핵심 파이프라인**으로 구성된 AI 데스크톱 에이전트입니다.
 >
 > **① 설계** — 아이디어나 코드베이스를 완전한 PM + SA 문서로 몇 분 만에 변환  
-> **② Agile 협업** — 태스크를 자동 생성·배분하고, GitHub와 연결하며, 설계 변경 승인 워크플로우 제공  
-> **③ QA** *(개발 예정)* — PR마다 실제 코드를 역분석해 설계 명세와 비교하고, GAP을 의도적·비의도적으로 분류해 PM에게 결재 요청
+> **② Agile 협업** — 태스크를 자동 생성·배분하고, GitHub Wiki/Issues로 내보내며, 설계 변경 승인 워크플로우 제공  
+> **③ Dev Tracking** — PR마다 실제 코드를 역분석해 설계 명세와 비교하고, GAP을 의도적·비의도적으로 분류해 PM에게 결재 요청
 
 <br/>
 
-[**빠른 시작**](#-빠른-시작) · [**아키텍처**](#-아키텍처) · [**설계 파이프라인**](#-설계-파이프라인) · [**Agile 협업**](#-agile-협업-파이프라인) · [**QA 파이프라인**](#-qa-파이프라인-개발-예정) · [**API 레퍼런스**](#-api-레퍼런스) · [**기여하기**](#-기여하기)
+[**빠른 시작**](#-빠른-시작) · [**아키텍처**](#-아키텍처) · [**설계 파이프라인**](#-설계-파이프라인) · [**Agile 협업**](#-agile-협업-파이프라인) · [**Dev Tracking**](#-dev-tracking-파이프라인) · [**API 레퍼런스**](#-api-레퍼런스) · [**기여하기**](#-기여하기)
 
 <br/>
 
@@ -67,7 +67,7 @@
 </td>
 <td width="33%">
 
-### 🔬 QA *(개발 예정)*
+### 🔬 Dev Tracking
 모든 PR에서 설계 적합성을 자동 검사합니다.
 
 - 브랜치 코드 AST 스캔 → `code_inventory` 빌드
@@ -75,6 +75,7 @@
 - GAP 식별: 누락 API, 누락 컴포넌트, 설계 불일치
 - 각 GAP을 **의도적(INTENTIONAL)** / **비의도적(UNINTENTIONAL)** 으로 분류
 - PM에게 결재 요청하거나 PR에 자동 코멘트 게시
+- GitHub Webhook 자동 트리거 외에 Dev Tracking 탭에서 수동 실행 가능
 
 </td>
 </tr>
@@ -128,7 +129,7 @@ flowchart TB
             DCR -->|거절| PCN_A["pr_comment\nnotifier"]:::agile
         end
 
-        subgraph P3["③ QA 파이프라인  ·  개발 예정"]
+        subgraph P3["③ Dev Tracking 파이프라인"]
             direction LR
             WH(["GitHub\nWebhook"]):::qa --> DTP["dev_task\nplanner"]:::qa --> BF["branch\nfetcher"]:::qa --> RAN["reverse\nanalyzer\nAST 스캔"]:::qa
             RAN --> FP["forensic\nprofiler\n파일 역할 분류"]:::qa --> SL["spec\nloader\nshared.db"]:::qa --> GA["gap\nanalyzer\nHIGH/MED/LOW"]:::qa
@@ -254,16 +255,16 @@ Engineer                PM                    시스템
 
 ### GitHub 연동
 
-- 설계 문서를 **GitHub Issues**에 발행
+- 설계 문서를 **GitHub Issues** 또는 **GitHub Wiki**로 내보내기 (설계 배너 드롭다운)
 - 아키텍처 리포트를 **GitHub Wiki**에 동기화 (`doc_sync`)
 - `commit_analyzer`로 커밋 이력 분석
 - 설계 GAP 요약을 PR에 직접 코멘트 (`pr_comment_notifier`)
 
 ---
 
-## 🔬 QA 파이프라인 *(개발 예정)*
+## 🔬 Dev Tracking 파이프라인
 
-> QA 파이프라인은 설계와 구현 사이의 간극을 자동으로 닫습니다. GitHub PR/push 이벤트에 자동 트리거되며 PM이 바로 결재할 수 있는 적합성 리포트를 생성합니다.
+> Dev Tracking 파이프라인은 설계와 구현 사이의 간극을 자동으로 닫습니다. GitHub PR/push 이벤트에 자동 트리거되거나 Dev Tracking 탭에서 수동으로 실행할 수 있으며, PM이 바로 결재할 수 있는 적합성 리포트를 생성합니다.
 
 ### 파이프라인 흐름
 
@@ -620,8 +621,10 @@ Electron 콘솔에서 `[Python] Initializing PM Agent Backend subsystems...` 메
 
 ## 🗺️ 로드맵
 
-- [ ] QA 파이프라인 — GitHub Webhook 연동 (설계 → 구현 적합성 검사)
-- [ ] QA 파이프라인 — `code_inventory` + `file_role_map` 기반 테스트 코드 자동 생성 및 실행
+- [x] Dev Tracking 파이프라인 — GitHub Webhook 연동 (설계 → 구현 적합성 검사)
+- [x] Dev Tracking 파이프라인 — Dev Tracking 탭에서 수동 실행
+- [x] GitHub Wiki / Issue 내보내기 (설계 배너 드롭다운)
+- [ ] Dev Tracking — `code_inventory` + `file_role_map` 기반 테스트 코드 자동 생성
 - [ ] 멀티 모델 지원: OpenAI / Anthropic Claude
 - [ ] MCP (Model Context Protocol) 서버 모드
 - [ ] Confluence / Notion 내보내기

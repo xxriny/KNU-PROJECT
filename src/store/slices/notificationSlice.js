@@ -7,7 +7,7 @@ export const createNotificationSlice = (set, get) => ({
     const notification = { id, message, type, meta, duration };
 
     set((state) => ({
-      notifications: [notification, ...state.notifications]
+      notifications: [notification, ...state.notifications].slice(0, 20)
     }));
 
     if (duration > 0) {

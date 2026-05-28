@@ -6,6 +6,7 @@ main.py에서 app.include_router(rest_router) 호출.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 import hashlib
 import hmac
@@ -286,7 +287,8 @@ async def analyze(req: AnalysisRequest, shared_db: Session = Depends(get_shared_
             try:
                 from pipeline.domain.dev_tracking.knowledge import query_dev_knowledge_artifacts
 
-                knowledge = query_dev_knowledge_artifacts(
+                knowledge = await asyncio.to_thread(
+                    query_dev_knowledge_artifacts,
                     shared_db,
                     team_id=req.team_id or "",
                     owner=req.owner,

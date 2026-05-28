@@ -144,8 +144,17 @@ export default function TaskApprovalPanel() {
 
   useEffect(() => {
     fetchTasks();
-    const id = setInterval(fetchTasks, 5000);
-    return () => clearInterval(id);
+    const id = setInterval(() => {
+      if (!document.hidden) fetchTasks();
+    }, 15_000);
+    const onVisibility = () => {
+      if (!document.hidden) fetchTasks();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [fetchTasks]);
 
   // 상태 전환

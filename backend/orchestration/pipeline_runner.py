@@ -299,7 +299,7 @@ async def run_analysis(ws: WebSocket, payload: dict) -> None:
     # UPDATE: 코드 스캔 불필요 — 이전 설계 artifact(context)가 진실 소스
     code_inventory: dict = {}
     if action_type == "REVERSE_ENGINEER" and source_dir:
-        context, code_inventory = build_reverse_context(source_dir)
+        context, code_inventory = await asyncio.to_thread(build_reverse_context, source_dir)
         if not context:
             await manager.send_json(ws, {
                 "type": "error",

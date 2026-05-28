@@ -1,6 +1,9 @@
 import re, os
 from typing import List, Optional
 from llmlingua import PromptCompressor as LinguaCompressor
+from observability.logger import get_logger
+
+_logger = get_logger()
 
 MAX_COMPRESS_CHARS = 24000
 
@@ -32,7 +35,7 @@ class PromptCompressor:
         if self._initialized:
             return
         
-        print(f"--- Initializing PromptCompressor with {model_name} on {device}... ---")
+        _logger.info("compressor_init", model=model_name, device=device)
         try:
             self.compressor = LinguaCompressor(
                 model_name=model_name,
@@ -40,9 +43,9 @@ class PromptCompressor:
                 use_llmlingua2=True
             )
             self._initialized = True
-            print("DONE: PromptCompressor initialized successfully.")
+            _logger.info("compressor_ready")
         except Exception as e:
-            print(f"FAIL: Failed to initialize PromptCompressor: {e}")
+            _logger.error("compressor_init_failed", error=str(e))
             self.compressor = None
 
     def compress_with_preservation(

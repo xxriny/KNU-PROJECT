@@ -7,6 +7,9 @@ import {
   normalizeMode
 } from "../storeHelpers";
 
+let _thinkingBuf = [];
+let _thinkingTimer = null;
+
 export const createPipelineSlice = (set, get) => ({
   pipelineStatus: "idle",
   pipelineError: null,
@@ -74,12 +77,17 @@ export const createPipelineSlice = (set, get) => ({
         if (isBackground) {
           const prev = get().teamWorkspaces[analysisOwnerTeamId]?.thinkingLog || [];
           get()._updateParkedWorkspace(analysisOwnerTeamId, {
-            thinkingLog: [...prev, { node, text: data.text, timestamp: Date.now() }],
+            thinkingLog: [...prev, { node, text: data.text, timestamp: Date.now() }].slice(-100),
           });
         } else {
-          set((state) => ({
-            thinkingLog: [...state.thinkingLog, { node, text: data.text, timestamp: Date.now() }]
-          }));
+          _thinkingBuf.push({ node, text: data.text, timestamp: Date.now() });
+          if (!_thinkingTimer) {
+            _thinkingTimer = setTimeout(() => {
+              const msgs = _thinkingBuf.splice(0);
+              _thinkingTimer = null;
+              set((state) => ({ thinkingLog: [...state.thinkingLog, ...msgs].slice(-100) }));
+            }, 200);
+          }
         }
         break;
       case "result":
