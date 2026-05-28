@@ -297,7 +297,13 @@ export default function TaskApprovalPanel() {
       const res = await fetch(`http://127.0.0.1:${port}/api/agile/distribute-tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ team_id: teamId, auth_token: authToken, api_key: apiKey, distributed_by: userId }),
+        body: JSON.stringify({
+          team_id: teamId,
+          auth_token: authToken,
+          api_key: apiKey,
+          distributed_by: userId,
+          members: teamMembers.map((m) => ({ id: m.id, name: m.name || m.email, role: m.role })),
+        }),
       });
       const json = await res.json();
       if (json.status === "ok") {

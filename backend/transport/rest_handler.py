@@ -1904,6 +1904,7 @@ class DistributeTasksRequest(BaseModel):
     api_key: str = ""
     model: str = ""
     distributed_by: str = ""
+    members: list = []
 
 
 @rest_router.post("/api/agile/generate-tasks")
@@ -1956,6 +1957,7 @@ async def distribute_tasks_endpoint(req: DistributeTasksRequest):
             api_key=req.api_key,
             model=req.model or DEFAULT_MODEL,
             distributed_by=req.distributed_by,
+            members=req.members or [],
         )
         return {"status": "ok", "data": result}
     except Exception as e:

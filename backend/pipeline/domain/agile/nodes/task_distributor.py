@@ -23,10 +23,11 @@ from observability.logger import get_logger
 logger = get_logger()
 
 ROLE_AREA_COMPAT: dict[str, set[str]] = {
-    "engineer":  {"backend", "frontend", "fullstack", "devops"},
-    "backend":   {"backend", "fullstack"},
-    "frontend":  {"frontend", "fullstack"},
-    "devops":    {"devops"},
+    "software_engineer": {"backend", "frontend", "fullstack", "devops", "sa"},
+    "engineer":          {"backend", "frontend", "fullstack", "devops", "sa"},
+    "backend":           {"backend", "fullstack"},
+    "frontend":          {"frontend", "fullstack"},
+    "devops":            {"devops"},
 }
 
 
@@ -137,11 +138,16 @@ def run_task_distributor(
     api_key: str,
     model: str,
     distributed_by: str = "",
+    members: list | None = None,
 ) -> dict:
     """
     unassigned 태스크 → 팀 멤버에게 배분 → pending_approval 상태로 전환.
+    members: 프론트엔드에서 전달한 팀원 목록 (Cloud Run DB 기준). 없으면 로컬 shared.db 조회.
     """
-    members = _get_team_members(team_id)
+    if members:
+        members = [m for m in members if m.get("role") != "pm"]
+    else:
+        members = _get_team_members(team_id)
     if not members:
         logger.warning("[task_distributor] 배분 가능한 팀 멤버 없음 (pm 외 멤버 없음)")
         return {"assigned": 0, "message": "배분 가능한 팀 멤버가 없습니다."}
