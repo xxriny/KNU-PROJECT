@@ -160,9 +160,8 @@ def extract_final_idea(
 
     try:
         from langchain_core.messages import SystemMessage, HumanMessage
-        from pipeline.core.utils import get_effective_key
+        from pipeline.core.utils import get_effective_key, get_llm
 
-        # 키 fetch 단계 로깅
         try:
             resolved_key = get_effective_key(api_key)
             logger.info(f"[extract_final_idea] key resolved OK (len={len(resolved_key)})")
@@ -170,16 +169,32 @@ def extract_final_idea(
             logger.error(f"[extract_final_idea] key resolve FAILED: {ve}")
             raise
 
-        llm = get_llm(api_key=api_key, model=model)
-        logger.info(f"[extract_final_idea] LLM instance acquired, invoking structured output...")
-        structured_llm = llm.with_structured_output(FinalIdeaOutput)
-        out = structured_llm.invoke([
-            SystemMessage(content=SYSTEM_PROMPT),
+        # temperature=0 + JSON 직접 파싱으로 structured_output 오버헤드 제거
+        llm = get_llm(api_key=resolved_key, model=model, temperature=0)
+        logger.info(f"[extract_final_idea] LLM invoking (direct JSON)...")
+
+        json_prompt = (
+            SYSTEM_PROMPT
+            + "\n\n반드시 다음 JSON 형식으로만 응답하라 (코드블록 없이):\n"
+            '{\"summary_markdown\": \"...\", \"dropped_points\": [\"...\"]}'
+        )
+        response = llm.invoke([
+            SystemMessage(content=json_prompt),
             HumanMessage(content=user_msg),
         ])
+        raw = response.content if hasattr(response, "content") else str(response)
+        if isinstance(raw, list):
+            raw = " ".join(item.get("text", str(item)) if isinstance(item, dict) else str(item) for item in raw)
 
-        if isinstance(out, dict):
-            out = FinalIdeaOutput.model_validate(out)
+        # JSON 파싱 (코드블록 제거 후 시도)
+        import re as _re
+        cleaned = _re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=_re.MULTILINE).strip()
+        try:
+            parsed = json.loads(cleaned)
+            out = FinalIdeaOutput.model_validate(parsed)
+        except Exception:
+            # JSON 파싱 실패 시 raw를 마크다운으로 그대로 사용
+            out = FinalIdeaOutput(summary_markdown=cleaned, dropped_points=[])
 
         summary = (out.summary_markdown or "").strip()
         dropped = [s.strip() for s in (out.dropped_points or []) if isinstance(s, str) and s.strip()]

@@ -1,19 +1,12 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
   Rocket, X, Sparkles, Layers, MessageSquare, StickyNote,
-  Wand2, Loader2, AlertTriangle, ChevronDown, Trash2,
+  Wand2, Loader2, AlertTriangle, ChevronDown, Trash2, Pencil, Eye,
 } from "lucide-react";
 import useAppStore from "../store/useAppStore";
 
 /**
  * 🚀 Sync 확인 모달 — Pre-flight 요약 + 사용자 검토/편집 → 빌드
- *
- * 흐름:
- * 1. 모달이 열리면 store.extractFinalIdea()를 호출, 날것 대화·메모를
- *    LLM 1회로 정제해 '최종 확정 요구사항' 마크다운을 받는다.
- * 2. 결과는 편집 가능한 textarea로 노출. 사용자가 그대로 쓰거나 다듬을 수 있다.
- * 3. [적용 및 빌드] 클릭 시 textarea 내용을 ideaOverride로 onConfirm에 전달.
- *    무거운 PM/SA 파이프라인은 이 깨끗한 입력만 보게 된다.
  */
 export default function SyncConfirmModal({
   open,
@@ -32,6 +25,7 @@ export default function SyncConfirmModal({
   const [editedText, setEditedText] = useState("");
   const [droppedPoints, setDroppedPoints] = useState([]);
   const [showOriginals, setShowOriginals] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const textareaRef = useRef(null);
 
   const diffCount = (chatDiff || []).length;
@@ -58,21 +52,11 @@ export default function SyncConfirmModal({
 
   const confirmLabel = isFirstBuild ? "🚀 적용 및 설계 시작" : "🚀 적용 및 업데이트";
 
-  // 모달 열림 → Pre-flight 요약 자동 호출
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
+  const doExtract = useCallback(() => {
     setIsExtracting(true);
     setExtractError("");
-    setEditedText("");
-    setDroppedPoints([]);
-    setShowOriginals(false);
-
-    if (!hasRawChanges) {
-      setIsExtracting(false);
-      return () => { cancelled = true; };
-    }
-
+    setIsEditing(false);
+    let cancelled = false;
     extractFinalIdea()
       .then((res) => {
         if (cancelled) return;
@@ -90,12 +74,32 @@ export default function SyncConfirmModal({
       .finally(() => {
         if (!cancelled) setIsExtracting(false);
       });
-
     return () => { cancelled = true; };
-    // hasRawChanges는 chatDiff/activeMemos 길이에 의해 결정되므로 의존성 폭주 방지를
-    // 위해 open만 트리거로 사용. 동일 데이터 재호출은 의도된 동작.
+  }, [extractFinalIdea]);
+
+  // 모달 열림 → Pre-flight 요약 자동 호출
+  useEffect(() => {
+    if (!open) return;
+    setEditedText("");
+    setDroppedPoints([]);
+    setShowOriginals(false);
+    setIsEditing(false);
+
+    if (!hasRawChanges) {
+      setIsExtracting(false);
+      return;
+    }
+    return doExtract();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // textarea 높이 자동 조절
+  useEffect(() => {
+    if (!textareaRef.current || !isEditing) return;
+    textareaRef.current.style.height = "auto";
+    textareaRef.current.style.height =
+      Math.min(textareaRef.current.scrollHeight, 320) + "px";
+  }, [editedText, isEditing]);
 
   // ESC 닫기 / Ctrl+Enter 수락
   useEffect(() => {
@@ -110,34 +114,11 @@ export default function SyncConfirmModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onCancel, onConfirm, canConfirm, trimmedFinal]);
 
-  // textarea 높이 자동 조절
-  useEffect(() => {
-    if (!textareaRef.current) return;
-    textareaRef.current.style.height = "auto";
-    textareaRef.current.style.height =
-      Math.min(textareaRef.current.scrollHeight, 320) + "px";
-  }, [editedText, open]);
-
   if (!open) return null;
 
   const handleConfirm = () => {
     if (!canConfirm) return;
     onConfirm?.(trimmedFinal);
-  };
-
-  const handleRetry = () => {
-    setIsExtracting(true);
-    setExtractError("");
-    extractFinalIdea()
-      .then((res) => {
-        if (res?.status === "ok") {
-          setEditedText(res.summary_markdown || "");
-          setDroppedPoints(res.dropped_points || []);
-        } else {
-          setExtractError(res?.error || "요약 추출에 실패했습니다.");
-        }
-      })
-      .finally(() => setIsExtracting(false));
   };
 
   return (
@@ -260,33 +241,57 @@ export default function SyncConfirmModal({
                     AI 정제 결과
                   </h3>
                 </div>
-                {!isExtracting && !extractError && (
-                  <button
-                    onClick={handleRetry}
-                    title="다시 추출"
-                    className={`text-[11px] font-bold px-2 py-1 rounded-md transition-colors ${
-                      isDarkMode
-                        ? "text-slate-400 hover:text-slate-100 hover:bg-white/[0.06]"
-                        : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
-                    }`}
-                  >
-                    ↻ 다시 추출
-                  </button>
-                )}
+                <div className="flex items-center gap-1">
+                  {!isExtracting && !extractError && editedText && (
+                    <button
+                      onClick={() => setIsEditing((v) => !v)}
+                      title={isEditing ? "미리보기" : "직접 편집"}
+                      className={`text-[11px] font-bold px-2 py-1 rounded-md flex items-center gap-1 transition-colors ${
+                        isEditing
+                          ? isDarkMode
+                            ? "bg-blue-500/20 text-blue-300"
+                            : "bg-blue-100 text-blue-700"
+                          : isDarkMode
+                            ? "text-slate-400 hover:text-slate-100 hover:bg-white/[0.06]"
+                            : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                      }`}
+                    >
+                      {isEditing ? <Eye size={11} /> : <Pencil size={11} />}
+                      {isEditing ? "미리보기" : "편집"}
+                    </button>
+                  )}
+                  {!isExtracting && !extractError && (
+                    <button
+                      onClick={doExtract}
+                      title="다시 추출"
+                      className={`text-[11px] font-bold px-2 py-1 rounded-md transition-colors ${
+                        isDarkMode
+                          ? "text-slate-400 hover:text-slate-100 hover:bg-white/[0.06]"
+                          : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                      }`}
+                    >
+                      ↻ 다시 추출
+                    </button>
+                  )}
+                </div>
               </div>
 
               {isExtracting && (
                 <div
-                  className={`px-4 py-6 rounded-2xl border flex items-center justify-center gap-3 ${
+                  className={`px-4 py-6 rounded-2xl border flex flex-col items-center justify-center gap-3 ${
                     isDarkMode
                       ? "bg-white/[0.02] border-white/5 text-slate-400"
                       : "bg-slate-50/60 border-slate-200 text-slate-500"
                   }`}
                 >
-                  <Loader2 size={16} className="animate-spin text-blue-500" />
+                  <Loader2 size={18} className="animate-spin text-blue-500" />
                   <span className="text-[12px] font-medium">
                     대화·메모에서 최종 합의된 요구사항을 정리 중...
                   </span>
+                  <div className={`w-48 h-1 rounded-full overflow-hidden ${isDarkMode ? "bg-white/5" : "bg-slate-200"}`}>
+                    <div className="h-full bg-blue-500 rounded-full animate-[shimmer_1.5s_ease-in-out_infinite]"
+                      style={{ animation: "indeterminate 1.5s ease-in-out infinite" }} />
+                  </div>
                 </div>
               )}
 
@@ -302,7 +307,7 @@ export default function SyncConfirmModal({
                   <div className="flex-1 text-[12px] font-medium leading-snug">
                     <div>정제 단계 실패: {extractError}</div>
                     <button
-                      onClick={handleRetry}
+                      onClick={doExtract}
                       className={`mt-1 text-[11px] font-bold underline ${
                         isDarkMode ? "text-rose-200" : "text-rose-800"
                       }`}
@@ -314,21 +319,30 @@ export default function SyncConfirmModal({
               )}
 
               {!isExtracting && !extractError && (
-                <textarea
-                  ref={textareaRef}
-                  value={editedText}
-                  onChange={(e) => setEditedText(e.target.value)}
-                  placeholder="정제된 요구사항이 여기에 표시됩니다. 직접 수정해도 됩니다."
-                  className={`
-                    w-full rounded-2xl border px-4 py-3 text-[13px] leading-relaxed resize-none
-                    font-mono whitespace-pre-wrap focus:outline-none focus:ring-2 transition-all
-                    ${isDarkMode
-                      ? "bg-white/[0.03] border-white/10 text-slate-100 placeholder:text-slate-600 focus:ring-blue-400/40 focus:border-blue-400/40"
-                      : "bg-slate-50/60 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:ring-blue-300 focus:border-blue-300"
-                    }
-                  `}
-                  style={{ minHeight: "120px" }}
-                />
+                isEditing ? (
+                  <textarea
+                    ref={textareaRef}
+                    value={editedText}
+                    onChange={(e) => setEditedText(e.target.value)}
+                    autoFocus
+                    placeholder="정제된 요구사항이 여기에 표시됩니다. 직접 수정해도 됩니다."
+                    className={`
+                      w-full rounded-2xl border px-4 py-3 text-[13px] leading-relaxed resize-none
+                      font-mono whitespace-pre-wrap focus:outline-none focus:ring-2 transition-all
+                      ${isDarkMode
+                        ? "bg-white/[0.03] border-white/10 text-slate-100 placeholder:text-slate-600 focus:ring-blue-400/40 focus:border-blue-400/40"
+                        : "bg-slate-50/60 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:ring-blue-300 focus:border-blue-300"
+                      }
+                    `}
+                    style={{ minHeight: "120px" }}
+                  />
+                ) : (
+                  <MarkdownPreview
+                    markdown={editedText}
+                    isDarkMode={isDarkMode}
+                    onEditRequest={() => setIsEditing(true)}
+                  />
+                )
               )}
             </section>
           )}
@@ -471,6 +485,138 @@ export default function SyncConfirmModal({
       </div>
     </div>
   );
+}
+
+/** 경량 마크다운 렌더러 — 별도 패키지 없이 bullet/header/bold/inline-code 지원 */
+function MarkdownPreview({ markdown, isDarkMode, onEditRequest }) {
+  if (!markdown?.trim()) return null;
+
+  const lines = markdown.split("\n");
+  const elements = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const raw = lines[i];
+    const trimmed = raw.trimEnd();
+
+    // 빈 줄
+    if (!trimmed) {
+      elements.push(<div key={i} className="h-1.5" />);
+      i++;
+      continue;
+    }
+
+    // ## 헤더
+    const h2 = trimmed.match(/^##\s+(.+)/);
+    if (h2) {
+      elements.push(
+        <p key={i} className={`text-[11px] font-black uppercase tracking-widest mt-3 mb-1 ${isDarkMode ? "text-blue-300" : "text-blue-600"}`}>
+          {h2[1]}
+        </p>
+      );
+      i++;
+      continue;
+    }
+
+    // # 헤더
+    const h1 = trimmed.match(/^#\s+(.+)/);
+    if (h1) {
+      elements.push(
+        <p key={i} className={`text-[12px] font-black uppercase tracking-widest mt-3 mb-1 ${isDarkMode ? "text-purple-300" : "text-purple-700"}`}>
+          {h1[1]}
+        </p>
+      );
+      i++;
+      continue;
+    }
+
+    // 번호 목록 (1. )
+    const ol = trimmed.match(/^(\d+)\.\s+(.+)/);
+    if (ol) {
+      const indent = raw.match(/^(\s*)/)[1].length;
+      elements.push(
+        <div key={i} className="flex gap-2 items-start" style={{ paddingLeft: indent * 4 }}>
+          <span className={`shrink-0 text-[11px] font-black mt-0.5 w-4 text-right ${isDarkMode ? "text-blue-400" : "text-blue-500"}`}>
+            {ol[1]}.
+          </span>
+          <span className={`text-[13px] leading-relaxed ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>
+            {renderInline(ol[2], isDarkMode)}
+          </span>
+        </div>
+      );
+      i++;
+      continue;
+    }
+
+    // 불릿 목록 (- 또는 *)
+    const li = trimmed.match(/^[-*]\s+(.+)/);
+    if (li) {
+      const indent = raw.match(/^(\s*)/)[1].length;
+      elements.push(
+        <div key={i} className="flex gap-2 items-start" style={{ paddingLeft: Math.max(0, indent - 2) * 4 }}>
+          <span className={`shrink-0 text-[10px] font-black mt-[5px] ${isDarkMode ? "text-blue-400" : "text-blue-500"}`}>
+            {indent >= 2 ? "◦" : "•"}
+          </span>
+          <span className={`text-[13px] leading-relaxed ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>
+            {renderInline(li[1], isDarkMode)}
+          </span>
+        </div>
+      );
+      i++;
+      continue;
+    }
+
+    // 일반 텍스트
+    elements.push(
+      <p key={i} className={`text-[13px] leading-relaxed ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
+        {renderInline(trimmed, isDarkMode)}
+      </p>
+    );
+    i++;
+  }
+
+  return (
+    <div
+      onClick={onEditRequest}
+      title="클릭하여 편집"
+      className={`
+        rounded-2xl border px-4 py-3 space-y-0.5 cursor-text transition-all
+        ${isDarkMode
+          ? "bg-white/[0.03] border-white/10 hover:border-blue-400/30"
+          : "bg-slate-50/60 border-slate-200 hover:border-blue-300"
+        }
+      `}
+    >
+      {elements}
+    </div>
+  );
+}
+
+/** 인라인 마크다운 파싱: **bold**, `code` */
+function renderInline(text, isDarkMode) {
+  const parts = [];
+  const regex = /(\*\*(.+?)\*\*|`(.+?)`)/g;
+  let last = 0;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    if (match[2] !== undefined) {
+      parts.push(
+        <strong key={match.index} className={isDarkMode ? "text-white font-bold" : "text-slate-900 font-bold"}>
+          {match[2]}
+        </strong>
+      );
+    } else if (match[3] !== undefined) {
+      parts.push(
+        <code key={match.index} className={`px-1 py-0.5 rounded text-[11px] font-mono ${isDarkMode ? "bg-white/10 text-blue-200" : "bg-slate-200 text-blue-700"}`}>
+          {match[3]}
+        </code>
+      );
+    }
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts.length > 0 ? parts : text;
 }
 
 function RawList({ Icon, isDarkMode, title, items, moreCount }) {

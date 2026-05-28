@@ -25,6 +25,7 @@ export default function AgileImpactTab() {
   const resultData = useAppStore((s) => s.resultData);
   const apiKey = useAppStore((s) => s.apiKey);
   const backendHasKey = useAppStore((s) => s.backendHasKey);
+  const authToken = useAppStore((s) => s.authToken);
   const currentUser = useAppStore((s) => s.currentUser);
   const userRole = useAppStore((s) => s.userRole);
   const backendPort = useAppStore((s) => s.backendPort);
@@ -66,7 +67,8 @@ export default function AgileImpactTab() {
             tables: saData.tables || [],
           },
           api_key: apiKey || "",
-          use_llm: (!!apiKey || backendHasKey) && isGithubConnected,
+          auth_token: authToken || "",
+          use_llm: !!apiKey || !!authToken || backendHasKey,
         }),
       });
       const json = await res.json();
