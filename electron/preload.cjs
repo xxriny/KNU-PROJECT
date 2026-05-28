@@ -59,4 +59,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
   /** onGithubAuthCallback 리스너 해제 */
   removeGithubAuthCallback: () =>
     ipcRenderer.removeAllListeners("github-auth-callback"),
+
+  /** 업데이트 가능 알림 수신 */
+  onUpdateAvailable: (cb) =>
+    ipcRenderer.on("update-available", (_, info) => cb(info)),
+
+  /** 업데이트 다운로드 완료 알림 수신 */
+  onUpdateDownloaded: (cb) =>
+    ipcRenderer.on("update-downloaded", (_, info) => cb(info)),
+
+  /** 업데이트 설치 및 재시작 */
+  installUpdate: () => ipcRenderer.invoke("install-update"),
 });

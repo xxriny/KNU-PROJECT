@@ -21,6 +21,7 @@ const path = require("path");
 const net = require("net");
 const http = require("http");
 const fs = require("fs");
+const { autoUpdater } = require("electron-updater");
 
 // OS 디스플레이 배율(125%, 150% 등)을 무시하고 항상 1:1 픽셀로 렌더링.
 // zoomFactor만으로는 OS-level DPI 스케일링을 막을 수 없어 commandLine 플래그가 필요.
@@ -127,12 +128,19 @@ function findFreePort() {
  * @param {number} port - 할당된 포트 번호
  */
 function startPythonBackend(port) {
-  // venv가 존재하면 우선 사용해 의존성 드리프트(예: anaconda Python pick-up) 방지.
+  // 우선순위: 번들 Python → .venv → 시스템 Python
+  const bundledPython = process.platform === "win32"
+    ? path.join(BACKEND_DIR, ".python", "python.exe")
+    : path.join(BACKEND_DIR, ".python", "bin", "python");
   const venvPython = process.platform === "win32"
     ? path.join(BACKEND_DIR, ".venv", "Scripts", "python.exe")
     : path.join(BACKEND_DIR, ".venv", "bin", "python");
   const fallbackCmd = process.platform === "win32" ? "python" : "python3";
-  const pythonCmd = fs.existsSync(venvPython) ? venvPython : fallbackCmd;
+  const pythonCmd = fs.existsSync(bundledPython)
+    ? bundledPython
+    : fs.existsSync(venvPython)
+      ? venvPython
+      : fallbackCmd;
   const mainScript = path.join(BACKEND_DIR, "main.py");
 
   safeLog(`[Electron] Starting Python backend using ${pythonCmd} on port ${port}...`);
@@ -144,8 +152,9 @@ function startPythonBackend(port) {
     stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env,
-      PYTHONUNBUFFERED: "1",        // 실시간 로그 출력
-      PYTHONIOENCODING: "utf-8",    // 한글 인코딩
+      PYTHONUNBUFFERED: "1",
+      PYTHONIOENCODING: "utf-8",
+      PYTHONPATH: BACKEND_DIR,      // Embeddable Python은 cwd를 sys.path에 추가 안 함
     },
   });
 
@@ -416,6 +425,45 @@ ipcMain.handle("reload-window", () => {
 //  앱 라이프사이클
 // ═══════════════════════════════════════════
 
+// ═══════════════════════════════════════════
+//  Auto Updater
+// ═══════════════════════════════════════════
+
+function setupAutoUpdater() {
+  if (isDev) return; // 개발 모드에서는 업데이트 비활성화
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("update-available", (info) => {
+    safeLog(`[Updater] 새 버전 발견: ${info.version}`);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("update-available", info);
+    }
+  });
+
+  autoUpdater.on("update-downloaded", (info) => {
+    safeLog(`[Updater] 다운로드 완료: ${info.version}`);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("update-downloaded", info);
+    }
+  });
+
+  autoUpdater.on("error", (err) => {
+    safeError("[Updater] 오류:", err.message);
+  });
+
+  // 앱 시작 5초 후 업데이트 확인 (백엔드 준비 후)
+  setTimeout(() => autoUpdater.checkForUpdates(), 5000);
+
+  // 이후 6시간마다 재확인
+  setInterval(() => autoUpdater.checkForUpdates(), 6 * 60 * 60 * 1000);
+}
+
+ipcMain.handle("install-update", () => {
+  autoUpdater.quitAndInstall();
+});
+
 app.whenReady().then(async () => {
   try {
     // 1. 빈 포트 할당
@@ -430,6 +478,9 @@ app.whenReady().then(async () => {
 
     // 4. 윈도우 생성
     createWindow();
+
+    // 5. 자동 업데이트 설정
+    setupAutoUpdater();
   } catch (err) {
     safeError("[Electron] Startup failed:", err.message);
     app.quit();

@@ -11,6 +11,7 @@
     "dev:electron:now": "electron .",
     "build": "vite build",
     "build:electron": "vite build && electron-builder",
+    "build:prod": "node scripts/build-prod.cjs",
     "start": "electron .",
     "backend": "cd backend && python main.py --port 8765"
   },
@@ -21,6 +22,7 @@
     "@tisoap/react-flow-smart-edge": "^4.0.1",
     "@xyflow/react": "^12.10.2",
     "dagre": "^0.8.5",
+    "electron-updater": "^6.8.3",
     "elkjs": "^0.11.1",
     "framer-motion": "^12.38.0",
     "lucide-react": "^0.400.0",
@@ -58,7 +60,13 @@
         "filter": [
           "**/*",
           "!__pycache__/**",
-          "!*.pyc"
+          "!*.pyc",
+          "!.venv/**",
+          "!models/**",
+          "!storage/**",
+          "!test/**",
+          "!scratch/**",
+          "!.pytest_cache/**"
         ]
       }
     ],
@@ -67,6 +75,12 @@
     },
     "mac": {
       "target": "dmg"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "xxriny",
+      "repo": "KNU-PROJECT",
+      "private": true
     }
   },
   "overrides": {
