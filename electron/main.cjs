@@ -13,6 +13,12 @@
  * - 프로세스 종료 시 stdout/stderr 리스너 제거 후 파이프 닫기
  * - process.stdout.write 대신 console.log 사용 시 EPIPE 방어 처리
  * - pythonProcess.stdout/stderr에 'error' 이벤트 핸들러 추가
+ *
+ * 수정 (v2.3 — macOS 지원):
+ * - PyInstaller 번들 바이너리 우선 탐색 (dist/navigator-backend/navigator-backend)
+ * - macOS: titleBarStyle "hiddenInset" + setTitleBarOverlay 호출 비활성화
+ * - NAVIGATOR_BACKEND_ROOT / NAVIGATOR_STORAGE_DIR 환경변수 주입
+ *   (PyInstaller frozen 모드에서 __file__ 기반 경로 탐색이 불가하므로)
  */
 
 const { app, BrowserWindow, ipcMain, Menu, dialog, nativeTheme, shell } = require("electron");
@@ -125,38 +131,79 @@ function findFreePort() {
 
 /**
  * Python FastAPI 백엔드를 자식 프로세스로 실행.
+ *
+ * 우선순위:
+ *   1. PyInstaller 번들 바이너리 (dist/navigator-backend/navigator-backend)
+ *      — macOS 프로덕션 빌드. Python 인터프리터 없이 직접 실행.
+ *   2. Windows Embeddable Python (.python/python.exe)
+ *      — Windows 프로덕션 빌드 (build-prod.cjs가 설치).
+ *   3. .venv Python — 개발 환경.
+ *   4. 시스템 Python — 최후 폴백.
+ *
  * @param {number} port - 할당된 포트 번호
  */
 function startPythonBackend(port) {
-  // 우선순위: 번들 Python → .venv → 시스템 Python
-  const bundledPython = process.platform === "win32"
+  const isWin = process.platform === "win32";
+
+  // 1) PyInstaller 번들 바이너리 (macOS/Linux 프로덕션)
+  const pyinstallerBin = path.join(
+    BACKEND_DIR, "dist", "navigator-backend",
+    isWin ? "navigator-backend.exe" : "navigator-backend"
+  );
+
+  // 2) Embeddable Python (Windows 프로덕션)
+  const bundledPython = isWin
     ? path.join(BACKEND_DIR, ".python", "python.exe")
     : path.join(BACKEND_DIR, ".python", "bin", "python");
-  const venvPython = process.platform === "win32"
+
+  // 3) venv Python (개발 환경)
+  const venvPython = isWin
     ? path.join(BACKEND_DIR, ".venv", "Scripts", "python.exe")
     : path.join(BACKEND_DIR, ".venv", "bin", "python");
-  const fallbackCmd = process.platform === "win32" ? "python" : "python3";
-  const pythonCmd = fs.existsSync(bundledPython)
-    ? bundledPython
-    : fs.existsSync(venvPython)
-      ? venvPython
-      : fallbackCmd;
-  const mainScript = path.join(BACKEND_DIR, "main.py");
 
-  safeLog(`[Electron] Starting Python backend using ${pythonCmd} on port ${port}...`);
-  safeLog(`[Electron] Script: ${mainScript}`);
+  const fallbackCmd = isWin ? "python" : "python3";
 
-  pythonProcess = spawn(pythonCmd, ["main.py", "--port", String(port)], {
-    cwd: BACKEND_DIR,
-    // 'pipe'를 사용하되 스트림 오류를 명시적으로 처리
-    stdio: ["ignore", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      PYTHONUNBUFFERED: "1",
-      PYTHONIOENCODING: "utf-8",
-      PYTHONPATH: BACKEND_DIR,      // Embeddable Python은 cwd를 sys.path에 추가 안 함
-    },
-  });
+  // PyInstaller frozen 모드에서 __file__ 기반 경로가 bundle 내부를 가리키므로
+  // 올바른 backend 루트 디렉토리를 환경변수로 명시 전달.
+  const commonEnv = {
+    ...process.env,
+    PYTHONUNBUFFERED: "1",
+    PYTHONIOENCODING: "utf-8",
+    NAVIGATOR_BACKEND_ROOT: BACKEND_DIR,
+    // NAVIGATOR_STORAGE_DIR: 사용자가 별도 지정한 경우 덮어쓰지 않음
+    NAVIGATOR_STORAGE_DIR: process.env.NAVIGATOR_STORAGE_DIR
+      || path.join(BACKEND_DIR, "storage"),
+  };
+
+  if (fs.existsSync(pyinstallerBin)) {
+    // PyInstaller 번들: Python 인터프리터 없이 직접 실행
+    safeLog(`[Electron] Using PyInstaller bundle: ${pyinstallerBin}`);
+    pythonProcess = spawn(pyinstallerBin, ["--port", String(port)], {
+      cwd: BACKEND_DIR,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: commonEnv,
+    });
+  } else {
+    // Python 인터프리터 + main.py 실행
+    const pythonCmd = fs.existsSync(bundledPython)
+      ? bundledPython
+      : fs.existsSync(venvPython)
+        ? venvPython
+        : fallbackCmd;
+    const mainScript = path.join(BACKEND_DIR, "main.py");
+
+    safeLog(`[Electron] Starting Python backend using ${pythonCmd} on port ${port}...`);
+    safeLog(`[Electron] Script: ${mainScript}`);
+
+    pythonProcess = spawn(pythonCmd, ["main.py", "--port", String(port)], {
+      cwd: BACKEND_DIR,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...commonEnv,
+        PYTHONPATH: BACKEND_DIR,   // Embeddable Python은 cwd를 sys.path에 추가 안 함
+      },
+    });
+  }
 
   // stdout 스트림 오류 방어 (EPIPE 핵심 수정)
   pythonProcess.stdout.on("error", (err) => {
@@ -292,7 +339,20 @@ function killPythonProcess() {
 // ═══════════════════════════════════════════
 
 function createWindow() {
-  // 초기 테마는 시스템 설정을 따르거나 기본값 유지 (렌더러에서 나중에 업데이트됨)
+  const isMac = process.platform === "darwin";
+
+  // titleBarOverlay (Windows 전용 — 색상/아이콘 커스텀 타이틀바)
+  // macOS는 titleBarStyle "hiddenInset"으로 트래픽 라이트 버튼을 유지
+  const titleBarOptions = isMac
+    ? { titleBarStyle: "hiddenInset" }
+    : {
+        titleBarStyle: "hidden",
+        titleBarOverlay: {
+          color: "#0D1117",
+          symbolColor: "#8B949E",
+          height: 56,
+        },
+      };
 
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -301,12 +361,7 @@ function createWindow() {
     minHeight: 700,
     title: "NAVIGATOR",
     backgroundColor: "#0D1117",
-    titleBarStyle: "hidden",
-    titleBarOverlay: {
-      color: "#0D1117",
-      symbolColor: "#8B949E",
-      height: 56,
-    },
+    ...titleBarOptions,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -377,20 +432,18 @@ ipcMain.handle("select-folder", async () => {
   return result.canceled ? null : result.filePaths[0];
 });
 
-// 타이틀 바 오버레이 테마 실시간 업데이트 (Windows 전용)
+// 타이틀 바 오버레이 테마 실시간 업데이트 (Windows 전용 — macOS는 네이티브 처리)
 ipcMain.handle("set-titlebar-theme", (event, isDark) => {
-  if (!mainWindow) return;
+  if (!mainWindow || process.platform === "darwin") return;
 
   safeLog(`[Electron] Received theme update request: isDark=${isDark}`);
 
   try {
-    // 1. 네이티브 테마 소스 먼저 변경
     nativeTheme.themeSource = isDark ? "dark" : "light";
 
-    // 2. 오버레이 색상 적용
-    const themeColors = isDark 
-      ? { color: "#0D1117", symbolColor: "#8B949E" }  // Dark
-      : { color: "#F1F5F9", symbolColor: "#475569" }; // Light
+    const themeColors = isDark
+      ? { color: "#0D1117", symbolColor: "#8B949E" }
+      : { color: "#F1F5F9", symbolColor: "#475569" };
 
     mainWindow.setTitleBarOverlay({
       ...themeColors,

@@ -26,7 +26,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from version import APP_VERSION
 
 # ── 경로 설정 ────────────────────────────────────────────
-ROOT = os.path.dirname(os.path.abspath(__file__))
+# PyInstaller 번들로 실행 시 __file__은 bundle 내부(_internal/)를 가리키므로
+# Electron이 주입하는 NAVIGATOR_BACKEND_ROOT 환경변수를 우선 사용.
+# 일반 실행(개발/venv)에서는 이 환경변수가 없으므로 __file__ 기준 경로 사용.
+if getattr(sys, 'frozen', False):
+    ROOT = os.environ.get('NAVIGATOR_BACKEND_ROOT') or os.path.dirname(sys.executable)
+else:
+    ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 

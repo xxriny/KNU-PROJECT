@@ -1,16 +1,28 @@
 /**
- * 프로덕션 빌드 스크립트
+ * 프로덕션 빌드 스크립트 (Windows + macOS)
  *
  * 사용법:
- *   NAVIGATOR_JWT_SECRET=<시크릿> npm run build:prod
+ *   NAVIGATOR_JWT_SECRET=<시크릿> npm run build:prod    # Windows
+ *   NAVIGATOR_JWT_SECRET=<시크릿> npm run build:mac     # macOS (Mac에서 실행)
  *   또는 루트에 .env.build 파일 생성 후 NAVIGATOR_JWT_SECRET=<시크릿> 작성
  *
- * 동작:
+ * Windows 동작:
  *   1. NAVIGATOR_JWT_SECRET → backend/.env 주입
  *   2. Python 3.11 Embeddable 다운로드 → backend/.python/ 셋업
  *   3. pip install -r requirements.txt
- *   4. vite build + electron-builder
+ *   4. vite build + electron-builder (NSIS)
  *   5. backend/.env 정리 (기존 파일 아닌 경우)
+ *
+ * macOS 동작:
+ *   1. NAVIGATOR_JWT_SECRET → backend/.env 주입
+ *   2. pip3 install pyinstaller + pyinstaller navigator-backend.spec 실행
+ *   3. vite build + electron-builder (DMG, 서명 없음)
+ *   4. backend/.env 정리
+ *
+ * 주의:
+ *   - macOS 빌드는 반드시 macOS 머신(또는 GitHub Actions macos runner)에서 실행
+ *   - PyInstaller는 크로스 컴파일 불가 — macOS 바이너리는 macOS에서만 생성 가능
+ *   - 인증서 없이 빌드하면 Gatekeeper가 차단하므로 최초 실행 시 우클릭 → 열기 필요
  */
 
 const { execSync, spawnSync } = require("child_process");
@@ -25,6 +37,10 @@ const ENV_PATH = path.join(BACKEND_DIR, ".env");
 const BUILD_ENV_PATH = path.join(ROOT, ".env.build");
 const PYTHON_DIR = path.join(BACKEND_DIR, ".python");
 
+const IS_MAC = process.platform === "darwin";
+const IS_WIN = process.platform === "win32";
+
+// Windows Embeddable Python 설정
 const PYTHON_VERSION = "3.11.9";
 const PYTHON_EMBED_URL = `https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-embed-amd64.zip`;
 const GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py";
@@ -80,7 +96,43 @@ if (!envAlreadyExisted) {
   console.log("[build:prod] 기존 backend/.env 사용");
 }
 
-// ── Python Embeddable 셋업 ────────────────────────────────────
+// ── macOS: PyInstaller 번들 셋업 ─────────────────────────────
+async function setupPythonMac() {
+  const distBin = path.join(BACKEND_DIR, "dist", "navigator-backend", "navigator-backend");
+
+  if (fs.existsSync(distBin)) {
+    console.log("[build:prod] PyInstaller 번들 이미 존재, 스킵");
+    return;
+  }
+
+  console.log("\n[build:prod] PyInstaller 설치 중...");
+  run("pip3 install pyinstaller --quiet", { cwd: BACKEND_DIR });
+
+  console.log("[build:prod] backend 의존성 설치 중...");
+  const reqPath = path.join(BACKEND_DIR, "requirements.txt");
+  run(`pip3 install -r "${reqPath}" --quiet`, { cwd: BACKEND_DIR });
+
+  console.log("[build:prod] PyInstaller 번들 빌드 중 (수 분 소요)...\n");
+  const specPath = path.join(BACKEND_DIR, "navigator-backend.spec");
+  const distPath = path.join(BACKEND_DIR, "dist");
+  const buildPath = path.join(BACKEND_DIR, "build");
+  run(
+    `pyinstaller "${specPath}" --distpath "${distPath}" --workpath "${buildPath}" --noconfirm`,
+    { cwd: BACKEND_DIR }
+  );
+
+  // 실행 권한 확인
+  if (!fs.existsSync(distBin)) {
+    throw new Error(
+      `PyInstaller 빌드 후 바이너리를 찾을 수 없습니다: ${distBin}\n` +
+      "빌드 로그를 확인하세요 (backend/build/ 디렉토리)."
+    );
+  }
+  run(`chmod +x "${distBin}"`);
+  console.log("[build:prod] ✅ PyInstaller 번들 완료\n");
+}
+
+// ── Windows: Python Embeddable 셋업 ──────────────────────────
 async function setupPython() {
   const pythonExe = path.join(PYTHON_DIR, "python.exe");
 
@@ -135,17 +187,40 @@ async function setupPython() {
 // ── 메인 ─────────────────────────────────────────────────────
 (async () => {
   try {
-    await setupPython();
+    if (IS_MAC) {
+      // ── macOS 빌드 ──────────────────────────────────────────
+      if (IS_WIN) {
+        // 이 분기는 실제로는 도달하지 않지만 명시적으로 차단
+        throw new Error("macOS 빌드는 macOS 머신에서만 실행 가능합니다.");
+      }
+      await setupPythonMac();
 
-    console.log("[build:prod] Vite 빌드 + electron-builder 시작...\n");
-    run("npm run build:electron", {
-      env: {
-        ...process.env,
-        CSC_IDENTITY_AUTO_DISCOVERY: "false",
-      },
-    });
+      console.log("[build:prod] Vite 빌드 + electron-builder (DMG) 시작...\n");
+      run("npm run build:electron", {
+        env: {
+          ...process.env,
+          CSC_IDENTITY_AUTO_DISCOVERY: "false",  // 인증서 없이 빌드
+          CSC_IDENTITY: "",
+        },
+      });
 
-    console.log("\n[build:prod] ✅ 빌드 완료! dist/NAVIGATOR Setup x.x.x.exe 확인하세요.");
+      console.log("\n[build:prod] ✅ 빌드 완료!");
+      console.log("    dist/ 또는 release/ 디렉토리에서 .dmg 파일을 확인하세요.");
+      console.log("    ⚠️  서명 없는 빌드: 설치 후 첫 실행 시 우클릭 → 열기 로 실행하세요.");
+    } else {
+      // ── Windows 빌드 ────────────────────────────────────────
+      await setupPython();
+
+      console.log("[build:prod] Vite 빌드 + electron-builder 시작...\n");
+      run("npm run build:electron", {
+        env: {
+          ...process.env,
+          CSC_IDENTITY_AUTO_DISCOVERY: "false",
+        },
+      });
+
+      console.log("\n[build:prod] ✅ 빌드 완료! dist/NAVIGATOR Setup x.x.x.exe 확인하세요.");
+    }
   } catch (err) {
     console.error("\n[build:prod] ❌ 빌드 실패:", err.message);
     process.exit(1);

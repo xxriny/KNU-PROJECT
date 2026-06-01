@@ -1,0 +1,166 @@
+name: Build macOS DMG
+
+# ─── 트리거 ────────────────────────────────────────────────────────────────────
+# 1. v* 태그 푸시 시 자동 실행 (예: git tag v2.1.0 && git push origin v2.1.0)
+# 2. GitHub Actions 탭 → "Run workflow" 버튼으로 수동 실행 가능
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Build architecture'
+        required: false
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - arm64
+          - x64
+
+# ─── 빌드 매트릭스 ─────────────────────────────────────────────────────────────
+# arm64: macos-14 (Apple Silicon M1/M2 runner)
+# x64 : macos-13 (Intel runner) — Apple Silicon에서도 Rosetta 2로 실행 가능
+jobs:
+  build-mac:
+    name: Build DMG (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            arch: arm64
+          - os: macos-13
+            arch: x64
+
+    steps:
+      # ── 코드 체크아웃 ──────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Node.js 셋업 ───────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # ── Python 3.11 셋업 ───────────────────────────────────
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ── pip 캐시 (requirements.txt 해시 기준) ──────────────
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/pip
+          key: pip-${{ matrix.arch }}-${{ hashFiles('backend/requirements.txt') }}
+          restore-keys: pip-${{ matrix.arch }}-
+
+      # ── PyInstaller 캐시 (spec + requirements 변경 시 무효화) ─
+      - name: Cache PyInstaller bundle
+        id: cache-pyinstaller
+        uses: actions/cache@v4
+        with:
+          path: backend/dist/navigator-backend
+          key: pyinstaller-${{ matrix.arch }}-${{ hashFiles('backend/navigator-backend.spec', 'backend/requirements.txt') }}
+
+      # ── Node 의존성 설치 ────────────────────────────────────
+      - name: Install Node dependencies
+        run: npm ci
+
+      # ── Python 의존성 + PyInstaller 설치 ───────────────────
+      - name: Install Python dependencies
+        if: steps.cache-pyinstaller.outputs.cache-hit != 'true'
+        run: |
+          pip3 install --upgrade pip
+          pip3 install -r backend/requirements.txt
+          pip3 install pyinstaller
+
+      # ── PyInstaller 번들 빌드 ──────────────────────────────
+      - name: Build PyInstaller bundle
+        if: steps.cache-pyinstaller.outputs.cache-hit != 'true'
+        working-directory: backend
+        run: |
+          pyinstaller navigator-backend.spec \
+            --distpath dist \
+            --workpath build \
+            --noconfirm
+          chmod +x dist/navigator-backend/navigator-backend
+          echo "Binary size: $(du -sh dist/navigator-backend | cut -f1)"
+
+      # ── 번들 존재 검증 ─────────────────────────────────────
+      - name: Verify PyInstaller bundle
+        run: |
+          test -f backend/dist/navigator-backend/navigator-backend \
+            || (echo "ERROR: PyInstaller binary not found!" && exit 1)
+          echo "PyInstaller bundle OK"
+          ls -la backend/dist/navigator-backend/ | head -20
+
+      # ── backend/.env 생성 (빌드 전용 JWT secret) ───────────
+      - name: Create backend .env
+        run: |
+          JWT_SECRET="${{ secrets.NAVIGATOR_JWT_SECRET }}"
+          if [ -z "$JWT_SECRET" ]; then
+            # secrets가 없으면 CI용 랜덤 시크릿 생성 (사용자는 배포 후 직접 설정 필요)
+            JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+            echo "::warning::NAVIGATOR_JWT_SECRET secret이 설정되지 않아 랜덤 시크릿을 사용합니다."
+          fi
+          echo "NAVIGATOR_JWT_SECRET=${JWT_SECRET}" > backend/.env
+
+      # ── Electron DMG 빌드 (서명 없음) ─────────────────────
+      - name: Build Electron DMG
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_IDENTITY: ''
+        run: npm run build:electron
+
+      # ── DMG 파일 찾기 ──────────────────────────────────────
+      - name: Find DMG artifact
+        id: find-dmg
+        run: |
+          DMG=$(find dist -name "*.dmg" 2>/dev/null | head -1)
+          if [ -z "$DMG" ]; then
+            DMG=$(find release -name "*.dmg" 2>/dev/null | head -1)
+          fi
+          echo "dmg_path=$DMG" >> "$GITHUB_OUTPUT"
+          echo "Found DMG: $DMG"
+          ls -lh "$DMG" 2>/dev/null || echo "DMG not found — check build output"
+
+      # ── backend/.env 삭제 (보안) ───────────────────────────
+      - name: Cleanup .env
+        if: always()
+        run: rm -f backend/.env
+
+      # ── 아티팩트 업로드 ────────────────────────────────────
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NAVIGATOR-macOS-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            release/*.dmg
+          if-no-files-found: error
+          retention-days: 30
+
+  # ── 빌드 결과 요약 ─────────────────────────────────────────
+  summary:
+    name: Build Summary
+    needs: build-mac
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "## macOS Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Architecture | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| arm64 (Apple Silicon) | ${{ needs.build-mac.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| x64 (Intel / Rosetta 2) | ${{ needs.build-mac.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 설치 방법 (서명 없는 빌드)" >> $GITHUB_STEP_SUMMARY
+          echo "Gatekeeper가 차단할 경우: DMG 우클릭 → 열기 → 열기 버튼 클릭" >> $GITHUB_STEP_SUMMARY

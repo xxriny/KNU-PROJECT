@@ -12,6 +12,7 @@
     "build": "vite build",
     "build:electron": "vite build && electron-builder",
     "build:prod": "node scripts/build-prod.cjs",
+    "build:mac": "node scripts/build-prod.cjs",
     "start": "electron .",
     "backend": "cd backend && python main.py --port 8765"
   },
@@ -60,13 +61,16 @@
         "filter": [
           "**/*",
           "!__pycache__/**",
+          "!**/__pycache__/**",
           "!*.pyc",
+          "!**/*.pyc",
           "!.venv/**",
           "!models/**",
           "!storage/**",
           "!test/**",
           "!scratch/**",
-          "!.pytest_cache/**"
+          "!.pytest_cache/**",
+          "!build/**"
         ]
       }
     ],
@@ -74,7 +78,14 @@
       "target": "nsis"
     },
     "mac": {
-      "target": "dmg"
+      "target": [
+        { "target": "dmg" }
+      ],
+      "identity": null,
+      "gatekeeperAssess": false,
+      "hardenedRuntime": false,
+      "entitlements": null,
+      "entitlementsInherit": null
     },
     "publish": {
       "provider": "github",
