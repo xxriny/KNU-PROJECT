@@ -112,12 +112,12 @@ jobs:
           fi
           echo "NAVIGATOR_JWT_SECRET=${JWT_SECRET}" > backend/.env
 
-      # ── Electron DMG 빌드 (서명 없음) ─────────────────────
+      # ── Electron DMG 빌드 (서명 없음, GitHub 자동 publish 비활성화) ──
       - name: Build Electron DMG
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           CSC_IDENTITY: ''
-        run: npm run build:electron
+        run: npm run build && npx electron-builder --mac --publish never
 
       # ── DMG 파일 찾기 ──────────────────────────────────────
       - name: Find DMG artifact
