@@ -38,11 +38,11 @@ jobs:
     steps:
       # ── 코드 체크아웃 ──────────────────────────────────────
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # ── Node.js 셋업 ───────────────────────────────────────
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
@@ -55,7 +55,7 @@ jobs:
 
       # ── pip 캐시 (requirements.txt 해시 기준) ──────────────
       - name: Cache pip
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/Library/Caches/pip
           key: pip-${{ matrix.arch }}-${{ hashFiles('backend/requirements.txt') }}
@@ -64,7 +64,7 @@ jobs:
       # ── PyInstaller 캐시 (spec + requirements 변경 시 무효화) ─
       - name: Cache PyInstaller bundle
         id: cache-pyinstaller
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: backend/dist/navigator-backend
           key: pyinstaller-${{ matrix.arch }}-${{ hashFiles('backend/navigator-backend.spec', 'backend/requirements.txt') }}
@@ -147,20 +147,91 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # ── 스모크 테스트: DMG 설치 + 앱 실행 + 스크린샷 ────────────
+  smoke-test:
+    name: Smoke Test (login page)
+    needs: build-mac
+    # arm64 빌드만 테스트 (x64는 같은 코드베이스라 중복 불필요)
+    runs-on: macos-14
+    steps:
+      - name: Download arm64 DMG
+        uses: actions/download-artifact@v4
+        with:
+          name: NAVIGATOR-macOS-arm64
+          path: ./artifacts
+
+      - name: Mount DMG and install app
+        run: |
+          DMG=$(find ./artifacts -name "*.dmg" | head -1)
+          echo "Installing: $DMG"
+          hdiutil attach "$DMG" -mountpoint /Volumes/NAVIGATOR -nobrowse -quiet
+          cp -r "/Volumes/NAVIGATOR/NAVIGATOR.app" /Applications/
+          hdiutil detach /Volumes/NAVIGATOR -quiet
+          # Gatekeeper 쿼런틴 해제 (CI 환경 필수)
+          xattr -cr /Applications/NAVIGATOR.app
+          # PyInstaller 바이너리 실행 권한 확인
+          chmod +x "/Applications/NAVIGATOR.app/Contents/Resources/backend/dist/navigator-backend/navigator-backend" || true
+
+      - name: Create .env for smoke test
+        run: |
+          ENV_DIR="/Applications/NAVIGATOR.app/Contents/Resources/backend"
+          echo "NAVIGATOR_JWT_SECRET=${{ secrets.NAVIGATOR_JWT_SECRET }}" > "$ENV_DIR/.env"
+
+      - name: Launch NAVIGATOR
+        run: open /Applications/NAVIGATOR.app
+
+      - name: Wait for login page (backend + Electron 기동 대기)
+        run: |
+          echo "앱 기동 대기 중..."
+          # navigator-backend 프로세스가 뜰 때까지 최대 90초 대기
+          for i in $(seq 1 90); do
+            if pgrep -f "navigator-backend" > /dev/null 2>&1; then
+              echo "Backend process detected at ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          # 추가 15초: Electron 윈도우 렌더링 대기
+          sleep 15
+
+      - name: Take screenshot
+        run: |
+          screencapture -x smoke-test.png
+          echo "Screenshot captured"
+          ls -lh smoke-test.png
+
+      - name: Upload screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-screenshot
+          path: smoke-test.png
+          if-no-files-found: error
+
+      - name: Verify backend is running
+        run: |
+          # navigator-backend 프로세스 살아있는지 확인
+          if pgrep -f "navigator-backend" > /dev/null 2>&1; then
+            echo "✅ Backend process is running"
+            pgrep -a "navigator-backend"
+          else
+            echo "❌ Backend process not found"
+            exit 1
+          fi
+
   # ── 빌드 결과 요약 ─────────────────────────────────────────
   summary:
     name: Build Summary
-    needs: build-mac
+    needs: [build-mac, smoke-test]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Print summary
         run: |
           echo "## macOS Build Results" >> $GITHUB_STEP_SUMMARY
-          echo "| Architecture | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| arm64 (Apple Silicon) | ${{ needs.build-mac.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| x64 (Intel / Rosetta 2) | ${{ needs.build-mac.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build DMG | ${{ needs.build-mac.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Smoke Test (login page) | ${{ needs.smoke-test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 설치 방법 (서명 없는 빌드)" >> $GITHUB_STEP_SUMMARY
           echo "Gatekeeper가 차단할 경우: DMG 우클릭 → 열기 → 열기 버튼 클릭" >> $GITHUB_STEP_SUMMARY
