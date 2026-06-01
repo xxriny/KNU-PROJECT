@@ -145,6 +145,15 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # ── GitHub Release에 DMG 첨부 (태그 푸시 시에만) ──────
+      - name: Attach DMG to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # ── 스모크 테스트: DMG 설치 + 앱 실행 + 스크린샷 ────────────
   smoke-test:
     name: Smoke Test (login page)
