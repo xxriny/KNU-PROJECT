@@ -30,7 +30,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-13
+          - os: macos-14
             arch: x64
 
     steps:
@@ -45,13 +45,25 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      # ── Python 3.11 셋업 ───────────────────────────────────
-      - name: Setup Python
+      # ── Python 셋업 ────────────────────────────────────────
+      # x64: Rosetta 2로 x86_64 Python 설치 (macos-14 arm64 러너에서 크로스 빌드)
+      # arm64: 기본 Python 사용
+      - name: Setup Python (arm64)
+        if: matrix.arch == 'arm64'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # ── pip 캐시 (requirements.txt 해시 기준) ──────────────
+      - name: Setup Python x64 via Rosetta 2
+        if: matrix.arch == 'x64'
+        run: |
+          softwareupdate --install-rosetta --agree-to-license 2>/dev/null || true
+          arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" < /dev/null 2>/dev/null || true
+          arch -x86_64 /usr/local/bin/brew install python@3.11 2>/dev/null || true
+          # x64 python3 심볼릭 링크 확인
+          arch -x86_64 /usr/local/bin/python3.11 --version
+
+      # ── pip 캐시 ───────────────────────────────────────────
       - name: Cache pip
         uses: actions/cache@v5
         with:
@@ -59,7 +71,7 @@ jobs:
           key: pip-${{ matrix.arch }}-${{ hashFiles('backend/requirements.txt') }}
           restore-keys: pip-${{ matrix.arch }}-
 
-      # ── PyInstaller 캐시 (spec + requirements 변경 시 무효화) ─
+      # ── PyInstaller 캐시 ───────────────────────────────────
       - name: Cache PyInstaller bundle
         id: cache-pyinstaller
         uses: actions/cache@v5
@@ -71,24 +83,42 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
-      # ── Python 의존성 + PyInstaller 설치 ───────────────────
-      - name: Install Python dependencies
-        if: steps.cache-pyinstaller.outputs.cache-hit != 'true'
+      # ── Python 의존성 + PyInstaller 설치 (arm64) ───────────
+      - name: Install Python dependencies (arm64)
+        if: steps.cache-pyinstaller.outputs.cache-hit != 'true' && matrix.arch == 'arm64'
         run: |
           pip3 install --upgrade pip
           pip3 install -r backend/requirements.txt
           pip3 install pyinstaller
 
-      # ── PyInstaller 번들 빌드 ──────────────────────────────
-      - name: Build PyInstaller bundle
-        if: steps.cache-pyinstaller.outputs.cache-hit != 'true'
+      # ── Python 의존성 + PyInstaller 설치 (x64 via Rosetta 2) ─
+      - name: Install Python dependencies (x64)
+        if: steps.cache-pyinstaller.outputs.cache-hit != 'true' && matrix.arch == 'x64'
+        run: |
+          arch -x86_64 /usr/local/bin/python3.11 -m pip install --upgrade pip
+          arch -x86_64 /usr/local/bin/python3.11 -m pip install -r backend/requirements.txt
+          arch -x86_64 /usr/local/bin/python3.11 -m pip install pyinstaller
+
+      # ── PyInstaller 번들 빌드 (arm64) ─────────────────────
+      - name: Build PyInstaller bundle (arm64)
+        if: steps.cache-pyinstaller.outputs.cache-hit != 'true' && matrix.arch == 'arm64'
         working-directory: backend
         run: |
           pyinstaller navigator-backend.spec \
-            --distpath dist \
-            --workpath build \
-            --noconfirm
+            --distpath dist --workpath build --noconfirm
           chmod +x dist/navigator-backend/navigator-backend
+          echo "Binary size: $(du -sh dist/navigator-backend | cut -f1)"
+
+      # ── PyInstaller 번들 빌드 (x64 via Rosetta 2) ─────────
+      - name: Build PyInstaller bundle (x64)
+        if: steps.cache-pyinstaller.outputs.cache-hit != 'true' && matrix.arch == 'x64'
+        working-directory: backend
+        run: |
+          arch -x86_64 /usr/local/bin/python3.11 -m PyInstaller navigator-backend.spec \
+            --distpath dist --workpath build --noconfirm
+          chmod +x dist/navigator-backend/navigator-backend
+          # 아키텍처 검증
+          file dist/navigator-backend/navigator-backend
           echo "Binary size: $(du -sh dist/navigator-backend | cut -f1)"
 
       # ── 번들 존재 검증 ─────────────────────────────────────
@@ -115,7 +145,13 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           CSC_IDENTITY: ''
-        run: npm run build && npx electron-builder --mac --publish never
+        run: |
+          npm run build
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            npx electron-builder --mac --x64 --publish never
+          else
+            npx electron-builder --mac --arm64 --publish never
+          fi
 
       # ── DMG 파일 찾기 ──────────────────────────────────────
       - name: Find DMG artifact
