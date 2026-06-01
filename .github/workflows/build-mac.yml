@@ -19,19 +19,21 @@ on:
           - arm64
           - x64
 
-# ─── 빌드 ──────────────────────────────────────────────────────────────────────
-# arm64 단일 빌드 (macos-14 Apple Silicon runner)
-# Intel Mac 사용자도 Rosetta 2로 arm64 DMG 실행 가능 → x64 별도 빌드 불필요
+# ─── 빌드 매트릭스 ─────────────────────────────────────────────────────────────
+# arm64: macos-14 (Apple Silicon)
+# x64  : macos-13 (Intel) — Intel Mac 사용자용
 jobs:
   build-mac:
-    name: Build DMG (arm64)
-    runs-on: macos-14
+    name: Build DMG (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: macos-14
             arch: arm64
+          - os: macos-13
+            arch: x64
 
     steps:
       # ── 코드 체크아웃 ──────────────────────────────────────
@@ -158,13 +160,12 @@ jobs:
   smoke-test:
     name: Smoke Test (login page)
     needs: build-mac
-    # arm64 빌드만 테스트 (x64는 같은 코드베이스라 중복 불필요)
-    runs-on: macos-14
+    runs-on: macos-13
     steps:
-      - name: Download arm64 DMG
+      - name: Download x64 DMG
         uses: actions/download-artifact@v4
         with:
-          name: NAVIGATOR-macOS-arm64
+          name: NAVIGATOR-macOS-x64
           path: ./artifacts
 
       - name: Mount DMG and install app
