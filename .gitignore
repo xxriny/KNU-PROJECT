@@ -45,6 +45,9 @@ DOCS
 **/chroma_db/
 **/vector_db/
 **/storage/
+!backend/storage/
+!backend/storage/__init__.py
+!backend/storage/publish_service.py
 **/*.sqlite3
 **/*.db
 **/*.bin
