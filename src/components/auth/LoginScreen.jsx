@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import useAppStore from "../../store/useAppStore";
 import { platform } from "../../platform/index.js";
 import { serverRequest } from "../../api/serverClient";
+import { apiBaseUrl } from "../../api/apiClient";
 import {
   LogIn, UserPlus, Eye, EyeOff, Loader2, Github,
   AlertCircle, Settings, ExternalLink, ChevronUp, ChevronDown, CheckCircle2,
@@ -117,7 +118,7 @@ export default function LoginScreen({ isFirstRun = false }) {
     setSetupLoading(true); setGhError("");
     try {
       const port = useAppStore.getState().backendPort || 8000;
-      const res  = await fetch(`http://127.0.0.1:${port}/auth/setup-oauth`, {
+      const res  = await fetch(`${apiBaseUrl(port)}/auth/setup-oauth`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(setupConfig),

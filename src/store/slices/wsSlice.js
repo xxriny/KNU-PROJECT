@@ -1,3 +1,5 @@
+import { wsUrl } from "../../api/apiClient";
+
 /**
  * WebSocket connection slice
  */
@@ -15,7 +17,7 @@ export const createWsSlice = (set, get) => ({
     if (currentWs && currentWs.readyState === WebSocket.OPEN) return;
 
     set({ wsStatus: "connecting" });
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/pipeline`);
+    const ws = new WebSocket(wsUrl("/ws/pipeline", port));
 
     ws.onopen = () => {
       console.log("[WS] Connected to backend");

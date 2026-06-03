@@ -4,6 +4,7 @@ import {
   FolderGit2, ChevronRight, ScanSearch,
 } from "lucide-react";
 import useAppStore from "../../store/useAppStore";
+import { apiBaseUrl } from "../../api/apiClient";
 
 export default function AttachMenu({ isDarkMode, disabled, onAttach }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -28,7 +29,7 @@ export default function AttachMenu({ isDarkMode, disabled, onAttach }) {
     try {
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch(`http://127.0.0.1:${backendPort}/api/upload-doc`, {
+      const res = await fetch(`${apiBaseUrl(backendPort)}/api/upload-doc`, {
         method: "POST",
         body: form,
       });

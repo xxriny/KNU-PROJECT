@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import useAppStore from "../../store/useAppStore";
 import { serverRequest } from "../../api/serverClient";
+import { apiBaseUrl } from "../../api/apiClient";
 import {
   Github, GitCommit, Users, AlertCircle, BookOpen,
   Loader2, RefreshCw, TrendingUp, TrendingDown, Minus,
@@ -106,7 +107,7 @@ export default function GitHubDashboard() {
         ghToken = td.github_oauth_token || "";
       } catch (_) {}
 
-      const res = await fetch(`http://127.0.0.1:${port}/api/github/publish`, {
+      const res = await fetch(`${apiBaseUrl(port)}/api/github/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeader },
         body: JSON.stringify({

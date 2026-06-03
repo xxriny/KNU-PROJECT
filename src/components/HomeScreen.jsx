@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import useAppStore from "../store/useAppStore";
+import { apiBaseUrl } from "../api/apiClient";
 import {
   Send, Loader2, Rocket, Sparkles, ScanSearch,
   Github as GithubIcon, FileText, X, Plus, GitBranch,
@@ -86,12 +87,12 @@ export default function HomeScreen() {
     try {
       let ghToken = "";
       try {
-        const td = await fetch(`http://127.0.0.1:${port}/auth/github/token`, { headers: authHeader });
+        const td = await fetch(`${apiBaseUrl(port)}/auth/github/token`, { headers: authHeader });
         const tdJson = await td.json();
         ghToken = tdJson.github_oauth_token || "";
       } catch (_) {}
 
-      const res = await fetch(`http://127.0.0.1:${port}/api/github/publish`, {
+      const res = await fetch(`${apiBaseUrl(port)}/api/github/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeader },
         body: JSON.stringify({
@@ -525,7 +526,7 @@ function PlusMenu({ isDarkMode, onAttach, onClose }) {
     try {
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch(`http://127.0.0.1:${backendPort}/api/upload-doc`, {
+      const res = await fetch(`${apiBaseUrl(backendPort)}/api/upload-doc`, {
         method: "POST",
         body: form,
       });

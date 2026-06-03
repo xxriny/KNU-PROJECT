@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import useAppStore from "../../store/useAppStore";
+import { apiBaseUrl } from "../../api/apiClient";
 import MemoManager from "./MemoManager";
 import {
   GitBranch, Zap, Loader2, AlertTriangle, ChevronDown, ChevronRight,
@@ -56,7 +57,7 @@ export default function AgileImpactTab() {
     if (!changeDesc.trim()) { setError("변경 사항 설명을 입력하세요."); return; }
     setLoading(true); setError(""); setResult(null); setSavedToMemo(false);
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/agile/impact`, {
+      const res = await fetch(`${apiBaseUrl(port)}/api/agile/impact`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

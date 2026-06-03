@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { serverRequest } from "../../api/serverClient";
-import useAppStore from "../../store/useAppStore";
+import useAppStore from '../../store/useAppStore';
+import { apiBaseUrl } from '../../api/apiClient';
 import {
   ClipboardList, Check, X, Clock, Loader2, RefreshCw,
   ChevronDown, ChevronRight, AlertTriangle, CheckCircle,
@@ -134,7 +135,7 @@ export default function TaskApprovalPanel() {
       const params = new URLSearchParams();
       if (teamId) params.set("team_id", teamId);
       const query = params.toString() ? `?${params}` : "";
-      const res  = await fetch(`http://127.0.0.1:${port}/api/tasks${query}`);
+      const res  = await fetch(`${apiBaseUrl(port)}/api/tasks${query}`);
       const json = await res.json();
       if (json.status === "ok") setTasks(json.data);
       else setError(json.error || "조회 실패");
@@ -160,7 +161,7 @@ export default function TaskApprovalPanel() {
   // 상태 전환
   const handleAction = async (taskId, newStatus) => {
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, {
+      const res = await fetch(`${apiBaseUrl(port)}/api/tasks/${taskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus, reviewed_by: userId }),
@@ -177,7 +178,7 @@ export default function TaskApprovalPanel() {
       const headers = { "Content-Type": "application/json" };
       if (authToken) headers.Authorization = `Bearer ${authToken}`;
       const endpoint = action === "approve" ? "approve" : "reject";
-      const res = await fetch(`http://127.0.0.1:${port}/api/dev-tracking/tasks/${taskId}/${endpoint}`, {
+      const res = await fetch(`${apiBaseUrl(port)}/api/dev-tracking/tasks/${taskId}/${endpoint}`, {
         method: "POST",
         headers,
         body: JSON.stringify({ reason }),
@@ -207,7 +208,7 @@ export default function TaskApprovalPanel() {
     if ("assignee" in afterSave) patch.assignee = afterSave.assignee;
     else if (currentTask?.status === "rejected") patch.assignee = "";
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, {
+      const res = await fetch(`${apiBaseUrl(port)}/api/tasks/${taskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
@@ -226,7 +227,7 @@ export default function TaskApprovalPanel() {
   // 거절 (사유 포함)
   const handleRejectWithReason = async (taskId) => {
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, {
+      const res = await fetch(`${apiBaseUrl(port)}/api/tasks/${taskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "rejected", result: rejectReason, reviewed_by: userId }),
@@ -243,7 +244,7 @@ export default function TaskApprovalPanel() {
   // PM: rejected → unassigned (미할당으로 되돌리기)
   const handleReturnToUnassigned = async (taskId) => {
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, {
+      const res = await fetch(`${apiBaseUrl(port)}/api/tasks/${taskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "unassigned", assignee: "" }),
@@ -258,7 +259,7 @@ export default function TaskApprovalPanel() {
   const handleReassign = async (taskId) => {
     if (!reassignTarget) return;
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, {
+      const res = await fetch(`${apiBaseUrl(port)}/api/tasks/${taskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "pending_approval", assignee: reassignTarget, result: "" }),
@@ -278,7 +279,7 @@ export default function TaskApprovalPanel() {
     if (!teamId) { setGenMsg("팀 정보가 없습니다."); return; }
     setGenLoading(true); setGenMsg("");
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/agile/generate-tasks`, {
+      const res = await fetch(`${apiBaseUrl(port)}/api/agile/generate-tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ run_id: runId, team_id: teamId, auth_token: authToken, api_key: apiKey, created_by: userId }),
@@ -303,7 +304,7 @@ export default function TaskApprovalPanel() {
     if (!teamId) { setDistMsg("팀 정보가 없습니다."); return; }
     setDistLoading(true); setDistMsg("");
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/agile/distribute-tasks`, {
+      const res = await fetch(`${apiBaseUrl(port)}/api/agile/distribute-tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -333,7 +334,7 @@ export default function TaskApprovalPanel() {
     if (!createForm.title.trim()) { setCreateMsg("제목을 입력하세요."); return; }
     setCreateLoading(true); setCreateMsg("");
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/tasks`, {
+      const res = await fetch(`${apiBaseUrl(port)}/api/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...createForm, created_by: userId, team_id: teamId }),
@@ -353,7 +354,7 @@ export default function TaskApprovalPanel() {
 
   const handleDelete = async (taskId) => {
     try {
-      const res  = await fetch(`http://127.0.0.1:${port}/api/tasks/${taskId}`, { method: "DELETE" });
+      const res  = await fetch(`${apiBaseUrl(port)}/api/tasks/${taskId}`, { method: "DELETE" });
       const json = await res.json();
       if (json.status === "ok") setTasks((prev) => prev.filter((t) => t.id !== taskId));
       else setError(json.error || "삭제 실패");
@@ -379,7 +380,7 @@ export default function TaskApprovalPanel() {
     setDeleteLoading(true);
     try {
       await Promise.all([...selectedIds].map((id) =>
-        fetch(`http://127.0.0.1:${port}/api/tasks/${id}`, { method: "DELETE" })
+        fetch(`${apiBaseUrl(port)}/api/tasks/${id}`, { method: "DELETE" })
       ));
       setTasks((prev) => prev.filter((t) => !selectedIds.has(t.id)));
       setSelectedIds(new Set());

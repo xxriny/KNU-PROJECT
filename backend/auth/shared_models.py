@@ -12,6 +12,7 @@ from sqlalchemy import (
     Column, String, ForeignKey, DateTime, Text, Integer, Boolean,
     CheckConstraint, Index, UniqueConstraint, Float, text,
 )
+from sqlalchemy import inspect
 from sqlalchemy.orm import relationship
 
 from auth.database import SharedBase
@@ -222,12 +223,18 @@ def ensure_dev_tracking_schema(bind_or_session) -> None:
     }
     with bind.begin() as conn:
         for table_name, columns in additions.items():
-            existing = {
-                row[1]
-                for row in conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
-            }
+            if conn.dialect.name == "sqlite":
+                existing = {
+                    row[1]
+                    for row in conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
+                }
+            else:
+                existing = {col["name"] for col in inspect(conn).get_columns(table_name)}
             for column_name, column_sql in columns.items():
                 if column_name not in existing:
+                    if conn.dialect.name != "sqlite":
+                        column_sql = column_sql.replace("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE")
+                        column_sql = column_sql.replace("DATETIME", "TIMESTAMP")
                     conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"))
 
 

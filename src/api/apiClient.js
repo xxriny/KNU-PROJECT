@@ -2,10 +2,43 @@
  * API Client — HTTP 요청 공통 처리 및 베이스 설정
  */
 
-const BASE_URL = "http://127.0.0.1";
+const DEFAULT_BACKEND_PORT = 8765;
+
+function stripTrailingSlash(value) {
+  return value ? value.replace(/\/+$/, "") : "";
+}
+
+export function apiBaseUrl(port = DEFAULT_BACKEND_PORT) {
+  const configured = stripTrailingSlash(import.meta.env.VITE_API_BASE_URL || "");
+  if (configured) return configured;
+
+  if (typeof window !== "undefined" && !window.electronAPI) {
+    return window.location.origin;
+  }
+
+  return `http://127.0.0.1:${port || DEFAULT_BACKEND_PORT}`;
+}
+
+export function apiUrl(path, port) {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${apiBaseUrl(port)}${normalizedPath}`;
+}
+
+export function wsUrl(path, port = DEFAULT_BACKEND_PORT) {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const configured = stripTrailingSlash(import.meta.env.VITE_WS_BASE_URL || "");
+  if (configured) return `${configured}${normalizedPath}`;
+
+  if (typeof window !== "undefined" && !window.electronAPI) {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//${window.location.host}${normalizedPath}`;
+  }
+
+  return `ws://127.0.0.1:${port || DEFAULT_BACKEND_PORT}${normalizedPath}`;
+}
 
 export async function request(port, path, options = {}) {
-  const url = `${BASE_URL}:${port}${path}`;
+  const url = apiUrl(path, port);
   const response = await fetch(url, {
     ...options,
     headers: {

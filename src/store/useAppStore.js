@@ -9,7 +9,8 @@ import { createConfigSlice } from "./slices/configSlice";
 import { createNotificationSlice } from "./slices/notificationSlice";
 import { createAuthSlice } from "./slices/authSlice";
 import { createGithubSlice } from "./slices/githubSlice";
-import { createPublishSlice } from "./slices/publishSlice";
+import { createPublishSlice } from './slices/publishSlice';
+import { apiBaseUrl } from '../api/apiClient';
 
 /**
  * NAVIGATOR — Global Store (Zustand)
@@ -43,7 +44,7 @@ const useAppStore = create((set, get) => {
 
       if (backendPort && runId) {
         try {
-          await fetch(`http://127.0.0.1:${backendPort}/api/session/${runId}`, { method: "DELETE" });
+          await fetch(`${apiBaseUrl(backendPort)}/api/session/${runId}`, { method: "DELETE" });
         } catch (e) { console.error("[DeleteSession] API Failed:", e); }
       }
 

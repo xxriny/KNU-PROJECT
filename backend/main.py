@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from version import APP_VERSION
 
 # ── 경로 설정 ────────────────────────────────────────────
@@ -53,7 +54,14 @@ from observability.logger import get_logger
 from auth.router import auth_router
 from auth.database import init_db
 
-ALLOWED_ORIGIN_REGEX = r"^(null|https?://(127\.0\.0\.1|localhost)(:\d+)?)$"
+ALLOWED_ORIGIN_REGEX = os.environ.get(
+    "NAVIGATOR_ALLOWED_ORIGIN_REGEX",
+    r"^(null|https?://(127\.0\.0\.1|localhost)(:\d+)?)$",
+)
+STATIC_DIR = os.environ.get(
+    "NAVIGATOR_STATIC_DIR",
+    os.path.join(os.path.dirname(ROOT), "dist"),
+)
 
 
 # ── App Lifespan ─────────────────────────────────────────
@@ -94,6 +102,16 @@ if _metrics_app is not None:
     app.mount("/metrics", _metrics_app)
 
 
+if os.path.isdir(STATIC_DIR):
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        requested = os.path.realpath(os.path.join(STATIC_DIR, full_path))
+        static_root = os.path.realpath(STATIC_DIR)
+        if os.path.commonpath([requested, static_root]) == static_root and os.path.isfile(requested):
+            return FileResponse(requested)
+        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
 # ── Entry Point ──────────────────────────────────────────
 if __name__ == "__main__":
     multiprocessing.freeze_support()  # Windows spawn 모드에서 자식 프로세스 중복 실행 방지
@@ -102,8 +120,8 @@ if __name__ == "__main__":
     get_logger().info("backend_subsystems_initializing")
     
     parser = argparse.ArgumentParser(description="PM Agent Pipeline Backend")
-    parser.add_argument("--port", type=int, default=8765, help="Server port")
-    parser.add_argument("--host", type=str, default="127.0.0.1", help="Server host")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8765")), help="Server port")
+    parser.add_argument("--host", type=str, default=os.environ.get("HOST", "127.0.0.1"), help="Server host")
     args = parser.parse_args()
 
     get_logger().info("backend_entry", host=args.host, port=args.port)
@@ -112,6 +130,8 @@ if __name__ == "__main__":
         host=args.host,
         port=args.port,
         log_level="info",
+        proxy_headers=True,
+        forwarded_allow_ips="*",
         ws_ping_interval=30,
         ws_ping_timeout=30,
     )

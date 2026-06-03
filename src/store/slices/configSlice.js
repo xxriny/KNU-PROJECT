@@ -1,3 +1,5 @@
+import { apiBaseUrl } from '../../api/apiClient';
+
 /**
  * Settings/config slice
  */
@@ -18,22 +20,22 @@ export const createConfigSlice = (set, get) => ({
 
   fetchConfig: async (port) => {
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/config`);
+      const res = await fetch(`${apiBaseUrl(port)}/api/config`);
       if (!res.ok) return;
       const cfg = await res.json();
       const nextAvailableModels = Array.isArray(cfg.available_models) && cfg.available_models.length > 0
         ? cfg.available_models
         : ["gemini-3.1-flash-lite"];
-      
+
       const currentModel = get().model;
       if (cfg.has_api_key) set({ backendHasKey: true });
-      
+
       const updatedModel = nextAvailableModels.includes(currentModel)
         ? currentModel
         : (cfg.default_model && nextAvailableModels.includes(cfg.default_model)
             ? cfg.default_model
             : nextAvailableModels[0]);
-            
+
       set({
         availableModels: nextAvailableModels,
         model: updatedModel,

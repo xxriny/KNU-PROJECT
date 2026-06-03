@@ -13,6 +13,7 @@ import {
   XCircle,
 } from "lucide-react";
 import useAppStore from "../../store/useAppStore";
+import { apiBaseUrl } from "../../api/apiClient";
 import { serverRequest } from "../../api/serverClient";
 
 const DEFAULT_FORM = {
@@ -191,7 +192,7 @@ export default function DevTrackingTab() {
     try {
       const headers = {};
       if (authToken) headers.Authorization = `Bearer ${authToken}`;
-      const response = await fetch(`http://127.0.0.1:${port}/api/dev-tracking/analyses/${analysis.id}`, { headers });
+      const response = await fetch(`${apiBaseUrl(port)}/api/dev-tracking/analyses/${analysis.id}`, { headers });
       const json = await response.json();
       if (json.status !== "ok") {
         setHistoryError(json.error || "분석 상세 조회에 실패했습니다.");
@@ -238,7 +239,7 @@ export default function DevTrackingTab() {
       params.set("limit", "20");
       const headers = {};
       if (authToken) headers.Authorization = `Bearer ${authToken}`;
-      const response = await fetch(`http://127.0.0.1:${port}/api/dev-tracking/analyses?${params}`, { headers });
+      const response = await fetch(`${apiBaseUrl(port)}/api/dev-tracking/analyses?${params}`, { headers });
       const json = await response.json();
       if (json.status === "ok") {
         setAnalyses(Array.isArray(json.data) ? json.data : []);
@@ -363,7 +364,7 @@ export default function DevTrackingTab() {
     // setRunning/setRunError/setResult 모두 Zustand이므로 언마운트 후 결과도 store에 정상 저장됨.
     const headers = { "Content-Type": "application/json" };
     if (authToken) headers.Authorization = `Bearer ${authToken}`;
-    fetch(`http://127.0.0.1:${port}/api/dev-tracking/pr`, {
+    fetch(`${apiBaseUrl(port)}/api/dev-tracking/pr`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -418,7 +419,7 @@ export default function DevTrackingTab() {
     try {
       const headers = { "Content-Type": "application/json" };
       if (authToken) headers.Authorization = `Bearer ${authToken}`;
-      const response = await fetch(`http://127.0.0.1:${port}/api/dev-tracking/gaps/${gap.id}/${action}`, {
+      const response = await fetch(`${apiBaseUrl(port)}/api/dev-tracking/gaps/${gap.id}/${action}`, {
         method: "POST",
         headers,
         body: JSON.stringify({

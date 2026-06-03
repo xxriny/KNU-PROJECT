@@ -8,7 +8,44 @@ shared.db — 공유 데이터: users, teams, subscriptions, published_snapshots
 
 import os
 from sqlalchemy import create_engine, text
+from sqlalchemy import inspect
+from sqlalchemy.engine import URL
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+
+
+def _is_sqlite_url(url: str) -> bool:
+    return str(url).startswith("sqlite:")
+
+
+def _engine_options(url: str) -> dict:
+    if _is_sqlite_url(url):
+        return {"connect_args": {"check_same_thread": False}}
+    return {"pool_pre_ping": True, "pool_recycle": 1800}
+
+
+def _cloud_sql_postgres_url():
+    socket_path = os.environ.get("INSTANCE_UNIX_SOCKET")
+    password = os.environ.get("NAVIGATOR_DB_PASSWORD") or os.environ.get("DB_PASS")
+    if not socket_path or not password:
+        return None
+
+    return URL.create(
+        "postgresql+psycopg",
+        username=os.environ.get("NAVIGATOR_DB_USER", "navigator_user"),
+        password=password,
+        database=os.environ.get("NAVIGATOR_DB_NAME", "navigator_shared"),
+        query={"host": socket_path},
+    )
+
+
+def _database_url(env_name: str, fallback_sqlite_url: str):
+    return (
+        os.environ.get(env_name)
+        or os.environ.get("NAVIGATOR_DATABASE_URL")
+        or os.environ.get("DATABASE_URL")
+        or _cloud_sql_postgres_url()
+        or fallback_sqlite_url
+    )
 
 # ── 로컬 DB (개인 산출물) ───────────────────────────────────
 _STORAGE_DIR = os.environ.get(
@@ -18,9 +55,9 @@ _STORAGE_DIR = os.environ.get(
 os.makedirs(_STORAGE_DIR, exist_ok=True)
 
 LOCAL_DB_PATH = os.path.join(_STORAGE_DIR, "local.db")
-LOCAL_DB_URL = f"sqlite:///{LOCAL_DB_PATH}"
+LOCAL_DB_URL = _database_url("NAVIGATOR_LOCAL_DATABASE_URL", f"sqlite:///{LOCAL_DB_PATH}")
 
-engine = create_engine(LOCAL_DB_URL, connect_args={"check_same_thread": False})
+engine = create_engine(LOCAL_DB_URL, **_engine_options(LOCAL_DB_URL))
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # ── 공유 DB (로컬 환경 통합: local.db와 병합) ─────────────────────
@@ -58,14 +95,19 @@ def get_shared_db():
 
 
 def _add_column_if_missing(conn, table: str, column: str, col_def: str) -> None:
-    rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
-    existing = {row[1] for row in rows}
+    if conn.dialect.name == "sqlite":
+        rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+        existing = {row[1] for row in rows}
+    else:
+        existing = {col["name"] for col in inspect(conn).get_columns(table)}
     if column not in existing:
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}"))
 
 
 def _migrate_role_constraint(conn) -> None:
     """users.role CheckConstraint를 새 역할 포함하도록 확장 (shared.db)."""
+    if conn.dialect.name != "sqlite":
+        return
     schema = conn.execute(
         text("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'")
     ).scalar() or ""
