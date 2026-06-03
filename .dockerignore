@@ -12,7 +12,9 @@ backend/.venv
 backend/__pycache__
 backend/**/__pycache__
 backend/.pytest_cache
-backend/storage
+backend/storage/*
+!backend/storage/__init__.py
+!backend/storage/publish_service.py
 backend/test
 backend/scratch
 backend/**/*.pyc
