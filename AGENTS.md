@@ -1,11 +1,10 @@
 # NAVIGATOR 저장소 작업 규칙
 
-> 개인 전역 규칙(RTK.md 등)을 쓰는 에이전트는 자기 로컬 설정에서 각자 import한다.
-> 이 파일에는 특정 사용자의 로컬 경로(`C:\Users\<user>\.codex\...`)를 하드코딩하지 않는다 — 팀원마다 계정/경로가 달라 공유 파일에 넣으면 즉시 깨진다.
+@C:\Users\ning\.codex\RTK.md
 
 ## 1. 목적
 
-이 문서는 NAVIGATOR 저장소에서 작업하는 모든 에이전트(Codex, Claude Code 등)에게 적용된다.
+이 문서는 NAVIGATOR 저장소에서 작업하는 모든 Codex 에이전트에게 적용된다.
 
 목표는 다음과 같다.
 
@@ -22,22 +21,20 @@ LLM Injection 보안 작업의 기준 문서는 다음과 같다.
 
 `docs/specs/llm-injection-collaboration.md`
 
-**현재 상태: 이 파일은 아직 이 저장소(`main`)에 존재하지 않는다.** 마찬가지로 도메인별 `AGENTS.md`(예: `backend/pipeline/domain/dev_tracking/AGENTS.md`)도 아직 없다. 이 문서(루트 `AGENTS.md`)가 그 역할을 임시로 겸한다.
-
 LLM Injection 관련 구현, 분석, 리뷰 또는 테스트를 시작하기 전에:
 
-1. `docs/specs/llm-injection-collaboration.md`가 존재하는지 확인한다. 없으면 이 문서(5장 담당 범위)를 대신 기준으로 삼고, 작업 시작 전에 사용자에게 "협업 Spec 부재"를 한 줄로 보고한다 — 임의로 새로 작성하지 않는다.
-2. 현재 작업 패키지를 확인한다 (없으면 사용자에게 확인).
-3. 해당 작업 패키지의 담당 파일을 5장에서 확인한다.
-4. 현재 경로에 적용되는 가장 가까운 `AGENTS.md`를 읽는다 (도메인별 파일이 없으면 이 루트 파일이 적용된다).
-5. 사용할 수 있는 관련 Skill이 있으면 사용한다. (이 세션 기준 `navigator-llm-injection`이라는 이름의 Skill은 등록돼 있지 않다 — 없으면 이 단계는 생략하고 진행한다.)
+1. 협업 Spec을 읽는다.
+2. 현재 작업 패키지를 확인한다.
+3. 해당 작업 패키지의 담당 파일을 확인한다.
+4. 현재 경로에 적용되는 가장 가까운 `AGENTS.md`를 읽는다.
+5. 사용할 수 있다면 `navigator-llm-injection` Skill을 사용한다.
 
 문서 간 내용이 충돌하면 다음 우선순위를 따른다.
 
 1. 사용자의 명시적 지시
 2. `AGENTS.md`의 안전 및 담당 범위 규칙
-3. 협업 Spec의 보안 요구사항과 소유권 (존재할 경우)
-4. Skill의 작업 절차 (존재할 경우)
+3. 협업 Spec의 보안 요구사항과 소유권
+4. Skill의 작업 절차
 
 중요한 충돌을 임의로 해석하지 말고 수정 전에 보고한다.
 
@@ -46,13 +43,13 @@ LLM Injection 관련 구현, 분석, 리뷰 또는 테스트를 시작하기 전
 ## 3. main 브랜치 기준
 
 - 별도 요청이 없다면 분석과 구현은 `main` 브랜치를 기준으로 한다.
-- 분석 문서에는 기준 브랜치와 기준 커밋 SHA를 기록한다 (`git rev-parse HEAD`로 확인, 문서에 하드코딩하지 않고 작업 시점마다 새로 기록).
+- 분석 문서에는 기준 브랜치와 기준 커밋 SHA를 기록한다.
 - 보안 작업 브랜치는 승인된 최신 `main`에서 생성한다.
-- 현재 브랜치가 `main` 기반이라고 가정하지 말고 관계를 확인한다 (`git merge-base`).
+- 현재 브랜치가 `main` 기반이라고 가정하지 말고 관계를 확인한다.
 - 작업 트리에 변경사항이 있으면 이를 덮어쓸 수 있는 브랜치 전환을 하지 않는다.
 - 사용자의 명시적 요청 없이 merge, rebase, push 또는 PR 생성을 하지 않는다.
 
-권장 작업 브랜치 (현재 원격에는 아직 없음 — 새로 생성 시 사용):
+권장 작업 브랜치:
 
 - Dev Tracking: `security/dev-tracking-evidence`
 - PM/SA: `security/pm-sa-input-boundary`
@@ -81,11 +78,11 @@ LLM Injection 관련 구현, 분석, 리뷰 또는 테스트를 시작하기 전
 
 ## 5. 작업 담당 범위
 
-파일의 담당자는 해당 파일을 처음 만든 사람이 아니라 현재 협업 Spec(또는 이 문서)에 지정된 작업 담당자다.
+파일의 담당자는 해당 파일을 처음 만든 사람이 아니라 현재 협업 Spec에 지정된 작업 담당자다.
 
 하나의 파일에 여러 사람의 커밋이 있을 수 있으므로 Git 작성자 정보만으로 담당자를 판단하지 않는다.
 
-### 5.1 Dev Tracking 담당 — 김예린
+### 5.1 Dev Tracking 담당
 
 주요 책임:
 
@@ -99,15 +96,16 @@ LLM Injection 관련 구현, 분석, 리뷰 또는 테스트를 시작하기 전
 
 주요 담당 범위:
 
-```
-backend/pipeline/domain/dev_tracking/**
-```
-(nodes.py · llm_nodes.py · analysis_rules.py · knowledge.py · persistence.py ·
-notifications.py · schemas.py · followup.py · doc_updater.py · service.py 등 전체)
+- `backend/pipeline/domain/dev_tracking/**`
+- Dev Tracking 전용 테스트
+- Dev Tracking 프롬프트
+- Dev Tracking evidence 모델
 
-권장 브랜치: `security/dev-tracking-evidence`
+권장 브랜치:
 
-### 5.2 PM/SA 및 의존성 담당 — 박건원
+`security/dev-tracking-evidence`
+
+### 5.2 PM/SA 및 의존성 담당
 
 주요 책임:
 
@@ -121,15 +119,18 @@ notifications.py · schemas.py · followup.py · doc_updater.py · service.py �
 
 주요 담당 범위:
 
-```
-backend/pipeline/domain/pm/**
-backend/pipeline/domain/sa/**
-```
-핵심 파일: `pm/nodes/requirement_analyzer.py` · `pm/nodes/stack_planner.py` · `pm/nodes/stack_crawling.py`
+- PM 도메인 파일
+- SA 도메인 파일
+- `requirement_analyzer.py`
+- `stack_planner.py`
+- `stack_crawling.py`
+- PM/SA 전용 테스트
 
-권장 브랜치: `security/pm-sa-input-boundary`
+권장 브랜치:
 
-### 5.3 Agile 및 Idea Chat 담당 — 전성빈
+`security/pm-sa-input-boundary`
+
+### 5.3 Agile 및 Idea Chat 담당
 
 주요 책임:
 
@@ -142,13 +143,15 @@ backend/pipeline/domain/sa/**
 
 주요 담당 범위:
 
-```
-backend/pipeline/domain/agile/**
-backend/pipeline/domain/chat/**
-```
-핵심 파일: `agile/nodes/task_generator.py` · `chat/idea_chat.py`
+- Agile 도메인 파일
+- Idea Chat 도메인 파일
+- `task_generator.py`
+- `idea_chat.py`
+- Agile/Chat 전용 테스트
 
-권장 브랜치: `security/agile-chat-write-gate`
+권장 브랜치:
+
+`security/agile-chat-write-gate`
 
 ---
 
@@ -181,7 +184,7 @@ backend/pipeline/domain/chat/**
 
 1. 수정하기 전에 작업을 멈춘다.
 2. 정확한 파일 경로를 보고한다.
-3. 해당 파일의 담당자를 밝힌다 (5장 참고).
+3. 해당 파일의 담당자를 밝힌다.
 4. 변경이 필요한 이유를 설명한다.
 5. 필요한 최소 변경사항을 제안한다.
 6. 호환성 및 충돌 가능성을 설명한다.
@@ -195,15 +198,14 @@ backend/pipeline/domain/chat/**
 
 협업 Spec에서 별도 담당자를 지정하지 않았다면 다음 항목은 공용 파일로 간주한다.
 
-- Pipeline Runner (`backend/orchestration/pipeline_runner.py`, `backend/orchestration/executor.py`)
-- 그래프 정의 레이어 (`backend/pipeline/orchestration/graph.py`, `dev_tracking_graphs.py`, `aux_graphs.py`, `facade.py`)
-- 공통 LLM Client (`backend/pipeline/domain/dev_tracking/llm.py` 같은 저수준 호출 래퍼)
+- Pipeline Runner
+- 공통 LLM Client
 - 공통 Prompt Utility
 - 공통 입력 Wrapper
-- 공통 Schema 및 DTO (`backend/pipeline/core/schemas.py`, `backend/pipeline/core/state.py`)
-- 데이터베이스 모델과 Migration (`backend/auth/database.py`, `backend/auth/models.py`, `backend/auth/shared_models.py`)
+- 공통 Schema 및 DTO
+- 데이터베이스 모델과 Migration
 - Persistence Helper
-- 의존성 설정 파일 (`backend/requirements.txt`, `package.json`)
+- 의존성 설정 파일
 - 공통 Test Fixture
 - 여러 도메인이 사용하는 공개 인터페이스
 
@@ -380,8 +382,8 @@ LLM Injection을 의심 문자열 목록이나 정규식만으로 해결하지 �
 3. 작업 트리 상태를 확인한다.
 4. 기존 변경사항을 확인한다.
 5. 현재 작업 패키지를 확인한다.
-6. 파일 담당 범위를 확인한다 (5장).
-7. 협업 Spec을 읽는다 (없으면 2장 절차대로 보고).
+6. 파일 담당 범위를 확인한다.
+7. 협업 Spec을 읽는다.
 8. 관련 테스트를 찾는다.
 
 구현 중:
@@ -468,8 +470,6 @@ LLM Injection을 의심 문자열 목록이나 정규식만으로 해결하지 �
 - 실행하지 못한 이유를 설명한다.
 - 실행해야 할 정확한 명령을 제공한다.
 - 완전히 검증됐다고 보고하지 않는다.
-
-참고: 실제 실행 명령은 `python -m pytest -q test/` (backend/ 디렉터리 기준, `CLAUDE.md` 참고). Dev Tracking 전용 테스트는 `backend/pipeline/domain/dev_tracking/test/`.
 
 ---
 
