@@ -8,7 +8,7 @@ import time
 import re
 import os
 import httpx
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 from pipeline.core.state import PipelineState, make_sget
 from pipeline.domain.pm.schemas import StackCrawlingOutput, StackSourceData
 from observability.logger import get_logger
@@ -17,6 +17,24 @@ logger = get_logger()
 
 # HTML 태그 제거용 정규식
 CLEAN_HTML_RE = re.compile('<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});')
+
+# LLM(stack_planner)이 생성한 query/pkg는 검증 없이 외부 레지스트리 API URL에
+# 그대로 삽입하지 않는다 — npm scoped 패키지(@scope/pkg)와 "owner/repo" 형태만
+# 허용하고, URL 구조를 바꿀 수 있는 문자(?, #, 공백 등)는 전부 배제한다.
+_MAX_QUERY_LEN = 128
+_SAFE_QUERY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._/-]{0,127}$")
+
+
+def _sanitize_query(raw_query: Any) -> str:
+    """크롤러 검색어를 정규화한다. 형식/길이 조건을 만족하지 않으면 빈 문자열을 반환한다."""
+    query = str(raw_query or "").strip()
+    if not query or len(query) > _MAX_QUERY_LEN:
+        return ""
+    if ".." in query:
+        return ""
+    if not _SAFE_QUERY_RE.match(query):
+        return ""
+    return query
 
 def clean_html(text: str) -> str:
     """HTML 태그 및 엔티티를 제거하여 순수 텍스트를 반환합니다."""
@@ -141,16 +159,22 @@ def stack_crawling_node(state: PipelineState) -> Dict[str, Any]:
     queries_to_crawl = []
     
     if next_inputs:
-        # Planner가 준 명확한 타겟과 쿼리 사용
+        # Planner가 준 명확한 타겟과 쿼리 사용 — 실제 외부 요청 전 반드시 정규화한다.
         for item in next_inputs:
-            queries_to_crawl.append(item.get("query"))
-            
+            sanitized = _sanitize_query(item.get("query"))
+            if sanitized:
+                queries_to_crawl.append(sanitized)
+            else:
+                logger.warning(
+                    f"[stack_crawling] 형식/길이 검증 실패로 검색어 거부: {item.get('query')!r}"
+                )
+
     # 만약 루프 요청이 없다면 기존 단일 input 방식 사용 (초기 진입)
     if not queries_to_crawl:
         crawler_input = sget("stack_crawler_input", {})
-        query = crawler_input.get("query")
-        if query:
-            queries_to_crawl = [query]
+        sanitized = _sanitize_query(crawler_input.get("query"))
+        if sanitized:
+            queries_to_crawl = [sanitized]
 
     if not queries_to_crawl:
         logger.warning("No queries to crawl.")

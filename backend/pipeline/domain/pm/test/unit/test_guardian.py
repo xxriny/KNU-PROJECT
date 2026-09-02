@@ -3,7 +3,9 @@ import sys
 import json
 from dotenv import load_dotenv
 
-# ?�로?�트 루트(backend)�?검??경로??추�?
+sys.stdout.reconfigure(encoding="utf-8")  # Windows 콘솔 코드페이지(cp949)에서 이모지/한글 출력 시 크래시 방지
+
+# 프로젝트 루트(backend)를 검색 경로에 추가
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../.."))
 
 from pipeline.domain.pm.nodes.guardian import guardian_node
@@ -12,8 +14,8 @@ load_dotenv()
 
 def debug_guardian():
     api_key = os.getenv("GEMINI_API_KEY")
-    
-    # [Case 1] ?�상 병합 �??�인 케?�스 (zustand)
+
+    # [Case 1] 정상 병합 및 승인 케이스 (zustand)
     state_normal = {
         "api_key": api_key,
         "stack_crawler_input": {"target": "npm", "query": "zustand"},
@@ -45,7 +47,7 @@ def debug_guardian():
         "thinking_log": []
     }
 
-    # [Case 2] ?�이?�스 거절 케?�스 (GPL)
+    # [Case 2] 라이선스 거절 케이스 (GPL)
     state_rejected_license = {
         "api_key": api_key,
         "stack_crawler_output": {
@@ -65,7 +67,7 @@ def debug_guardian():
         }
     }
 
-    # [Case 3] ?�?�포?�쿼???�심 케?�스 (reackt)
+    # [Case 3] 타이포스쿼팅 의심 케이스 (reackt)
     state_typo = {
         "api_key": api_key,
         "stack_crawler_output": {
@@ -86,29 +88,29 @@ def debug_guardian():
     }
 
     test_cases = [
-        ("?�상 병합 �??�인 (NPM+GitHub)", state_normal),
-        ("?�이?�스 거절 (GPL)", state_rejected_license),
-        ("?�?�포?�쿼???�심 (reackt)", state_typo)
+        ("정상 병합 및 승인 (NPM+GitHub)", state_normal),
+        ("라이선스 거절 (GPL)", state_rejected_license),
+        ("타이포스쿼팅 의심 (reackt)", state_typo)
     ]
 
     for title, state in test_cases:
-        print(f"\n?? [?�스?? {title} ?�작...")
+        print(f"\n🧪 [테스트] {title} 시작...")
         result = guardian_node(state)
         output = result.get("guardian_output", {})
-        
+
         status = output.get("status")
-        color = "?? if status == "APPROVED" else "??
-        
-        print(f"{color} ?�태: {status}")
+        color = "✅" if status == "APPROVED" else "❌"
+
+        print(f"{color} 상태: {status}")
         if status == "REJECTED":
-            print(f"??거절 ?�유: {output.get('rejection_reason')}")
-        
-        print(f"?�� 분석 ?�고과정: {output.get('thinking')}")
-        
+            print(f"❌ 거절 사유: {output.get('rejection_reason')}")
+
+        print(f"🔍 분석 사고과정: {output.get('thinking')}")
+
         if status == "APPROVED" and output.get("final_data"):
             data = output["final_data"]
-            print(f"?�� 최종 ?�이?? {data['name']} (v{data['version']}, {data['stars']} stars, {data['license']})")
-        
+            print(f"📦 최종 데이터: {data['name']} (v{data['version']}, {data['stars']} stars, {data['license']})")
+
         # print(json.dumps(output, indent=2, ensure_ascii=False))
 
 if __name__ == "__main__":
