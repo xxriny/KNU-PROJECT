@@ -74,3 +74,6 @@ vite.log
 vite_test*.log
 %LOGFILE%
 backend/backend/generated/
+
+# Backend runtime session logs
+backend/storage/logs/

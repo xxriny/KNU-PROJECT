@@ -3,7 +3,9 @@ import sys
 import json
 from dotenv import load_dotenv
 
-# ?�재 ?�일 ?�치�?기�??�로 ?�로?�트 루트(backend)�?검??경로??추�?
+sys.stdout.reconfigure(encoding="utf-8")  # Windows 콘솔 코드페이지(cp949)에서 이모지/한글 출력 시 크래시 방지
+
+# 현재 파일 위치를 기준으로 프로젝트 루트(backend)를 검색 경로에 추가
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../.."))
 
 from pipeline.domain.pm.nodes.requirement_analyzer import requirement_analyzer_node
@@ -11,35 +13,35 @@ from pipeline.domain.pm.nodes.requirement_analyzer import requirement_analyzer_n
 load_dotenv()
 
 def debug_analyzer():
-    # 1. 초기 ?�태 ?�정
+    # 1. 초기 상태 설정
     state = {
         "api_key": os.getenv("GEMINI_API_KEY"),
-        "input_idea": "?�원가??기능?�랑 로그??기능 만들?�줘. ?�셜 로그?�도 ?�함?�서.",
+        "input_idea": "회원가입 기능이랑 로그인 기능 만들어줘. 소셜 로그인도 포함해서.",
         "action_type": "CREATE",
         "thinking_log": []
     }
 
-    print("\n[1] AI 분석 ?�작 �?..")
-    
-    # 2. ?�드 직접 ?�행 (?�제 LLM ?�출)
+    print("\n[1] AI 분석 시작 중...")
+
+    # 2. 노드 직접 실행 (실제 LLM 호출)
     result = requirement_analyzer_node(state)
 
     if "error" in result:
-        print(f"???�러 발생: {result['error']}")
+        print(f"❌ 에러 발생: {result['error']}")
         return
 
     # 3. 결과 출력
-    print("\n[2] AI ?�고 과정 (Thinking):")
+    print("\n[2] AI 사고 과정 (Thinking):")
     for log in result.get("thinking_log", []):
         print(f" > {log['thinking']}")
 
-    print("\n[3] 추출???�자 ?�구?�항 (Features):")
+    print("\n[3] 추출된 원자 요구사항 (Features):")
     features = result.get("features", [])
     for f in features:
-        print(f" - [{f['id']}] {f['description']} ({f['priority']})")
-        print(f"   * 검�?기�?: {f['test_criteria']}")
+        print(f" - [{f['id']}] {f['desc']} ({f['pri']})")
+        print(f"   * 검증 기준: {f['tc']}")
 
-    # ?�체 JSON??보고 ?�다�?
+    # 전체 JSON 결과 출력
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 if __name__ == "__main__":
